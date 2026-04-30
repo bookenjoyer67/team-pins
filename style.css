@@ -1,0 +1,61 @@
+body {
+    margin: 0;
+    font-family: sans-serif;
+}
+
+#map-container {
+    height: 100vh;
+    width: 100%;
+}
+
+#auth-overlay {
+    position: absolute;
+    top: 10px;
+    left: 50px;
+    z-index: 1000;
+    background: white;
+    padding: 8px 12px;
+    border-radius: 6px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.3);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    font-size: 13px;
+}
+
+#auth-overlay input {
+    padding: 4px 6px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 13px;
+}
+
+#auth-overlay button {
+    padding: 4px 8px;
+    border: none;
+    border-radius: 3px;
+    background: #2563eb;
+    color: white;
+    cursor: pointer;
+    font-size: 13px;
+}
+
+#auth-overlay button:hover {
+    background: #1d4ed8;
+}
+
+#team-overlay {
+    position: absolute;
+    top: 55px;
+    left: 50px;
+    z-index: 1000;
+    background: white;
+    padding: 6px 10px;
+    border-radius: 6px;
+    box-shadow: 0 1px 5px rgba(0,0,0,0.3);
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 13px;
+}

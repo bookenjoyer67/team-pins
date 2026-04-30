@@ -1,0 +1,19 @@
+{
+  "name": "e2e-map-wasm",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.105.1",
+    "leaflet": "^1.9.4",
+    "leaflet-draw": "^1.0.4"
+  },
+  "devDependencies": {
+    "vite": "^8.0.10"
+  }
+}
