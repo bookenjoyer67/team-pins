@@ -1,0 +1,548 @@
+},
+    bounds: null,
+    relay_nodes: [],
+  });
+  window._names[sid] = name;
+  const defaultLayer = { layer_id: generate_uuid(), name: "Default", color: state.defaultLayerColor, visible: true, opacity: 1.0 };
+  await DB.saveLayers(sid, [defaultLayer]);
+  await switchSet(sid);
+  await loadSetList();
+}
+
+const TUTORIAL_PINS = [
+  // === Layer: Tutorial (opacity 1.0) — feature instruction only ===
+  { lat:51.505,lng:-0.09,color:"#7c3aed",layer:"Tutorial",title:"Welcome to piggPin!",note:"piggPin is a peer-to-peer encrypted collaborative map — no accounts, no cloud. You write the map. You own the data. Everything is encrypted with X25519 + ChaCha20Poly1305 before it ever touches storage.\n\nThis tutorial introduces every feature. Click ▶ Slideshow to fly through all pins, or tap each one to learn a specific capability. Each pin lives in a layer — look at 📑 Layers to see how they're organized. Tutorial pins are full opacity; story pins are slightly transparent." },
+  { lat:40.6892,lng:-74.0445,color:"#7c3aed",layer:"Tutorial",title:"Peer-to-Peer Sync",note:"Click 'Host Group' to generate a connection code, QR code, or shareable link. Peers connect directly via WebRTC — no server holds your data. Your map syncs automatically.\n\nJoin a peer by scanning their QR, pasting their connection string, or using a relay link. Peers auto-connect to each other in a mesh — not just to the host. Toggle 'Follow' to sync map position across connected peers." },
+  { lat:35.6595,lng:139.7004,color:"#7c3aed",layer:"Tutorial",title:"Placing Pins",note:"Press 'N' or click the 📌 pin button, then click anywhere on the map. Each pin gets a title, description, color, emoji, and optional photo or video.\n\nIf your active layer has a schema (📋), the pin form shows custom typed fields — text, number, choice, date, time, boolean — instead of a generic note. Use Shift+click to multi-select. Ctrl+Z / Ctrl+Y to undo and redo." },
+  { lat:-33.9628,lng:18.4098,color:"#7c3aed",layer:"Tutorial",title:"Drawing Shapes & Free Draw",note:"Use the toolbar on the left to draw polygons, polylines, rectangles, and circles. Click the free draw button to sketch any path freehand — great for marking trails or boundaries.\n\nAll shapes get automatic metrics: circumference, diameter, area, length, and perimeter. Toggle metric/imperial with a single click. Drawings support file attachments, custom colors, and arrow heads." },
+  { lat:48.8566,lng:2.3522,color:"#7c3aed",layer:"Tutorial",title:"📑 Layers",note:"Layers organize pins into named categories within a map. Click 📑 Layers next to the map name. Each layer has:\n\n• A color for visual identification\n• Visibility toggle (👁) to show or hide its pins\n• Opacity slider to fade pins into the background\n• Click the layer name (●) to make it active — new pins land there. The tab bar shows → LayerName in the active color.\n\nDelete a layer and its pins reassign to the first remaining layer." },
+  { lat:37.7749,lng:-122.4194,color:"#7c3aed",layer:"Tutorial",title:"📋 Schemas",note:"Schemas define custom pin forms with typed fields. Click 📋 Schemas, then + New Schema. Add fields: text for names, number for counts, choice for dropdowns, date for calendars, time for clocks, boolean for true/false.\n\nBind a schema to a layer in 📑 Layers — every new pin on that layer shows that custom form. Schemas are global: create once, reuse on any map. Keys auto-generate from field labels. Reorder fields with ▲▼." },
+  { lat:39.9163,lng:116.3972,color:"#7c3aed",layer:"Tutorial",title:"Managing Maps & Export",note:"Click 🗺 Maps to see all your saved maps. Switch between them, rename, or delete. Each map has its own pins, drawings, layers, and encryption keys.\n\nExport any map as an encrypted .piggpin file — layers, schemas, custom data, and media all travel together. Import maps from files, shared links, or QR codes. Import layers from other maps via 📑 Layers → 📥." },
+  { lat:30.0444,lng:31.2357,color:"#7c3aed",layer:"Tutorial",title:"Security & Key Rotation",note:"Every map has its own Data Encryption Key (DEK) wrapped by your personal X25519 key pair. All pins, drawings, and media are encrypted with ChaCha20Poly1305 client-side. Keys and plaintext never reach a server.\n\nUse 'Rotate Keys' to re-encrypt everything with a new DEK — old keys can no longer read new data. Export with an optional password for an extra layer of protection." },
+  { lat:13.9057,lng:-4.5552,color:"#7c3aed",layer:"Tutorial",title:"Relay Server & Self-Hosting",note:"A relay server helps peers connect behind firewalls and NAT. Click the gear icon (⚙) in the top bar to configure your ICE servers and WebSocket relay URL.\n\nHost your own signal relay to keep everything self-hosted and private. The Rust relay binary is included in signal-server/ — it handles WebSocket signaling, MQTT bridging, RNode bridging, and Reticulum bridging. Set usage limits, TTL expiration, and room passwords.\n\nOffline mesh: Meshtastic (USB/BLE), RNode (KISS/LoRa over WebSerial), and Reticulum (self-sovereign internet mesh) are supported." },
+  // === Layer: Why This Matters (opacity 1.0) — historical lessons for decentralized cartography ===
+  { lat:42.3710,lng:-83.0730,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Map the City Wouldn't Draw",tf:1968,tt:1971,note:"In 1968, geographer William Bunge moved to inner-city Detroit. Rather than exploring distant lands, he explored his own block. Working with community organizer Gwendolyn Warren, his Detroit Geographic Expedition produced maps of what the city refused to document: locations of pedestrian deaths from cars, rat bites reported by residents, machine gun positions in the neighborhood, and schools per child by zip code. The city's health department didn't collect rat-bite data. The transportation department didn't map where pedestrians died. Bunge's maps were arguments — for crosswalks, for pest control, for resource redistribution. He was later blacklisted as a communist.\n\nLesson: Your neighborhood doesn't exist on the official map until you put it there. piggPin exists so communities never wait for permission to document their own reality." },
+  { lat:36.1630,lng:-95.9890,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Map Survivors Kept",tf:1921,tt:1921,note:"On May 31, 1921, a white mob — some deputized by city officials — attacked Greenwood District in Tulsa, Oklahoma, known as Black Wall Street. They burned 35 square blocks. Between 39 and 300 people were killed. 10,000 were left homeless. The massacre was erased from official records for eighty years. Survivors preserved hand-drawn maps of destroyed businesses, churches, and homes. They mapped where bodies were buried — locations absent from every city document. In the 2020s, those survivor maps finally guided archaeologists to mass graves.\n\nLesson: When institutions erase history, community records endure. piggPin's encryption means your spatial knowledge survives — no matter who tries to suppress it." },
+  { lat:43.0130,lng:-83.6890,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Poison the State Said Was Fine",tf:2014,note:"On April 25, 2014, Flint, Michigan's water source was switched to the Flint River without corrosion treatment. Lead leached from aging pipes. Over 6,000 children were exposed. State officials repeatedly denied the problem — spokesman Brad Wurfel told Michigan Radio: 'Anyone who is concerned about lead in the drinking water in Flint can relax.'\n\nFlint resident LeeAnne Walters collected water samples showing lead seven times the EPA limit. Virginia Tech professor Marc Edwards ran a citizen-science study sampling hundreds of homes. Pediatrician Dr. Mona Hanna-Attisha mapped children's blood lead levels before and after the switch — proving the state was wrong. When state agencies denied reality, community science produced the spatial data that forced acknowledgment.\n\nLesson: The people living the crisis collect the data that power denies. piggPin puts that spatial evidence in your hands — encrypted, so whistleblowers are protected." },
+  { lat:18.5333,lng:-72.3333,color:"#ef4444",layer:"Why This Matters",schema:null,title:"48 Hours to Map a Nation",tf:2010,tt:2010,note:"On January 12, 2010, a magnitude 7.0 earthquake struck Haiti. Over 100,000 people died. Before the quake, much of Haiti was unmapped on any digital platform. The UN, USAID, and search-and-rescue teams had no usable maps.\n\nWithin hours, OpenStreetMap volunteers worldwide began tracing satellite imagery — generously donated by GeoEye, DigitalGlobe, and others. Within 48 hours, they produced the first comprehensive street-level map of Port-au-Prince: collapsed bridges, displacement camps, functioning hospitals, blocked roads. This volunteer network outperformed every government agency. It was P2P mapping in practice, years before the term existed.\n\nLesson: When central infrastructure collapses, the network IS the map. piggPin builds this principle into its architecture — no server, no single point of failure, no agency that has to approve before you can act." },
+  { lat:-22.9100,lng:-43.2000,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Double-Edged Map",note:"For decades, Rio de Janeiro's favelas — home to 25% of the city — appeared as blank spaces on official maps. No street names. No addresses. No mail delivery. No services. Residents couldn't prove they existed.\n\nIn response, residents built Wikimapa, crowdsourcing their own streets, businesses, and community landmarks. They mapped themselves into existence — and then the state mapped them for military occupation. The 2009 UPP pacification program used mapping to identify entry points, choke points, and gang-controlled zones. Being invisible on the map meant no services. Being visible meant surveillance.\n\nLesson: You need your data to exist — but not for the state to own it. piggPin's encrypted P2P model solves this paradox: your map exists within your trusted network and is cryptographically invisible to everyone else." },
+  { lat:30.0300,lng:-90.7500,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Air the Regulators Breathe",note:"Cancer Alley is an 85-mile stretch of the Mississippi River between Baton Rouge and New Orleans with over 200 petrochemical plants. The EPA found cancer risks 47 times federal thresholds — and near one plant, 700 times the national average. The state's tumor registry uses geographic units too large to detect neighborhood-level clusters.\n\nSince the 1990s, community organizations — the Louisiana Bucket Brigade, Rise St. James (led by Goldman Prize winner Sharon Lavigne) — have conducted their own air monitoring, mapped toxic release sites, and correlated them with health outcomes. These community maps have stopped multiple petrochemical expansions, including Formosa Plastics' proposed $9.4 billion complex.\n\nLesson: When regulators won't monitor, communities must. piggPin stores environmental data encrypted — protecting monitors and whistleblowers from the industries that dominate local employment." },
+  { lat:37.4215,lng:141.0325,color:"#ef4444",layer:"Why This Matters",schema:null,title:"120 Million Points of Light",tf:2011,note:"On March 11, 2011, the Fukushima Daiichi nuclear plant melted down. The Japanese government and TEPCO released radiation data widely considered incomplete and delayed. The very next day, three founders launched Safecast — a volunteer network building open-source Geiger counters (the bGeigie Nano) and mapping radiation across Japan from moving vehicles.\n\nBy 2020, Safecast accumulated over 120 million observations — the largest open dataset of background radiation ever collected. Independent validation found it highly correlated with US Department of Energy aerial survey data. In 2022, after Russia invaded Ukraine, Safecast deployed sensors in Chernobyl exclusion-zone areas, gathering over 300,000 readings.\n\nLesson: A decentralized network of volunteers with open-source hardware can produce higher-quality spatial data faster than a government-corporate complex with something to hide. piggPin adds encryption — critical in politically sensitive environmental crises." },
+  { lat:9.8200,lng:167.4800,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Map Only the Maker Could Read",note:"For centuries, Marshallese navigators used stick charts — coconut midribs lashed together with shells tied at island positions — to map ocean swell patterns, not land. Each chart worked only for its maker: 'Individual navigator who made the chart was the only person who could fully interpret and use it.' The categories — mattang (teaching), meddo (regional), rebbelib (comprehensive) — encoded navigation knowledge passed father-to-son across generations.\n\nAfter World War II, the United States conducted 67 nuclear tests at Bikini Atoll. Displacement, reduced canoe travel, and electronic navigation destroyed the stick chart tradition within a single generation. A mapping system that survived centuries of Pacific exploration was erased by colonial technology and military violence.\n\nLesson: A map doesn't need to be legible to outsiders to be powerful. piggPin's encryption echoes the stick chart principle — data that is meaningful to the community that holds it and opaque to those who would misuse it." },
+  { lat:31.9040,lng:35.2050,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Villages That Disappeared",note:"Since 2016, Google Maps has been documented as systematically underrepresenting Palestinian geography in the occupied West Bank. Palestinian village names, roads, and place markers are absent — while Israeli settlements, illegal under international law, are clearly labeled and navigable. The Green Line (1949 armistice line) isn't shown. Google uses algorithmic and policy justifications, but the effect is consistent: disappear Palestinian spatial existence from the world's most-used map. One billion users navigate a territory where one side's geography exists and the other's doesn't.\n\nLesson: When one corporation controls the map, entire populations can become cartographically illegible. piggPin's multi-source architecture means no single entity decides which places exist. Every community maintains its own markers. The map becomes a contested surface — not a pronouncement." },
+  { lat:39.9570,lng:-75.2280,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Block the City Bulldozed",tf:1985,tt:1985,note:"On May 13, 1985, the Philadelphia Police Department dropped two bombs from a helicopter onto the MOVE organization's communal house at 6221 Osage Avenue. The fire killed six MOVE members and five children. It destroyed 65 neighboring homes — an entire city block. The fire department admitted under oath they let it burn.\n\nAfterward, the city rebuilt the site. Street numbers changed. Physical evidence was demolished. The block became a spatial lacuna — its destruction suppressed from official records. For decades, former residents maintained the memory: who lived where, where the bombs fell, where bodies were found, which houses burned first. Community-produced maps and oral testimony preserved what the city's bulldozers and lawyers tried to erase.\n\nLesson: The palimpsest — layers of meaning that persist even when the surface is rewritten — preserves what power bulldozes. piggPin holds each layer; no authority can delete a community's truth from the map." },
+  { lat:-25.3444,lng:131.0369,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Continent That Was Sung",note:"For 50,000+ years, Aboriginal Australians navigated the continent using songlines — paths across land and sky traced by creator-beings during the Dreaming. Each songline encoded water sources, sacred sites, seasonal food locations, and territorial boundaries into song cycles. When sung in sequence, the melody described the topography. A knowledgeable person could navigate 3,500 km through desert by singing the right verses.\n\nBritish colonists found no paper maps and declared the continent terra nullius — nobody's land. In 1992, the Mabo decision overturned this fiction, but the epistemological violence continues. Mining companies still bulldoze sacred sites that exist in song but on no Western map. The 2020 destruction of Juukan Gorge — a 46,000-year-old site — happened because Rio Tinto's maps showed nothing there.\n\nLesson: The most sophisticated maps are sometimes sung, not drawn. piggPin's encrypted layers mirror the songline principle: knowledge held within trusted networks, invisible to those who would erase it." },
+  { lat:51.4833,lng:-124.2167,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Map That Won a Nation",tf:2014,note:"For over a century, British Columbia claimed the Tsilhqot'in people had no legal title to their land. Then, in 2014, the Supreme Court of Canada unanimously declared Aboriginal title for the first time in Canadian history — 1,750 km² of traditional territory in the Nemiah Valley.\n\nThe evidence? Decades of community-produced maps: hunting routes, trap lines, village sites, burial grounds, spiritual locations. Chief Justice Beverley McLachlin wrote: 'The doctrine of terra nullius never applied in Canada.' Roger William, the Xeni Gwet'in chief who led the 30-year legal battle, proved that indigenous maps are legal documents — not folklore, not oral supplement, but evidence of sovereignty equal to any colonial deed.\n\nLesson: A community map, produced by the people who live on the land, can overturn centuries of legal fiction." },
+  { lat:45.7500,lng:-101.2000,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Pipeline That Moved Twice",tf:2016,tt:2017,note:"In 2016, Energy Transfer Partners planned the Dakota Access Pipeline to cross the Missouri River north of Bismarck, North Dakota. The US Army Corps rejected that route — too close to the city's water supply. So they moved it. The new route crossed the river just half a mile upstream from the Standing Rock Sioux Reservation.\n\nThe Standing Rock Sioux Tribe mapped what was in the pipeline's path: sacred stone features, burial grounds, and treaty boundaries from 1851 and 1868. On November 3, 2016, 524 clergy members burned copies of the papal bulls that established the Doctrine of Discovery — explicitly connecting a 21st-century pipeline to a 15th-century cartographic-legal doctrine that declared non-Christian lands available for taking.\n\nLesson: Environmental risk was literally remapped from a predominantly white community onto indigenous land. Community spatial data — treaty maps, sacred site locations, water infrastructure — became the infrastructure of resistance." },
+  { lat:63.7467,lng:-68.5170,color:"#ef4444",layer:"Why This Matters",schema:null,title:"A Country the Size of Mexico",tf:1999,note:"On April 1, 1999, the map of Canada changed for the first time since 1949. Nunavut separated from the Northwest Territories — 2,093,190 square kilometres, larger than Mexico, home to 36,000 people, 85% of them Inuit.\n\nThe boundaries were not drawn in Ottawa by distant administrators. They were negotiated over decades, informed by Inuit mapping of traditional hunting grounds, travel routes, and community locations. Inuit Tapiriit Kanatami, led by John Amagoalik — known as the father of Nunavut — used spatial data as a sovereignty tool. A 1982 plebiscite had supported the division. Inuktitut became an official language. The map was redrawn to reflect indigenous reality.\n\nLesson: Maps can be instruments of restitution, not just dispossession. Nunavut proves that borders can be negotiated, that territory can be returned, and that indigenous spatial knowledge can reshape a nation's geography." },
+  { lat:-0.5000,lng:35.5000,color:"#ef4444",layer:"Why This Matters",schema:null,title:"4,000 Years on the Map",tf:2017,note:"The Ogiek people are among the oldest indigenous communities in East Africa — hunter-gatherers and honey-harvesters who have inhabited the Mau Forest of Kenya for over 4,000 years. The Kenyan government repeatedly evicted them, claiming they were destroying the watershed, while issuing land titles to politically-connected settlers and logging companies.\n\nIn 2017, the African Court on Human and Peoples' Rights ruled in the Ogiek's favour — the first indigenous land rights case decided by the court. The evidence? Community GIS mapping: beekeeping sites, sacred locations, hunting grounds, forest boundaries. Ogiek community organizations, supported by Minority Rights Group International, mapped their ancestral territory and proved sustainable stewardship that predates every modern state in the region. In 2022, the court ordered Kenya to pay reparations and formally recognize Ogiek indigeneity.\n\nLesson: Participatory mapping by the community — not external surveyors, not government agencies — was the evidence that won. The people who live on the land produced the map that proved they belong there." },
+  { lat:31.7958,lng:35.1967,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Villages Erased from Time",tf:1948,note:"In 1948, over 500 Palestinian villages were depopulated and physically destroyed. Many were bulldozed and rebuilt over. Some were renamed with Hebrew place names. Approximately 750,000 Palestinians were expelled or fled.\n\nFor decades, these villages existed in refugee memory — hand-drawn maps, house keys, land deeds — but not on any official map of Israel. Palestinian researchers Walid Khalidi (All That Remains, 1992) and Salman Abu Sitta (Atlas of Palestine, 2010) painstakingly reconstructed the locations, populations, and land holdings of every destroyed village. The Israeli NGO Zochrot built an interactive map marking each site. Then, in 2011, Israel passed the Nakba Law, allowing the state to cut funding to institutions that commemorate the Nakba — making counter-mapping an act of direct political resistance.\n\nLesson: When the state makes spatial memory illegal, community maps preserve what was erased. The palimpsest holds each layer — the village that was there, the settlement that replaced it, and the memory that refuses erasure." },
+  { lat:50.6800,lng:-120.3400,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Graves That Weren't on Any Map",tf:2021,note:"In May 2021, the Tk'emlúps te Secwépemc Nation announced that ground-penetrating radar had detected 215 unmarked children's graves at the former Kamloops Indian Residential School. Within months, similar discoveries followed across Canada.\n\nOver 139 residential schools operated from the 1880s through 1996, removing Indigenous children from their families under a policy the Truth and Reconciliation Commission later classified as cultural genocide. None of these schools appeared on standard government maps. The children who died at them — from tuberculosis, malnutrition, abuse, neglect — were buried in graves that did not appear on any map either. The cartographic absence was not accidental. It was part of the paper genocide — the systematic erasure of Indigenous presence from official records.\n\nThe TRC's 2015 final report explicitly called for mapping every school and every grave. Survivors had been saying where the bodies were for decades. They just needed someone to look.\n\nLesson: What is absent from the map is as political as what appears on it. Mapping the schools is now an act of truth and reconciliation — spatial evidence that can no longer be denied." },
+  { lat:-13.5320,lng:-71.9675,color:"#ef4444",layer:"Why This Matters",schema:null,title:"The Library Made of Knots",tf:1583,tt:1583,note:"The Inca Empire managed a territory stretching 5,000 km along the Andes using quipus — knotted-cord recording devices. Using a decimal positional system, colour coding, and knot types, quipucamayocs (knot specialists) recorded census data, tax obligations, resource distribution, and spatial information. They could read by touch what others could not see.\n\nIn 1583, the Third Council of Lima ordered quipus burned as 'idolatrous objects' that recorded offerings to non-Christian gods. Of an estimated tens of thousands, only approximately 1,400 survive today. The largest collection — 298 quipus — is held at the Ethnological Museum in Berlin, thousands of kilometres from the Andes. The Spanish systematically destroyed Andean information infrastructure the same way they burned Maya codices.\n\nThe quipu was functionally encrypted: its multiple simultaneous encoding dimensions (colour, knot type, spatial position, fiber type) meant only the maker and their community could fully decode it.\n\nLesson: Five hundred years before PGP, the quipu proved that a community's data could be encoded in a format illegible to colonizers. piggPin's encryption is not new technology. It is a very old idea — data that speaks only to those who hold the key." },
+  // === Layer: Heritage (opacity 0.85) — Schema: Heritage Site ===
+  { lat:29.9792,lng:31.1342,color:"#eab308",layer:"Heritage",schema:"heritage",emoji:"🔺",custom:{year_built:"2560",status:"Standing",century:"Ancient",unesco:"true"},title:"Great Pyramid of Giza",tf:-2560,note:"Built ~2560 BCE for Pharaoh Khufu. Tallest structure on Earth for 3,800 years. 2.3 million stone blocks. Only surviving Ancient Wonder." },
+  { lat:-13.1631,lng:-72.5450,color:"#eab308",layer:"Heritage",schema:"heritage",emoji:"🦙",custom:{year_built:"1450",status:"Standing",century:"Ancient",unesco:"true"},title:"Machu Picchu",tf:1450,note:"Inca citadel high in the Andes, built ~1450. Abandoned during Spanish conquest, unknown to the outside world until Hiram Bingham's 1911 expedition. Precision stonework without mortar." },
+  { lat:30.3285,lng:35.4444,color:"#eab308",layer:"Heritage",schema:"heritage",emoji:"🏛️",custom:{year_built:"300",status:"Standing",century:"Ancient",unesco:"true"},title:"Petra",note:"Nabataean capital carved from rose-red sandstone cliffs. Thrived as a caravan city on the incense routes. Elaborate water management in the desert. The Treasury facade is 40m tall." },
+  { lat:13.4125,lng:103.8670,color:"#eab308",layer:"Heritage",schema:"heritage",emoji:"🛕",custom:{year_built:"1150",status:"Reconstructed",century:"Medieval",unesco:"true"},title:"Angkor Wat",tf:1150,note:"Largest religious monument on Earth, built by the Khmer Empire. Originally Hindu, later Buddhist. Surrounded by a 190m-wide moat. Intricate bas-reliefs span 1,200 square metres." },
+  { lat:41.8902,lng:12.4922,color:"#eab308",layer:"Heritage",schema:"heritage",emoji:"🏟️",custom:{year_built:"80",status:"Ruins",century:"Ancient",unesco:"true"},title:"Colosseum",tf:80,note:"Completed 80 CE under Titus. Held 50,000–80,000 spectators for gladiatorial contests and public spectacles. The hypogeum beneath the arena floor held animals and fighters in a complex lift system." },
+  { lat:27.1751,lng:78.0421,color:"#eab308",layer:"Heritage",schema:"heritage",emoji:"🕌",custom:{year_built:"1653",status:"Standing",century:"Medieval",unesco:"true"},title:"Taj Mahal",tf:1653,note:"Mughal emperor Shah Jahan built this marble mausoleum for his wife Mumtaz Mahal. 20,000 artisans worked for 22 years. The white marble appears to shift colour through the day." },
+  { lat:-12.0393,lng:-77.0315,color:"#eab308",layer:"Heritage",schema:"heritage",emoji:"⛪",custom:{year_built:"1000",status:"Standing",century:"Medieval",unesco:"true"},title:"Historic Centre of Lima",note:"Founded by Pizarro in 1535 as the 'City of Kings.' The Plaza Mayor, Cathedral, and San Francisco monastery with its catacombs hold 500 years of colonial and indigenous history." },
+  { lat:-8.9580,lng:39.5130,color:"#eab308",layer:"Heritage",schema:"heritage",emoji:"🏚️",custom:{year_built:"1200",status:"At Risk",century:"Medieval",unesco:"true"},title:"Kilwa Kisiwani",note:"Medieval Swahili trading city on the Tanzanian coast. Connected Africa to Arabia, Persia, India, and China. Coins minted here have been found across the Indian Ocean, from Arabia to Southeast Asia. Now a haunting ruin on a mangrove island." },
+  { lat:-20.1597,lng:57.5029,color:"#eab308",layer:"Heritage",schema:"heritage",emoji:"🧱",custom:{year_built:"1849",status:"Standing",century:"Industrial",unesco:"true"},title:"Aapravasi Ghat",note:"Between 1834 and 1920, nearly half a million people passed through this stone immigration depot in Port Louis, Mauritius. They came from India — not as free migrants, but as indentured labourers, recruited under a system that replaced slavery after abolition across the British Empire. Many were deceived about the terms. Many never returned.\n\nThe British called it the 'Great Experiment.' Those who survived the brutal plantation conditions built new lives on the island, and their descendants now form the majority of Mauritius' population. Aapravasi Ghat is a UNESCO World Heritage site — not because the system was noble, but because the people who endured it must be remembered." },
+  { lat:50.8261,lng:-0.1775,color:"#eab308",layer:"Heritage",schema:"heritage",emoji:"🏰",custom:{year_built:"1787",status:"Standing",century:"Industrial",unesco:"false"},title:"Royal Pavilion",note:"George IV's seaside fantasy in Brighton — an Indo-Saracenic confection of minarets, domes, and chinoiserie interiors built between 1787–1823. A Grade I listed Regency oddity that defies architectural category." },
+  { lat:60.0069,lng:11.5082,color:"#eab308",layer:"Heritage",schema:"heritage",emoji:"🪵",custom:{year_built:"1190",status:"Standing",century:"Medieval",unesco:"false"},title:"Heddal Stave Church",note:"Norway's largest stave church, built entirely of pine around 1200. A triple-nave masterpiece of Viking-era craftsmanship — dragon heads on the gables and carved portals blending pagan and Christian motifs." },
+  // === Layer: Nature (opacity 0.8) — Schema: Natural Feature ===
+  { lat:36.1069,lng:-112.1129,color:"#16a34a",layer:"Nature",schema:"natural",emoji:"🏜️",custom:{feature_type:"Canyon",elevation_m:"1600",protected:"true",best_season:"Spring"},title:"Grand Canyon",note:"Carved by the Colorado River over 5–6 million years. 446km long, up to 29km wide, 1.8km deep. Exposes nearly two billion years of Earth's geological history in its layered walls." },
+  { lat:-18.2871,lng:147.6997,color:"#16a34a",layer:"Nature",schema:"natural",emoji:"🐠",custom:{feature_type:"Reef",elevation_m:"0",protected:"true",best_season:"Year-round"},title:"Great Barrier Reef",note:"World's largest coral reef system — 2,900 reefs, 900 islands, 2,300km long. Visible from space. Home to 1,500 fish species. Under severe threat from warming oceans and coral bleaching." },
+  { lat:-25.6953,lng:-54.4367,color:"#16a34a",layer:"Nature",schema:"natural",emoji:"💧",custom:{feature_type:"Waterfall",elevation_m:"180",protected:"true",best_season:"Summer"},title:"Iguazu Falls",note:"275 individual waterfalls spanning 2.7km along the Argentina-Brazil border. Taller than Niagara and wider than Victoria. The Devil's Throat drops 82 metres into a perpetual cloud of mist." },
+  { lat:-3.0674,lng:37.3556,color:"#16a34a",layer:"Nature",schema:"natural",emoji:"🗻",custom:{feature_type:"Mountain",elevation_m:"5895",protected:"true",best_season:"Summer"},title:"Mount Kilimanjaro",note:"Africa's highest peak — a dormant volcano with five climate zones from rainforest to arctic summit. The glaciers that crowned it for 11,000 years may vanish by 2050." },
+  { lat:-3.4653,lng:-62.2159,color:"#16a34a",layer:"Nature",schema:"natural",emoji:"🌳",custom:{feature_type:"Forest",elevation_m:"100",protected:"false",best_season:"Year-round"},title:"Amazon Rainforest",note:"5.5 million km² across nine countries. 10% of all known species. 390 billion trees. A vital carbon sink and hydrological engine — the Amazon River discharges more water than the next seven largest rivers combined." },
+  { lat:-17.9244,lng:25.8567,color:"#16a34a",layer:"Nature",schema:"natural",emoji:"🌈",custom:{feature_type:"Waterfall",elevation_m:"885",protected:"true",best_season:"Spring"},title:"Victoria Falls",note:"Known locally as Mosi-oa-Tunya — 'The Smoke That Thunders.' 1,708m wide, 108m drop. The world's largest sheet of falling water. Spray rises 400m and can be seen 50km away." },
+  { lat:44.4280,lng:-110.5885,color:"#16a34a",layer:"Nature",schema:"natural",emoji:"🌋",custom:{feature_type:"Mountain",elevation_m:"2500",protected:"true",best_season:"Summer"},title:"Yellowstone",note:"World's first national park (1872). Sits atop a supervolcano. Half of the world's geothermal features: geysers, hot springs, fumaroles. Old Faithful erupts every 60–110 minutes." },
+  { lat:31.1320,lng:-8.6194,color:"#16a34a",layer:"Nature",schema:"natural",emoji:"🐪",custom:{feature_type:"Desert",elevation_m:"150",protected:"false",best_season:"Autumn"},title:"Erg Chebbi",note:"Morocco's iconic golden dunes rise to 150m. Part of the Sahara, the world's largest hot desert at 9.2 million km². Sand seas, oases, and ancient caravan routes that once carried salt and gold." },
+  { lat:54.6000,lng:-2.5000,color:"#16a34a",layer:"Nature",schema:"natural",emoji:"🏞️",custom:{feature_type:"Mountain",elevation_m:"978",protected:"true",best_season:"Summer"},title:"Lake District",note:"England's largest national park — glacial valleys, 16 lakes, and England's highest peak (Scafell Pike, 978m). Inspired Wordsworth, Coleridge, and Beatrix Potter. Over 3,000km of footpaths." },
+  { lat:79.4700,lng:11.3000,color:"#16a34a",layer:"Nature",schema:"natural",emoji:"🐻‍❄️",custom:{feature_type:"Glacier",elevation_m:"0",protected:"true",best_season:"Summer"},title:"Svalbard",note:"Norwegian archipelago halfway to the North Pole. More polar bears than people. The Global Seed Vault stores backup seeds from gene banks worldwide in permafrost — a doomsday library for biodiversity." },
+  // === Layer: Urban (opacity 0.7) — Schema: City Note ===
+  { lat:35.6595,lng:139.7004,color:"#2563eb",layer:"Urban",schema:"city",emoji:"🚦",custom:{observation_type:"Transport",rating:"5",visited:"2025-10-15",recommend:"true"},title:"Shibuya Crossing",note:"Tokyo's iconic scramble crossing — up to 3,000 people at once. Hachikō statue at the station: the Akita who waited nine years for his owner. Neon, noise, and the rhythm of the world's largest city." },
+  { lat:51.5190,lng:-0.1336,color:"#2563eb",layer:"Urban",schema:"city",emoji:"🧀",custom:{observation_type:"Market",rating:"4",visited:"2024-03-20",recommend:"true"},title:"Borough Market",note:"London's oldest food market, trading on this site since at least 1276. Under the railway arches near London Bridge. The globe theatre is a five-minute walk — Shakespeare likely shopped here." },
+  { lat:48.8867,lng:2.3431,color:"#2563eb",layer:"Urban",schema:"city",emoji:"🎨",custom:{observation_type:"Architecture",rating:"5",visited:"2024-09-10",recommend:"true"},title:"Montmartre",note:"The hill of Paris where the Sacré-Cœur watches over the city. Once a village of windmills and vineyards, then the studio of Renoir, Picasso, and Van Gogh. Still holding onto its crooked, cobbled independence." },
+  { lat:41.0082,lng:28.9784,color:"#2563eb",layer:"Urban",schema:"city",emoji:"🕌",custom:{observation_type:"Market",rating:"5",visited:"2025-03-18",recommend:"true"},title:"Grand Bazaar",note:"Istanbul's covered market, operating since 1461. 4,000 shops across 61 streets. One of the world's oldest and largest covered markets. The scent of spices, leather, and strong tea fills the air." },
+  { lat:47.6062,lng:-122.3407,color:"#2563eb",layer:"Urban",schema:"city",emoji:"🐟",custom:{observation_type:"Market",rating:"4",visited:"2024-06-05",recommend:"true"},title:"Pike Place Market",note:"Seattle's century-old public market overlooking Elliott Bay. Fishmongers throw salmon. The original Starbucks sits across the street. Below the market, the gum wall is a strangely beloved attraction." },
+  { lat:28.6562,lng:77.2318,color:"#2563eb",layer:"Urban",schema:"city",emoji:"🍛",custom:{observation_type:"Market",rating:"4",visited:"2023-11-14",recommend:"true"},title:"Chandni Chowk",note:"Old Delhi's chaotic, glorious artery. Laid out in 1650 by Shah Jahan's daughter. Silver shops, spice markets, street food stalls that have served the same recipe for generations. The lane of parathas." },
+  { lat:-34.6310,lng:-58.4100,color:"#2563eb",layer:"Urban",schema:"city",emoji:"💃",custom:{observation_type:"Architecture",rating:"5",visited:"2022-09-01",recommend:"true"},title:"La Boca",note:"Buenos Aires' working-class port neighbourhood. Italian immigrants built homes from shipyard scraps and painted them in bright, clashing colours. Now a warren of tango, art, and defiant joy." },
+  { lat:22.3193,lng:114.1694,color:"#2563eb",layer:"Urban",schema:"city",emoji:"⛴️",custom:{observation_type:"Transport",rating:"4",visited:"2025-01-20",recommend:"true"},title:"Star Ferry",note:"Hong Kong's green-and-white ferries have crossed Victoria Harbour since 1888. A six-minute journey between Kowloon and Central — one of the world's great commutes, with the skyline unfolding on both sides." },
+  { lat:55.6761,lng:12.5683,color:"#2563eb",layer:"Urban",schema:"city",emoji:"🚲",custom:{observation_type:"Architecture",rating:"5",visited:"2023-07-12",recommend:"true"},title:"Nyhavn",note:"Copenhagen's 17th-century waterfront — once a rough sailors' district where Hans Christian Andersen lived. Now the candy-coloured townhouses are postcard-famous, but the harbour still holds its maritime soul." },
+  // === Layer: Festivals (opacity 0.6) — Schema: Festival ===
+  { lat:-22.9083,lng:-43.1964,color:"#ec4899",layer:"Festivals",schema:"festival",emoji:"🎭",custom:{month:"Feb",duration_days:"5",attendance:"2000000",free_entry:"true"},title:"Carnival — Rio de Janeiro",note:"The world's largest carnival. Samba schools spend the entire year preparing for 80 minutes in the Sambódromo. Over 2 million people fill the streets daily. A city that transforms into a single, breathing rhythm." },
+  { lat:48.1351,lng:11.5820,color:"#ec4899",layer:"Festivals",schema:"festival",emoji:"🍺",custom:{month:"Sep",duration_days:"16",attendance:"6000000",free_entry:"false"},title:"Oktoberfest — Munich",tf:1810,note:"Started as a royal wedding celebration in 1810. Now 6 million visitors drink 7 million litres of beer across 16 days. Traditional Bavarian brass bands and dirndls. The largest Volksfest in the world." },
+  { lat:25.2820,lng:83.0050,color:"#ec4899",layer:"Festivals",schema:"festival",emoji:"🪔",custom:{month:"Oct",duration_days:"5",attendance:"1000000",free_entry:"true"},title:"Diwali — Varanasi",note:"The festival of lights along the oldest living city on Earth. Thousands of diyas float on the Ganges at sunset. Fireworks echo off the ghats. A celebration of light over darkness that predates recorded history." },
+  { lat:17.0596,lng:-96.7266,color:"#ec4899",layer:"Festivals",schema:"festival",emoji:"💀",custom:{month:"Nov",duration_days:"2",attendance:"200000",free_entry:"true"},title:"Día de Muertos — Oaxaca",note:"Not a Halloween imitation but a pre-Hispanic tradition blending with Catholicism. Families build ofrendas, cemeteries glow with marigolds and candles. The dead are welcomed home for one night." },
+  { lat:27.4793,lng:77.6833,color:"#ec4899",layer:"Festivals",schema:"festival",emoji:"🎨",custom:{month:"Mar",duration_days:"2",attendance:"500000",free_entry:"true"},title:"Holi — Mathura",note:"The birthplace of Krishna erupts in colour. Strangers throw gulal powder, water balloons, and joy. Social hierarchies dissolve under layers of pink, blue, and green. A festival older than most modern borders." },
+  { lat:39.4192,lng:-0.3244,color:"#ec4899",layer:"Festivals",schema:"festival",emoji:"🍅",custom:{month:"Aug",duration_days:"1",attendance:"20000",free_entry:"false"},title:"La Tomatina — Buñol",tf:1945,note:"A small Spanish town of 9,000 floods with 20,000 people and 150,000 kilos of overripe tomatoes. For exactly one hour, the streets become a river of red pulp. How it started: a childish street brawl in 1945." },
+  { lat:13.7563,lng:100.5018,color:"#ec4899",layer:"Festivals",schema:"festival",emoji:"🔫",custom:{month:"Apr",duration_days:"3",attendance:"500000",free_entry:"true"},title:"Songkran — Bangkok",note:"Thai New Year — the world's biggest water fight. Originally a gentle ritual of pouring water over elders' hands for blessings. Now the streets of Bangkok become a citywide aquatic battle for three days." },
+  { lat:55.9533,lng:-3.1883,color:"#ec4899",layer:"Festivals",schema:"festival",emoji:"🎪",custom:{month:"Aug",duration_days:"25",attendance:"3500000",free_entry:"false"},title:"Edinburgh Fringe",tf:1947,note:"The world's largest arts festival. 3,500 shows, 50,000 performances, 300 venues. A former school hall, a pub basement, a parked taxi — everything becomes a stage. The city doubles in population for August." },
+  { lat:35.0210,lng:135.7601,color:"#ec4899",layer:"Festivals",schema:"festival",emoji:"🏮",custom:{month:"Jul",duration_days:"30",attendance:"1000000",free_entry:"true"},title:"Gion Matsuri — Kyoto",tf:869,note:"Japan's most famous festival, running since 869 CE — originally a purification ritual to appease gods during a plague. The grand parade of yamaboko floats, some weighing 12 tonnes, threads through Kyoto's narrow streets." },
+  { lat:12.0350,lng:39.0470,color:"#ec4899",layer:"Festivals",schema:"festival",emoji:"✝️",custom:{month:"Jan",duration_days:"3",attendance:"100000",free_entry:"true"},title:"Timkat — Lalibela",note:"Ethiopian Orthodox celebration of Epiphany at the rock-hewn churches of Lalibela — carved downward into solid volcanic stone in the 12th century. Priests carry replica Arks of the Covenant. A 3-day immersion in incense, chant, and white robes." },
+];
+
+export async function createTutorial() {
+  await createSet(t("tutorialMapName") || "Tutorial");
+
+  // Create schemas into global pool
+  const schemaDefs = [
+    { schema_id: generate_uuid(), key: "heritage", name: "Heritage Site", fields: [
+      { key:"year_built",label:"Year Built",type:"number" },
+      { key:"status",label:"Status",type:"choice",options:["Standing","Ruins","Reconstructed","At Risk"] },
+      { key:"century",label:"Century",type:"choice",options:["Ancient","Medieval","Renaissance","Industrial","Modern"] },
+      { key:"unesco",label:"UNESCO",type:"boolean" }
+    ]},
+    { schema_id: generate_uuid(), key: "natural", name: "Natural Feature", fields: [
+      { key:"feature_type",label:"Type",type:"choice",options:["Mountain","Waterfall","Forest","Reef","Canyon","Glacier","Desert"] },
+      { key:"elevation_m",label:"Elevation (m)",type:"number" },
+      { key:"protected",label:"Protected",type:"boolean" },
+      { key:"best_season",label:"Best Season",type:"choice",options:["Spring","Summer","Autumn","Winter","Year-round"] }
+    ]},
+    { schema_id: generate_uuid(), key: "city", name: "City Note", fields: [
+      { key:"observation_type",label:"Type",type:"choice",options:["Architecture","Food","Transport","Market","Nightlife"] },
+      { key:"rating",label:"Rating",type:"number" },
+      { key:"visited",label:"Visited",type:"date" },
+      { key:"recommend",label:"Recommend",type:"boolean" }
+    ]},
+    { schema_id: generate_uuid(), key: "festival", name: "Festival", fields: [
+      { key:"month",label:"Month",type:"choice",options:["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"] },
+      { key:"duration_days",label:"Duration (days)",type:"number" },
+      { key:"attendance",label:"Attendance",type:"number" },
+      { key:"free_entry",label:"Free Entry",type:"boolean" }
+    ]},
+  ];
+  const schemaMap = {};
+  for (const sd of schemaDefs) { schemaMap[sd.key] = sd.schema_id; await DB.saveSchema({ schema_id: sd.schema_id, name: sd.name, fields: sd.fields }); }
+  state.schemas = await DB.getSchemas();
+
+  // Create layers with schema bindings and opacity
+  const layerDefs = [
+    { name: "Tutorial", color: "#7c3aed", opacity: 1.0, default_schema_id: null },
+    { name: "Why This Matters", color: "#ef4444", opacity: 1.0, default_schema_id: null },
+    { name: "Heritage", color: "#eab308", opacity: 0.85, default_schema_id: schemaMap.heritage },
+    { name: "Nature", color: "#16a34a", opacity: 0.8, default_schema_id: schemaMap.natural },
+    { name: "Urban", color: "#2563eb", opacity: 0.7, default_schema_id: schemaMap.city },
+    { name: "Festivals", color: "#ec4899", opacity: 0.6, default_schema_id: schemaMap.festival },
+  ];
+  const layerMap = {};
+  for (const ld of layerDefs) {
+    const lid = generate_uuid();
+    layerMap[ld.name] = lid;
+    state.layers.push({ layer_id: lid, name: ld.name, color: ld.color, visible: true, opacity: ld.opacity, default_schema_id: ld.default_schema_id });
+  }
+  await DB.saveLayers(state.currentSet, state.layers);
+
+  const pids = [];
+  for (const tp of TUTORIAL_PINS) {
+    const pid = generate_uuid();
+    const enc = encrypt_pin_data(
+      tp.title,
+      tp.note,
+      tp.lat,
+      tp.lng,
+      tp.color,
+      state.dek,
+    );
+    const pin = {
+      pin_id: pid,
+      team_id: state.currentSet,
+      layer_id: layerMap[tp.layer] || null,
+      ciphertext: enc.ciphertext,
+      nonce: enc.nonce,
+      created_at: Date.now(),
+    };
+    if (tp.schema) pin.schema_id = schemaMap[tp.schema] || tp.schema;
+    if (tp.emoji) pin.emoji = tp.emoji;
+    if (tp.tf !== undefined && tp.tf !== null) pin.valid_from = tp.tf;
+    if (tp.tt !== undefined && tp.tt !== null) pin.valid_until = tp.tt;
+    if (tp.custom) {
+      const cdEnc = encrypt_raw_bytes(new TextEncoder().encode(JSON.stringify(tp.custom)), state.dek);
+      pin.custom_data = { ciphertext: cdEnc.ciphertext, nonce: cdEnc.nonce };
+    }
+    await DB.savePin(pin);
+    pids.push(pid);
+  }
+  await loadPins();
+  window._tutorialPids = pids;
+  await saveSlideOrder(pids);
+  window._addHistory?.(
+    t("tutorialLoaded") || "Tutorial loaded",
+    `${TUTORIAL_PINS.length} ${t("featurePins") || "feature pins"}`,
+  );
+  window._renderUI?.();
+  setTimeout(() => startSlideshow(pids), 700);
+}
+
+export function startSlideshow(pinIds) {
+  const map = state.map;
+  if (!map || !pinIds || pinIds.length === 0) return;
+  let current = 0;
+  const total = pinIds.length;
+  let currentOrder = pinIds;
+
+  const ctrl = document.getElementById("slideshow-bar");
+  if (ctrl) ctrl.remove();
+  const bar = document.createElement("div");
+  bar.id = "slideshow-bar";
+  bar.style.cssText =
+    "position:absolute;bottom:40px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:8px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;box-shadow:0 2px 14px rgba(0,0,0,0.18);z-index:1000;font-size:13px;white-space:nowrap;";
+
+  async function onReorder(newOrder) {
+    currentOrder = newOrder;
+    window._slideOrder = newOrder;
+    await saveSlideOrder(newOrder);
+    goTo(current);
+  }
+
+  function cleanup() {
+    bar.remove();
+  }
+
+  function goTo(i) {
+    current = Math.max(0, Math.min(total - 1, i));
+    const pid = currentOrder[current];
+    const marker = state._markerMap?.get(pid);
+    if (marker) {
+      map.flyTo(marker.getLatLng(), marker._pinZoom || 13, { duration: 1.2 });
+      const onEnd = () => {
+        map.off("moveend", onEnd);
+        marker.openPopup();
+      };
+      map.on("moveend", onEnd);
+      setTimeout(() => {
+        map.off("moveend", onEnd);
+        marker.openPopup();
+      }, 2000);
+    }
+    render();
+  }
+
+  function render() {
+    const pid = currentOrder[current];
+    const marker = state._markerMap?.get(pid);
+    const title = marker?._pinTitle || `Pin ${current + 1}`;
+    bar.innerHTML = `<span style="color:var(--text-dim);font-weight:500;">${current + 1}/${total}</span> <span style="max-width:180px;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(title)}</span> <button id="tour-prev" style="padding:4px 10px;border:1px solid var(--border);background:var(--bg-input);border-radius:4px;cursor:pointer;font-size:12px;">←</button> <button id="tour-next" style="padding:4px 12px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;font-size:12px;">${current === total - 1 ? t("finish") || "Finish" : t("next") || "Next →"}</button> <button id="tour-skip" style="padding:4px 8px;border:1px solid var(--border);background:var(--bg-input);border-radius:4px;cursor:pointer;font-size:11px;color:var(--text-dim);">${t("skip") || "Skip"}</button> <button id="tour-edit" style="padding:4px 8px;border:1px solid var(--border);background:var(--bg-input);border-radius:4px;cursor:pointer;font-size:12px;color:var(--text-dim);">${t("edit") || "Edit"}</button>`;
+    bar.querySelector("#tour-prev").onclick = () => goTo(current - 1);
+    bar.querySelector("#tour-next").onclick = () => {
+      if (current < total - 1) goTo(current + 1);
+      else cleanup();
+    };
+    bar.querySelector("#tour-skip").onclick = cleanup;
+    bar.querySelector("#tour-edit").onclick = () =>
+      editSlideOrder(currentOrder, current, onReorder);
+  }
+
+  document.getElementById("map-container").appendChild(bar);
+  goTo(0);
+}
+
+async function saveSlideOrder(order) {
+  if (!state.currentSet || !Array.isArray(order)) return;
+  const s = await DB.getSettings(state.currentSet);
+  const settings = s || { map_center: [0, 0], map_zoom: 5 };
+  settings.slide_order = order;
+  await DB.saveSettings(state.currentSet, settings);
+}
+
+export async function startCurrentMapSlideshow() {
+  const markerMap = state._markerMap;
+  if (!markerMap || markerMap.size === 0) return;
+  const settings = await DB.getSettings(state.currentSet);
+  let pinIds;
+  if (
+    settings &&
+    Array.isArray(settings.slide_order) &&
+    settings.slide_order.length > 0
+  ) {
+    const existing = new Set([...markerMap.keys()]);
+    pinIds = settings.slide_order.filter((id) => existing.has(id));
+    for (const id of existing) {
+      if (!pinIds.includes(id)) pinIds.push(id);
+    }
+  } else {
+    pinIds = [...markerMap.keys()].sort((a, b) => {
+      const ca = markerMap.get(a)?._createdAt || 0;
+      const cb = markerMap.get(b)?._createdAt || 0;
+      if (ca !== cb) return ca - cb;
+      const ta = markerMap.get(a)?._pinTitle || "";
+      const tb = markerMap.get(b)?._pinTitle || "";
+      return ta.localeCompare(tb);
+    });
+  }
+  startSlideshow(pinIds);
+}
+
+function editSlideOrder(pinIds, currentIndex, onSave) {
+  const markerMap = state._markerMap;
+  let order = [...pinIds];
+
+  const ov = document.createElement("div");
+  ov.style.cssText =
+    "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2100;display:flex;align-items:center;justify-content:center;";
+  ov.onclick = (e) => {
+    if (e.target === ov) ov.remove();
+  };
+
+  function renderList() {
+    const rows = order
+      .map((pid, i) => {
+        const marker = markerMap?.get(pid);
+        const title = escapeHtml(marker?._pinTitle || `Pin ${i + 1}`);
+        const upDisabled = i === 0 ? "opacity:0.3;cursor:default;" : "";
+        const downDisabled =
+          i === order.length - 1 ? "opacity:0.3;cursor:default;" : "";
+        return `<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--border-light);">
+        <span style="flex:1;font-size:13px;">${i + 1}. ${title}</span>
+        <button class="reorder-up" data-i="${i}" style="padding:2px 6px;border:1px solid var(--border);background:var(--bg-input);border-radius:3px;cursor:pointer;font-size:11px;${upDisabled}" ${i === 0 ? "disabled" : ""}>▲</button>
+        <button class="reorder-down" data-i="${i}" style="padding:2px 6px;border:1px solid var(--border);background:var(--bg-input);border-radius:3px;cursor:pointer;font-size:11px;${downDisabled}" ${i === order.length - 1 ? "disabled" : ""}>▼</button>
+      </div>`;
+      })
+      .join("");
+
+    listEl.innerHTML = rows;
+
+    listEl.querySelectorAll(".reorder-up").forEach((btn) => {
+      btn.onclick = (e) => {
+        const i = parseInt(btn.dataset.i);
+        if (i > 0) {
+          [order[i], order[i - 1]] = [order[i - 1], order[i]];
+          renderList();
+        }
+      };
+    });
+  }
+
+  ov.innerHTML = `<div style="background:var(--bg-card);padding:16px;border-radius:8px;min-width:320px;max-width:420px;width:90%;box-shadow:0 4px 20px rgba(0,0,0,0.3);max-height:70vh;display:flex;flex-direction:column;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3 style="margin:0;">${t("editSlideOrder") || "Edit Slide Order"}</h3>
+      <button id="reorder-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:#9ca3af;line-height:1;">×</button>
+    </div>
+    <div id="reorder-list" style="flex:1;overflow-y:auto;border:1px solid var(--border-light);border-radius:4px;min-height:40px;max-height:50vh;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
+      <button id="reorder-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--bg-input);border-radius:4px;cursor:pointer;">${t("cancel")}</button>
+      <button id="reorder-save" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("save")}</button>
+    </div>
+  </div>`;
+
+  document.body.appendChild(ov);
+  const listEl = document.getElementById("reorder-list");
+  document.getElementById("reorder-close").onclick = () => ov.remove();
+  document.getElementById("reorder-cancel").onclick = () => ov.remove();
+  document.getElementById("reorder-save").onclick = () => {
+    onSave([...order]);
+    ov.remove();
+  };
+  renderList();
+}
+
+export async function deleteSet(sid, skipConfirm = false) {
+  if (!skipConfirm && !(await confirmDialog(t("deleteSetConfirm")))) return;
+  await DB.deleteTeam(sid);
+  delete window._names[sid];
+  if (state.currentSet === sid) {
+    const ids = Object.keys(window._names || {});
+    state.currentSet = ids[0] || null;
+    if (state.currentSet) await switchSet(state.currentSet);
+    else await createSet("Default");
+  }
+  await loadSetList();
+  window._renderUI?.();
+}
+
+export async function renameSet(sid, newName) {
+  await DB.renameTeam(sid, newName);
+  window._names[sid] = newName;
+  window._renderUI?.();
+}
+
+export function showSetsModal() {
+  const ov = document.createElement("div");
+  ov.style.cssText =
+    "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
+
+  function renderList() {
+    const ids = Object.keys(window._names || {});
+    if (state.currentSet && !ids.includes(state.currentSet))
+      ids.push(state.currentSet);
+
+    Promise.all(ids.map(id => DB.getCommunity(id).catch(() => null))).then(communities => {
+      const rows = ids
+        .map((id, i) => {
+          const nm = escapeHtml((window._names[id] || id).slice(0, 30));
+          const isActive = id === state.currentSet;
+          const hasPeers = [...state.peers.values()].some(
+            (p) => p.setId === id && !p.offline,
+          );
+          const dot = hasPeers
+            ? '<span style="color:#16a34a;font-size:10px;">●</span>'
+            : "";
+          const isTutorial = nm === "Tutorial" && window._tutorialPids?.length;
+          const replayBtn = isTutorial
+            ? `<button class="set-replay-btn" data-sid="${escapeHtml(id)}" style="padding:2px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:12px;margin-right:4px;flex-shrink:0;" title="${t("replayTour") || "Replay Tour"}">▶</button>`
+            : "";
+          const community = communities[i];
+          const memberCount = community ? (community.members?.length || 1) : 1;
+          const pubBadge = community?.published
+            ? `<span style="background:#059669;color:#fff;font-size:9px;padding:0 4px;border-radius:2px;margin-left:4px;">community</span>`
+            : "";
+          const info = community
+            ? `<span style="font-size:10px;color:var(--text-dim);">${memberCount} member${memberCount !== 1 ? "s" : ""}${pubBadge}</span>`
+            : "";
+          return `<div class="set-row" data-sid="${escapeHtml(id)}" style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid #e5e7eb;cursor:pointer;${isActive ? "background:#eff6ff;" : ""}">
+          <div style="flex:1;display:flex;flex-direction:column;">
+            <span class="set-name-display" style="font-size:14px;${isActive ? "font-weight:600;color:#2563eb;" : ""}">${nm} ${dot}</span>
+            ${info}
+          </div>
+          <button class="set-detail-btn" data-sid="${escapeHtml(id)}" style="padding:2px 8px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;flex-shrink:0;color:var(--text-dim);" title="Community details">ℹ</button>
+          <button class="set-slideshow-btn" data-sid="${escapeHtml(id)}" style="padding:2px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:12px;margin-right:4px;flex-shrink:0;" title="${t("slideshow") || "Slideshow"}">▶</button>
+          ${replayBtn}
+          <button class="set-rename-btn" data-sid="${escapeHtml(id)}" style="padding:2px 8px;border:1px solid #9ca3af;background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;flex-shrink:0;">✎</button>
+          <button class="set-delete-btn" data-sid="${escapeHtml(id)}" style="padding:2px 6px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:14px;line-height:1;flex-shrink:0;">×</button>
+        </div>`;
+        })
+        .join("");
+
+      listEl.innerHTML =
+        rows ||
+        '<div style="padding:12px;color:#9ca3af;text-align:center;">No saved maps</div>';
+
+      listEl.querySelectorAll(".set-detail-btn").forEach((btn) => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          showCommunityDetails(btn.dataset.sid);
+        };
+      });
+
+    listEl.querySelectorAll(".set-row").forEach((row) => {
+      row.onclick = async (e) => {
+        if (e.target.closest("button")) return;
+        const sid = row.dataset.sid;
+        if (sid === state.currentSet) return;
+        clean();
+        await switchSet(sid);
+      };
+    });
+
+    listEl.querySelectorAll(".set-rename-btn").forEach((btn) => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const sid = btn.dataset.sid;
+        const nameSpan = btn.parentElement.querySelector(".set-name-display");
+        const currentName = window._names[sid] || "";
+        nameSpan.innerHTML = `<input type="text" class="rename-input" value="${escapeHtml(currentName)}" style="width:100%;padding:4px;border:1px solid #2563eb;border-radius:3px;font-size:14px;box-sizing:border-box;" />`;
+        const input = nameSpan.querySelector(".rename-input");
+        input.focus();
+        input.select();
+
+        const doRename = async () => {
+          const newName = input.value.trim();
+          if (newName && newName !== currentName) {
+            await renameSet(sid, newName);
+          }
+          renderList();
+        };
+
+        input.addEventListener("keydown", (ev) => {
+          if (ev.key === "Enter") doRename();
+          if (ev.key === "Escape") renderList();
+        });
+
+        input.addEventListener("blur", () => {
+          setTimeout(() => {
+            if (document.body.contains(input)) renderList();
+          }, 150);
+        });
+      };
+    });
+
+    listEl.querySelectorAll(".set-slideshow-btn").forEach((btn) => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const sid = btn.dataset.sid;
+        if (sid !== state.currentSet) await switchSet(sid);
+        clean();
+        setTimeout(() => startCurrentMapSlideshow(), 300);
+      };
+    });
+
+    listEl.querySelectorAll(".set-replay-btn").forEach((btn) => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const sid = btn.dataset.sid;
+        if (sid !== state.currentSet) await switchSet(sid);
+        clean();
+        setTimeout(() => startSlideshow(window._tutorialPids), 300);
+      };
+    });
+
+    listEl.querySelectorAll(".set-delete-btn").forEach((btn) => {
+      btn.onclick = async (e) => {
+        e.stopPropagation();
+        const sid = btn.dataset.sid;
+        const name = window._names[sid] || sid;
+        if (!(await confirmDialog(t("deleteMapConfirm", { name })))) return;
+        await deleteSet(sid, true);
+        if (Object.keys(window._names || {}).length === 0) {
+          clean();
+        } else {
+          renderList();
+        }
+      };
+    });
+  });  // close Promise.then
+}
+
+  ov.innerHTML = `<div style="background:var(--bg-card);padding:16px;border-radius:8px;min-width:320px;max-width:400px;width:90%;box-shadow:0 4px 20px rgba(0,0,0,0.3);max-height:80vh;display:flex;flex-direction:column;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3 style="margin:0;">${t("savedMaps")}</h3>
+      <button id="sets-modal-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:#9ca3af;line-height:1;">×</button>
+    </div>
+    <div id="sets-list" style="flex:1;overflow-y:auto;border:1px solid var(--border-light);border-radius:4px;min-height:40px;"></div>
+    <button id="sets-modal-new" style="margin-top:12px;width:100%;padding:8px;border:1px dashed #9ca3af;background:transparent;color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:14px;">${t("newMap")}</button>
+    <button id="sets-modal-tutorial" style="margin-top:8px;width:100%;padding:8px;border:1px dashed #2563eb;background:transparent;color:#2563eb;border-radius:4px;cursor:pointer;font-size:14px;">${t("tutorialMapName") || "Tutorial"}</button>
+  </div>`;
+
+  document.body.appendChild(ov);
+
+  const listEl = document.getElementById("sets-list");
+
+  const clean = () => ov.remove();
+  document.getElementById("sets-modal-close").onclick = clean;
+  ov.onclick = (e) => {
+    if (e.target === ov) clean();
+  };
+  document.getElementById("sets-modal-new").onclick = async () => {
+    const n = prompt(t("newMapPrompt"))?.trim();
+    if (n) {
+      await createSet(n);
+      if (!document.body.contains(ov)) return;
+      renderList();
+    }
+  };
+  document.getElementById("sets-modal-tutorial").onclick = async () => {
+    clean();
+    await createTutorial();
+  };
+
+  renderList();
+}
+
+export async function showCommunityDetails(communityId) {
+  const c = await DB.getCommunity(communityId);
+  if (!c) { toast("Community not found", "#dc2626"); return; }
+
+  const memberRows = (c.members || []).map(m => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border-light);">
+      <span style="font-size:12px;">${escapeHtml(m.display_name)}</span>
+      <span style="font-size:11px;color:var(--text-dim);padding:1px 6px;border:1px solid var(--border);border-radius:3px;">${escapeHtml(m.role)}</span>
+    </div>
+  `).join("") || '<div style="color:var(--text-dim);font-size:12px;text-align:center;padding:8px;">No members</div>';
+
+  const gov = c.governance || {};
+  const relayRows = (c.relay_nodes || []).map(r => `
+    <div style="font-size:11px;color:var(--text-dim);padding:2px 0;">${escapeHtml(r.url)} · ${escapeHtml(r.role)}</div>
+  `).join("") || '<div style="font-size:11px;color:var(--text-dim);">No relays configured</div>';

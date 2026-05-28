@@ -1,0 +1,9 @@
+{
+  "appId": "Pigg.Pin",
+  "appName": "PiggPin",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  }
+}

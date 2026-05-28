@@ -1,5 +1,13 @@
 node_modules/
-dist/
 target/
-.env
 *.wasm
+!dist/assets/*.wasm
+*.apk
+src-tauri/gen/
+*.deb
+*.rpm
+*.AppImage
+*.msi
+*.dmg
+signal-server/config.toml
+signal-server/community_data.json
