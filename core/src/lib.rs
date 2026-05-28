@@ -854,7 +854,7 @@ pub fn hw_model_name(model: u32) -> String {
 pub fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, JsError> {
     let mut d = GzDecoder::new(data);
     let mut out = Vec::new();
-    d.read_to_end(&mut out).map_err(js_err)?;
+    d.take(50_000_000).read_to_end(&mut out).map_err(js_err)?;
     Ok(out)
 }
 

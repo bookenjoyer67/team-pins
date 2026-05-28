@@ -504,7 +504,8 @@ export function pinIcon(c, emoji) {
       popupAnchor: [0, -36],
     });
   }
-  const s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 36"><path fill="${c}" d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24c0-6.6-5.4-12-12-12z"/><circle fill="#fff" cx="12" cy="12" r="4"/></svg>`;
+  const safeColor = validateHex(c) || "#2563eb";
+  const s = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 36"><path fill="${safeColor}" d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24c0-6.6-5.4-12-12-12z"/><circle fill="#fff" cx="12" cy="12" r="4"/></svg>`;
   return L.icon({
     iconUrl: `data:image/svg+xml,${encodeURIComponent(s)}`,
     iconSize: [24, 36],
@@ -970,7 +971,7 @@ export async function showCommunityDetails(communityId) {
   const ttlSaveBtn = document.getElementById("cd-ttl-save");
   if (ttlSaveBtn) ttlSaveBtn.onclick = async () => {
     gov.ttl_enabled = document.getElementById("cd-ttl-enabled")?.checked || false;
-    gov.ttl_base_mins = parseInt(document.getElementById("cd-ttl-base")?.value) || 10080;
+    gov.ttl_base_mins = (v => isNaN(v) ? 10080 : v)(parseInt(document.getElementById("cd-ttl-base")?.value));
     c.governance = gov;
     await DB.saveCommunity(c);
     state.currentCommunity = c;

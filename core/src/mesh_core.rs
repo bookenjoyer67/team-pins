@@ -7,7 +7,9 @@ use rns_core::identity::Identity;
 #[wasm_bindgen]
 pub fn reticulum_generate_identity() -> String {
     let mut seed = [0u8; 64];
-    getrandom::getrandom(&mut seed).ok();
+    if getrandom::getrandom(&mut seed).is_err() {
+        return String::new();
+    }
     let pk = &seed[..32];
     let vk = &seed[32..];
     Identity::new_from_slices(pk, vk).to_hex_string()
