@@ -1,0 +1,15 @@
+{
+  "name": "e2e-core",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "e2e_core_bg.wasm",
+    "e2e_core.js",
+    "e2e_core.d.ts"
+  ],
+  "main": "e2e_core.js",
+  "types": "e2e_core.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
