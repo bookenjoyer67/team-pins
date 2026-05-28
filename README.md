@@ -1,151 +1,97 @@
-# E2EE Team Pins
+# piggPin
 
-End-to-end encrypted collaborative map application. Teams place pins and draw shapes on a shared Leaflet map. All data is encrypted client-side — the server stores only ciphertext.
+Peer-to-peer encrypted collaborative cartography. Place pins, draw shapes, define custom schemas, organize into layers — synced directly between peers via WebRTC. Decentralized. No accounts. No cloud.
+
+## How it works
+
+- **Create maps** — each is an independent encrypted collection with its own keys
+- **Layers** — organize pins into named layers within a map: visibility toggles, opacity, active layer for editing
+- **Schemas** — define custom pin forms with typed fields (text, number, choice, date, time, boolean). Global pool shared across all maps
+- **Import between maps** — copy pins and drawings from any map into another at the layer level
+- **Host a group** — generates a connection code / QR / link. Share it with a peer.
+- **Join a peer** — scan their QR, paste their code, or use a relay link. Data syncs automatically.
+- **Mesh network** — peers auto-connect to each other, not just the host
+- **Export/Import** — share entire maps as portable encrypted blobs (optional password). Layers, schemas, and custom data travel together.
+
+Everything is encrypted client-side (ChaCha20Poly1305, X25519). Keys and data never leave your device.
+
+## Features
+
+- **Pins** — drop pins with title, note, custom schema fields, photo/video attachments, emoji, and colors
+- **Layers** — organize pins into categories with per-layer color coding, visibility toggles, opacity sliders, and an active editing target
+- **Schemas** — custom typed fields per pin (text, number, choice, date, time, boolean). Define once, reuse on any map. Schema sync between peers
+- **Import from Map** — copy pins and drawings between your maps at the layer level. Re-encrypted for the target map with progress feedback
+- **Drawings** — polygon, polyline, rectangle, circle, and freehand with custom colors
+- **Free draw** — click and drag to sketch any path on the map, with auto-shape detection
+- **Circle metrics** — circumference, diameter, and area automatically calculated
+- **All drawing metrics** — length, perimeter, and area shown in popups
+- **Metric/imperial toggle** — switch units inline per drawing (m/km vs yd/mi)
+- **Drawing attachments** — attach files to any drawing
+- **Edit pins & drawings** — update title, note, color, layer, schema, and arrow after creation
+- **Pin search** — filter pins by title or note text
+- **Pin slideshow** — animated fly-through of all pins with reorderable slide order
+- **Multiple maps** — independent tabs with separate encryption keys and layers
+- **Color presets** — 8 colors for pins and drawings
+- **Touch-friendly** — custom 36×36px draw toolbar with SVG icons
+- **ICE / TURN config** — custom STUN/TURN servers and WebSocket relay
+- **Follow toggle** — sync map position across connected peers
+- **Offline tiles** — tiles cached by service worker for offline access
+- **Offline mesh** — Meshtastic, RNode, and Reticulum radio mesh support
+- **PWA** — installable on desktop and mobile
+- **10 languages** — en, es, fr, de, pt, zh, ja, ar, ru, uk
 
 ## Architecture
 
 ```
-Browser (SPA)
-├── main.js / widget.js          ← UI + Supabase client
-├── core/pkg/e2e_core_bg.wasm    ← Rust crypto (X25519, ChaCha20Poly1305)
-└── Supabase
-    ├── Auth (email/password or Matrix JWT)
-    ├── PostgreSQL (encrypted pins, drawings, teams)
-    └── Realtime (live sync across tabs)
+main.js        Entry point, UI rendering, history, tabs, event delegation
+map.js         Map, pins, drawings, layers, schemas, forms, import, metrics
+sync.js        WebRTC messages, broadcast, host/join, export/import, key rotation
+dialogs.js     QR dialogs, password, progress, toast
+state.js       Shared reactive state (layers, schemas, active layer)
+peer.js        WebRTC peer connection manager
+db.js          IndexedDB storage (8 object stores)
+qr.js          Camera-based QR scanner
+core/src/lib.rs  Rust → WASM crypto (X25519, ChaCha20Poly1305, ECIES)
+style.css      All styles
 ```
 
-**Crypto:** Rust compiled to WASM via wasm-bindgen. Team keypairs use X25519 + ECIES for DEK wrapping. Pins/drawings encrypted with ChaCha20Poly1305 AEAD.
+## Tech stack
 
-## Features
-
-- Encrypted map pins (title, note, lat/lng)
-- Encrypted drawings (polygon, line, rectangle, circle)
-- Multi-team with invite tokens
-- Roles: administrator, moderator, member
-- Public/private pins — guests see only public pins
-- Matrix widget integration (auto-login via OpenID)
-- Realtime sync across sessions (Supabase Realtime)
-
-## Prerequisites
-
-- [Rust](https://rustup.rs) + `wasm-pack` (`cargo install wasm-pack`)
-- [Node.js](https://nodejs.org) 18+
-- [Supabase](https://supabase.com) project
+- **Frontend:** Vanilla JS + Vite + Leaflet + Leaflet-draw + Leaflet.markercluster
+- **Crypto:** Rust → WASM (X25519, ChaCha20Poly1305, ECIES, gzip, QR generation)
+- **Storage:** IndexedDB (zero server)
+- **Networking:** WebRTC data channels (P2P mesh)
+- **Mobile:** Capacitor (Android APK / iOS)
+- **Desktop:** Tauri (Linux, macOS, Windows)
+- **Signaling relay:** Rust (Tokio + Tungstenite + MQTT + RNode + Reticulum bridges)
 
 ## Setup
 
-### 1. Clone and install
-
 ```bash
-git clone <repo-url>
-cd team-pins
 npm install
+cd core && wasm-pack build --target web && cd ..
+npm run dev        # http://localhost:5173
 ```
 
-### 2. Configure Supabase
-
-Copy `.env.example` or create `.env`:
-
-```
-VITE_SUPABASE_URL=https://your-project.supabase.co
-VITE_SUPABASE_ANON_KEY=your-anon-key
-```
-
-Run `supabase-schema.sql` in your Supabase SQL Editor to create all tables and RLS policies.
-
-Create an account with supabase. On the left hand side look for the [>] icon.
-Paste the contents of supabase-schema.sql into the SQL editor.
-
-Enable auth providers in Supabase: **Email/Password** (disable email confirmation for testing).
-
-### 3. Build WASM
+### Relay server (optional — enables one-link multi-peer rooms)
 
 ```bash
-cd core
-wasm-pack build --target web
-cd ..
+cd signal-server
+cargo build --release
+./target/release/piggpin-signal [config.toml]   # defaults to port 9000
 ```
 
-### 4. Dev server
+Configure ICE settings in the app (gear ⚙ button) to point to your relay URL (`ws://your-server:9000`).
+
+## Build
 
 ```bash
-npm run dev
-```
+npm run build      # → dist/
 
-Opens at `http://localhost:5173`. Map loads immediately. Sign in to create pins.
-
-### 5. Production build
-
-```bash
-npm run build
-```
-
-Serves from `dist/`. Pair with any static file server.
-
-## Matrix Widget
-
-The app can run as a widget inside Element and other Matrix clients.
-
-### Widget mode
-
-Add to a room: `/addwidget https://yourserver.com/?widget`
-
-### Auth proxy
-
-The proxy (`map-proxy/`) handles both hosting and Matrix OpenID
-
-```
-cd map-proxy
-cargo run --release
-```
-
-Serves static files from `../team-pins/dist/` and the `/auth` endpoint on port 3030.
-
-Replace `CHANGE_ME` in `src/main.rs` with your Supabase JWT secret (Settings → API → JWT Secret) or set it as an environoment variable.
-
-### Cloudflare
-
-Point a domain at `localhost:3030` via Cloudflare Tunnel or Cloudflare Workers.
-
-## Roles and access
-
-| Role | View private | Create pins | Release pins | Manage team |
-|---|---|---|---|---|
-| Guest (no auth) | Public only | No | No | No |
-| Member | All | Yes | No | No |
-| Moderator | All | Yes | Yes | No |
-| Administrator | All | Yes | Yes | Yes |
-
-First user to join a team becomes administrator. Invite tokens control membership for protected teams.
-
-## Database tables
-
-| Table | Purpose |
-|---|---|
-| `encrypted_pins` | ChaCha20Poly1305-encrypted pin data |
-| `encrypted_drawings` | Encrypted GeoJSON shapes |
-| `team_secrets` | X25519 keypair per team |
-| `team_dek` | ECIES-wrapped data encryption key |
-| `team_members` | User membership and roles |
-| `team_settings` | Per-team configuration |
-| `team_invites` | Single-use join tokens |
-
-## Project structure
-
-```
-team-pins/
-├── index.html              # SPA shell
-├── main.js                 # Application logic
-├── widget.js               # Matrix Widget API client
-├── style.css               # Layout and overlay styles
-├── vite.config.js          # Vite config
-├── supabase-schema.sql     # Full database schema
-├── core/                   # Rust WASM crypto
-│   ├── Cargo.toml
-│   └── src/lib.rs
-└── map-proxy/              # Matrix → Supabase auth proxy
-    ├── Cargo.toml
-    └── src/main.rs
+# Android APK
+npx cap sync android
+cd android && ./gradlew assembleDebug
+# APK at: android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ## License

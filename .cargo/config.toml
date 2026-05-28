@@ -1,0 +1,15 @@
+[target.x86_64-pc-windows-gnu]
+linker = "python-zig"
+rustflags = ["-C", "link-arg=-target", "-C", "link-arg=x86_64-windows-gnu"]
+
+[target.aarch64-apple-darwin]
+linker = "python-zig"
+rustflags = ["-C", "link-arg=-target", "-C", "link-arg=aarch64-macos-none"]
+
+[x86_64-pc-windows-gnu]
+linker = "python-zig"
+rustflags = ["-C", "link-arg=-target", "-C", "link-arg=x86_64-windows-gnu"]
+
+[aarch64-apple-darwin]
+linker = "python-zig"
+rustflags = ["-C", "link-arg=-target", "-C", "link-arg=aarch64-macos-none"]
