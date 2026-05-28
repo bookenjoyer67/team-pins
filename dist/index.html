@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#2563eb" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-uhc6LteEic5Iqes7oh3Lj+BLG/Sx+fvUrEFwL5xa+vo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://server.arcgisonline.com blob:; connect-src 'self' blob: ws: wss: https:; media-src 'self' blob:; child-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; font-src 'self'; frame-ancestors 'self';" />
+    <link rel="manifest" href="/piggpin/manifest.json" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='12' fill='%232563eb'/></svg>" />
+    <link rel="apple-touch-icon" href="/piggpin/icon-192.png" />
+    <link rel="stylesheet" href="/piggpin/leaflet/leaflet.css" />
+    <link rel="stylesheet" href="/piggpin/leaflet/leaflet.draw.css" />
+    <link rel="stylesheet" href="/piggpin/leaflet/MarkerCluster.css" />
+    <link rel="stylesheet" href="/piggpin/leaflet/MarkerCluster.Default.css" />
+    <title>piggPin</title>
+    <script>window.process=window.process||{env:{},cwd:()=>'/',platform:'browser',version:'v0.0.0'};window.Buffer=window.Buffer||{isBuffer:()=>!1}</script>
+  <script type="module" crossorigin src="/piggpin/assets/index-DaOh8q6y.js"></script>
+  <link rel="modulepreload" crossorigin href="/piggpin/assets/rolldown-runtime-S-ySWqyJ.js">
+  <link rel="modulepreload" crossorigin href="/piggpin/assets/preload-helper-BwoHSnu5.js">
+  <link rel="modulepreload" crossorigin href="/piggpin/assets/e2e_core-CS2n0wHb.js">
+  <link rel="modulepreload" crossorigin href="/piggpin/assets/db-Bnun5_q8.js">
+  <link rel="modulepreload" crossorigin href="/piggpin/assets/state-CgoyYCYF.js">
+  <link rel="modulepreload" crossorigin href="/piggpin/assets/dialogs-VQ_awSaK.js">
+  <link rel="modulepreload" crossorigin href="/piggpin/assets/map-Cc-0Ji06.js">
+  <link rel="modulepreload" crossorigin href="/piggpin/assets/relay-B0IZ2lfA.js">
+  <link rel="stylesheet" crossorigin href="/piggpin/assets/index-BH7l7Mqb.css">
+</head>
+<body>
+    <style>
+    @keyframes lds-spin{to{transform:rotate(360deg)}}
+    #app-loader{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:#1a1a2e;font-family:system-ui,sans-serif;}
+    #app-loader .spinner{width:40px;height:40px;border:3px solid rgba(37,99,235,0.2);border-top-color:#2563eb;border-radius:50%;animation:lds-spin 0.8s linear infinite;margin:0 auto 12px;}
+    #app-loader .label{font-size:14px;color:rgba(255,255,255,0.7);text-align:center;}
+    </style>
+    <div id="app-loader"><div><div class="spinner"></div><div class="label">Loading map…</div></div></div>
+    <div id="offline-bar">You are offline — local features available</div>
+    <div id="tabs-row"></div>
+    <div id="peer-list"></div>
+    <div id="history-panel"></div>
+    <div id="map-container"></div>
+    <button id="menu-toggle">☰</button>
+    <div id="top-bar" class="hidden"></div>
+    <script src="/piggpin/leaflet/leaflet.js"></script>
+    <script src="/piggpin/leaflet/leaflet.draw.js"></script>
+    <script src="/piggpin/leaflet/leaflet.markercluster.js"></script>
+</body>
+</html>

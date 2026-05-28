@@ -1,0 +1,43 @@
+# piggPin Signal Relay Configuration
+# Copy this to config.toml and edit for your server
+
+[server]
+port = 9000
+bind_address = "0.0.0.0"
+
+[rooms]
+max_clients = 0
+room_timeout_secs = 600
+max_rooms = 1000
+
+[rate_limit]
+messages_per_sec = 20
+connections_per_min = 30
+ban_duration_secs = 60
+
+[security]
+require_passwords = false
+max_password_len = 128
+max_room_len = 64
+max_message_size = 10485760
+
+[share]
+max_shares = 1000
+share_ttl_secs = 86400
+max_share_ttl_secs = 86400
+max_share_bytes = 209715200
+allowed_origin = "https://app.piggpin.space"
+
+[logging]
+level = "info"
+
+[mqtt]
+enabled = false
+broker = "mqtt.meshtastic.org"
+port = 1883
+# Set via MQTT_USERNAME / MQTT_PASSWORD env vars, or fill in here
+username = ""
+password = ""
+root_topic = "msh"
+bridge_room = "mesh"
+uplink_enabled = true
