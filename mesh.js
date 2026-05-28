@@ -891,7 +891,7 @@ export function acceptAllInbox() {
     if (!item.accepted) {
       item.accepted = true;
       const msg = { type: item.type, data: item.data };
-      Sync.handleMessage(msg, item.from ? meshPeerConnId(item.from) : "mesh_unknown");
+      try { await Sync.handleMessage(msg, item.from ? meshPeerConnId(item.from) : "mesh_unknown"); } catch (_) {}
     }
   }
   meshInboxUnread = 0;

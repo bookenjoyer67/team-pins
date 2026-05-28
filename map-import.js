@@ -61,7 +61,9 @@ export async function importLayerFromMap(sourceTeamId, sourceLayerId, targetLaye
       if (row.media) {
         const decMedia = decrypt_raw_bytes(row.media.ciphertext, row.media.nonce, srcDek);
         const encMedia = encrypt_raw_bytes(decMedia, state.dek);
-        newPin.media = { type: row.media.type, name: row.media.name, ciphertext: encMedia.ciphertext, nonce: encMedia.nonce };
+        const safeType = /^(image|video|audio)\/[\w+.-]+$/.test(row.media.type) ? row.media.type : "application/octet-stream";
+        const safeName = (row.media.name || "file").replace(/[/\\]/g, "_").slice(0, 255);
+        newPin.media = { type: safeType, name: safeName, ciphertext: encMedia.ciphertext, nonce: encMedia.nonce };
       }
       await DB.savePin(newPin);
       importedPins++;
