@@ -361,7 +361,7 @@ export async function handleMessage(msg, connId) {
           secret_key = existingTeam.secret_key;
         }
       }
-      await DB.saveTeam({ team_id: sid, name: d.name || sid.slice(0, 8), public_key, secret_key, wrapped_dek: d.wrapped_dek, key_derivation: d.key_derivation || "random", community_public_key: d.community_public_key || d.public_key, community_secret_key: d.community_secret_key || "" });
+      await DB.saveTeam({ team_id: sid, name: d.name || sid.slice(0, 8), public_key, secret_key, wrapped_dek: d.wrapped_dek, key_derivation: d.key_derivation || "random", community_public_key: d.community_public_key || d.public_key, community_secret_key: d.community_secret_key || "", community_wrapped_dek: d.wrapped_dek || "" });
       const existingCommunity = await DB.getCommunity(sid);
       if (!existingCommunity) {
         await DB.saveCommunity({

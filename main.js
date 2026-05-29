@@ -529,7 +529,7 @@ wasmReady.then(async () => {
 
               const existing = await DB.getTeam(sid);
               if (!existing) {
-                await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "" });
+                await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "", community_wrapped_dek: result.wrapped_dek || "" });
                 await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "", visibility: "private", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [], relay_url: restoredRelayUrl || null });
                 await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: "Default", color: "#2563eb", visible: true, opacity: 1.0 }]);
                 window._names[sid] = (result.name || name) + " (← joined)";
@@ -804,7 +804,7 @@ wasmReady.then(async () => {
 
       const existing = await DB.getTeam(sid);
       if (!existing) {
-        await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "" });
+        await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "", community_wrapped_dek: result.wrapped_dek || "" });
         await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "", visibility: "private", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [], relay_url: linkRelayUrl || null });
         await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: "Default", color: "#2563eb", visible: true, opacity: 1.0 }]);
         window._names[sid] = (result.name || name) + " (← joined)";
