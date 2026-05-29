@@ -19,11 +19,14 @@ pub async fn handle_combined(state: Arc<AppState>, stream: TcpStream, addr: Sock
                     if first.contains("/share") || first.contains("/health") {
                         return Ok::<_, ()>(true);
                     }
-                    // Plain HTTP requests (not WebSocket upgrades) go to HTTP handler
+                    // Only route to HTTP if we can see headers and it's clearly NOT a WebSocket
+                    let is_websocket = head.contains("Upgrade: websocket")
+                        || head.contains("Sec-WebSocket-Key");
+                    if is_websocket {
+                        return Ok::<_, ()>(false);
+                    }
                     if first.contains("HTTP/") {
-                        let is_websocket = head.contains("Upgrade: websocket")
-                            || head.contains("Sec-WebSocket-Key");
-                        return Ok::<_, ()>(!is_websocket);
+                        return Ok::<_, ()>(true);
                     }
                     return Ok::<_, ()>(false);
                 }
