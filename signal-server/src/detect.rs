@@ -19,15 +19,6 @@ pub async fn handle_combined(state: Arc<AppState>, stream: TcpStream, addr: Sock
                     if first.contains("/share") || first.contains("/health") {
                         return Ok::<_, ()>(true);
                     }
-                    // Only route to HTTP if we can see headers and it's clearly NOT a WebSocket
-                    let is_websocket = head.contains("Upgrade: websocket")
-                        || head.contains("Sec-WebSocket-Key");
-                    if is_websocket {
-                        return Ok::<_, ()>(false);
-                    }
-                    if first.contains("HTTP/") {
-                        return Ok::<_, ()>(true);
-                    }
                     return Ok::<_, ()>(false);
                 }
                 Ok(_) => { sleep(Duration::from_millis(50)).await; }
