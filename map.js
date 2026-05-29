@@ -148,9 +148,19 @@ async function compressMedia(file) {
   if (
     !file.type.startsWith("image/") ||
     file.type.includes("gif") ||
-    file.type.includes("svg") ||
-    file.type.startsWith("video/")
+    file.type.includes("svg")
   ) {
+    if (file.type.startsWith("video/")) {
+      try {
+        const buf = new Uint8Array(await file.arrayBuffer());
+        const result = await compressVideoBytes(buf, file.type, file.name);
+        if (result) return {
+          buffer: result.buffer.buffer,
+          type: result.type,
+          name: result.name,
+        };
+      } catch (_) {}
+    }
     return {
       buffer: await file.arrayBuffer(),
       type: file.type,

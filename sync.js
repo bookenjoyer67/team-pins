@@ -19,7 +19,7 @@ const chunkStore = new Map();
 const syncBatchStore = new Map();
 const CHUNK_CLEANUP_MS = 60_000;
 const BATCH_CLEANUP_MS = 30_000;
-const MAX_CHUNKS = 200;
+const MAX_CHUNKS = 500;
 const MAX_BATCH_CHUNKS = 200;
 let _chunkCleanupTimer = null;
 _chunkCleanupTimer = setInterval(() => {
@@ -276,7 +276,7 @@ function relayToOthers(msg, fromConnId) {
 
 export async function handleMessage(msg, connId) {
   if (!msg || typeof msg !== "object" || typeof msg.type !== "string") return;
-  const d = msg.data;
+  const d = unpackHexFields(msg.data || {});
   if (d && typeof d.ts === "number") {
     const age = Date.now() - d.ts;
     if (age < -120000 || age > 120000) return;
@@ -786,7 +786,7 @@ export function broadcast(type, data, connId) {
     window._relayPushDelta?.(state.currentSet, [], [], [], [], [], [data.drawing_id]);
   }
 
-  const payload = { ...data, team_id: state.currentSet, ts: Date.now() };
+  const payload = packHexFields({ ...data, team_id: state.currentSet, ts: Date.now() });
   const msg = JSON.stringify({ type, data: payload });
   const chunks = splitMessage(msg);
   if (!chunks) {
