@@ -280,6 +280,8 @@ wireGlobals();
 Relay.setOnCommunityPeerUpdate(() => { renderPeerList(); });
 
 wasmReady.then(async () => {
+  document.getElementById("app-loader")?.remove();
+
 
   const savedIce = localStorage.getItem("pins-ice-servers");
   if (savedIce) Peer.setIceServers(JSON.parse(savedIce));
@@ -355,7 +357,7 @@ wasmReady.then(async () => {
     state.peers.set("known_" + kp.user_id, { name: kp.display_name, setId: null, userId: kp.user_id, offline: true });
   }
 
-  Relay.connectAll();
+  await Relay.connectAll();
 
   const hasPendingJoin = window.location.hash.startsWith("#community=")
     || window.location.hash.startsWith("#map=")
@@ -463,21 +465,49 @@ wasmReady.then(async () => {
             if (!result) {
               toast(restoredRelayUrl ? "Cannot reach community on relay — check relay URL" : "No relay connection — configure in ⚙ ICE settings", "#dc2626"); return;
             }
-            if (!isPasswordDerived && (!result.secret_key || result.secret_key.length === 0)) {
-              toast("Key exchange requires a direct peer connection — connect to an existing member via WebRTC or use a password-protected community", "#f97316"); return;
-            }
             if (result && result.public_key && result.wrapped_dek) {
               const sid = result.community_id;
-              let secret_key = result.secret_key || "";
+              let public_key = result.public_key;
+              let secret_key = "";
+              let myWrappedDek = result.individually_wrapped_dek || "";
+
               if (isPasswordDerived && plaintextPass) {
                 const { generate_user_keypair_from_password, encode_hex } = await import("./core/pkg/e2e_core.js");
                 const kp = generate_user_keypair_from_password(plaintextPass, sid);
+                public_key = encode_hex(kp.public);
                 secret_key = encode_hex(kp.secret);
+                myWrappedDek = result.wrapped_dek;
+              } else {
+                // Per-member keypair: generate own keypair
+                const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex } = await import("./core/pkg/e2e_core.js");
+                const kp = generate_user_keypair();
+                public_key = encode_hex(kp.public);
+                secret_key = encode_hex(kp.secret);
+
+                // If community_secret_key is embedded in the link, decrypt and re-wrap immediately
+                if (embeddedCommunitySk && !myWrappedDek) {
+                  try {
+                    const dk = unwrap_dek(result.wrapped_dek, embeddedCommunitySk);
+                    if (dk) {
+                      myWrappedDek = wrap_dek(dk, public_key);
+                      // Upload our re-wrapped DEK to relay so we can sponsor future members
+                      import("./relay.js").then(r => {
+                        r.rewrapMemberDek(sid, public_key, myWrappedDek);
+                      }).catch(() => {});
+                    }
+                  } catch (_) {}
+                }
+
+                // Use individually-wrapped DEK if available, else request via relay
+                if (!myWrappedDek) {
+                  Relay.requestMemberDek(sid, public_key);
+                }
               }
+
               const existing = await DB.getTeam(sid);
               if (!existing) {
-                await DB.saveTeam({ team_id: sid, name: result.name || name, public_key: result.public_key, secret_key, wrapped_dek: result.wrapped_dek, key_derivation: result.key_derivation || "random" });
-        await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "", visibility: "private", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [], relay_url: restoredRelayUrl || null });
+                await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "" });
+                await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "", visibility: "private", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [], relay_url: restoredRelayUrl || null });
                 await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: "Default", color: "#2563eb", visible: true, opacity: 1.0 }]);
                 window._names[sid] = (result.name || name) + " (← joined)";
               }
@@ -492,7 +522,11 @@ wasmReady.then(async () => {
               if (focusLat !== null && focusLng !== null && !isNaN(focusLat) && !isNaN(focusLng)) {
                 state.map?.flyTo([focusLat, focusLng], focusZoom, { duration: 1 });
               }
-              toast("Joined " + (result.name || name) + " via link", "#16a34a");
+              if (result.needs_key_exchange && !isPasswordDerived && !myWrappedDek) {
+                toast("Joined " + (result.name || name) + " — awaiting key exchange from an online member", "#f97316");
+              } else {
+                toast("Joined " + (result.name || name) + " via link", "#16a34a");
+              }
             }
           }
         } catch (_) {}
@@ -573,7 +607,7 @@ wasmReady.then(async () => {
       const raw = atob(b64);
       let buf;
       try { buf = new Uint8Array(raw.split("").map(c => c.charCodeAt(0))); } catch (_) {}
-      let cidUuid, name, linkRelayUrl, passwordProtected, inviteToken = null, focusLat = null, focusLng = null, focusZoom = 15;
+      let cidUuid, name, linkRelayUrl, passwordProtected, inviteToken = null, focusLat = null, focusLng = null, focusZoom = 15, embeddedCommunitySk = null;
       if (buf && buf.length >= 19) {
         let pos = 0;
         const nameLen = buf[pos++];
@@ -586,7 +620,17 @@ wasmReady.then(async () => {
         pos += relayLen;
         passwordProtected = !!(buf[pos] & 1);
         const isInvite = !!(buf[pos] & 2);
+        const hasCommunitySk = !!(buf[pos] & 0x04);
         pos++;
+        embeddedCommunitySk = null;
+        if (hasCommunitySk && buf.length > pos + 1) {
+          const skLen = (buf[pos] << 8) | buf[pos + 1];
+          pos += 2;
+          if (skLen > 0 && buf.length >= pos + skLen) {
+            embeddedCommunitySk = Array.from(buf.slice(pos, pos + skLen)).map(b => b.toString(16).padStart(2, "0")).join("");
+            pos += skLen;
+          }
+        }
         if (isInvite && buf.length > pos) {
           const roleLen = buf[pos++];
           const role = roleLen > 0 ? new TextDecoder().decode(buf.slice(pos, pos + roleLen)) : "contributor";
@@ -631,10 +675,13 @@ wasmReady.then(async () => {
 
       localStorage.setItem("pending-community", b64);
 
-      if (linkRelayUrl && !Relay.isRelayConnected?.()) {
-        Relay.connect(linkRelayUrl);
-        saveRelayToList(linkRelayUrl);
-        await new Promise(r => setTimeout(r, 1200));
+      if (linkRelayUrl) {
+        const needConnect = !Relay.isRelayConnected?.();
+        if (needConnect) {
+          Relay.connect(linkRelayUrl);
+          saveRelayToList(linkRelayUrl);
+        }
+        await new Promise(r => setTimeout(r, needConnect ? 1200 : 500));
       }
 
       if (!Relay.isRelayConnected?.()) {
@@ -679,23 +726,47 @@ wasmReady.then(async () => {
       if (!result) {
         toast(linkRelayUrl ? "Cannot reach community on relay — check relay URL" : "No relay connection — configure in ⚙ ICE settings", "#dc2626"); return;
       }
-      if (!isPasswordDerived && (!result.secret_key || result.secret_key.length === 0)) {
-        toast("Key exchange requires a direct peer connection — connect to an existing member via WebRTC or use a password-protected community", "#f97316"); return;
-      }
       if (!result.public_key || !result.wrapped_dek) {
         toast("Community not found on relay", "#dc2626"); return;
       }
 
       const sid = result.community_id;
-      let secret_key = result.secret_key || "";
+      let public_key = result.public_key;
+      let secret_key = "";
+      let myWrappedDek = result.individually_wrapped_dek || "";
+
       if (isPasswordDerived && plaintextPass) {
         const { generate_user_keypair_from_password, encode_hex } = await import("./core/pkg/e2e_core.js");
         const kp = generate_user_keypair_from_password(plaintextPass, sid);
+        public_key = encode_hex(kp.public);
         secret_key = encode_hex(kp.secret);
+        myWrappedDek = result.wrapped_dek;
+      } else {
+        const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex } = await import("./core/pkg/e2e_core.js");
+        const kp = generate_user_keypair();
+        public_key = encode_hex(kp.public);
+        secret_key = encode_hex(kp.secret);
+
+        if (embeddedCommunitySk && !myWrappedDek) {
+          try {
+            const dk = unwrap_dek(result.wrapped_dek, embeddedCommunitySk);
+            if (dk) {
+              myWrappedDek = wrap_dek(dk, public_key);
+              import("./relay.js").then(r => {
+                r.rewrapMemberDek(sid, public_key, myWrappedDek);
+              }).catch(() => {});
+            }
+          } catch (_) {}
+        }
+
+        if (!myWrappedDek) {
+          Relay.requestMemberDek(sid, public_key);
+        }
       }
+
       const existing = await DB.getTeam(sid);
       if (!existing) {
-        await DB.saveTeam({ team_id: sid, name: result.name || name, public_key: result.public_key, secret_key, wrapped_dek: result.wrapped_dek, key_derivation: result.key_derivation || "random" });
+        await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "" });
         await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "", visibility: "private", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [] });
         await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: "Default", color: "#2563eb", visible: true, opacity: 1.0 }]);
         window._names[sid] = (result.name || name) + " (← joined)";
@@ -713,7 +784,11 @@ wasmReady.then(async () => {
       if (focusLat !== null && focusLng !== null && !isNaN(focusLat) && !isNaN(focusLng)) {
         state.map?.flyTo([focusLat, focusLng], focusZoom, { duration: 1 });
       }
-      toast("Joined " + (result.name || name) + " via link", "#16a34a");
+      if (result.needs_key_exchange && !isPasswordDerived && !myWrappedDek) {
+        toast("Joined " + (result.name || name) + " — awaiting key exchange from an online member", "#f97316");
+      } else {
+        toast("Joined " + (result.name || name) + " via link", "#16a34a");
+      }
     } catch (e) { console.error("community link error:", e); toast("Invalid community link: " + (e.message || e), "#dc2626"); }
   } else if (window.location.hash.startsWith("#relay=")) {
     try {
@@ -726,7 +801,6 @@ wasmReady.then(async () => {
       }
     } catch (e) { console.error("relay join error:", e); }
   }
-  document.getElementById("app-loader")?.remove();
 }).catch(err => {
   document.getElementById("app-loader")?.remove();
   document.getElementById("map-container").innerHTML =
@@ -871,7 +945,7 @@ document.addEventListener("click", async e => {
       row.attestations = row.attestations || [];
       const existingIdx = row.attestations.findIndex(a => a.pubkey === state.signingPublicKey);
       const ts = Date.now();
-      const sig = sign(pid + attType + ts, state.signingSecretKey);
+      const sig = sign(pid + "|" + attType + "|" + ts, state.signingSecretKey);
       const att = { pubkey: state.signingPublicKey, type: attType, timestamp: ts, signature: sig };
       if (existingIdx >= 0) {
         if (row.attestations[existingIdx].type === attType) { toast("Already attested", "#f97316"); return; }
@@ -891,7 +965,13 @@ document.addEventListener("click", async e => {
         row.ttl_expires_at = row.ttl_base_at + (mins * 60000);
         const dir = attType === "confirmed" ? 1 : -1;
         window._broadcastPinVote?.(pid, dir);
-        if (down >= 3) { await DB.deletePin(pid); window._broadcast?.("delete_pin", { pin_id: pid }); Map.refreshPinMarkerPopup(state.markers?.find(m => m._pinId === pid)); return; }
+        if (down >= 7 && down > up) {
+          await DB.deletePin(pid);
+          window._broadcast?.("delete_pin", { pin_id: pid });
+          Map.refreshPinMarkerPopup(state.markers?.find(m => m._pinId === pid));
+          toast("Pin auto-removed by community attestation consensus", "#f97316");
+          return;
+        }
       }
       await DB.savePin(row);
       window._broadcast?.("new_pin", { ...row, team_id: state.currentSet });
@@ -940,9 +1020,10 @@ document.addEventListener("click", async e => {
       if (!ann) return;
       ann.votes = ann.votes || [];
       const existingIdx = ann.votes.findIndex(v => v.pubkey === state.signingPublicKey);
-      const payload = encode_hex(new TextEncoder().encode(annId + direction + Date.now()));
+      const ts = Date.now();
+      const payload = encode_hex(new TextEncoder().encode(annId + "|" + direction + "|" + ts));
       const sig = sign(payload, state.signingSecretKey);
-      const vote = { pubkey: state.signingPublicKey, direction, timestamp: Date.now(), signature: sig };
+      const vote = { pubkey: state.signingPublicKey, direction, timestamp: ts, signature: sig };
       if (existingIdx >= 0) ann.votes[existingIdx] = vote;
       else ann.votes.push(vote);
       await DB.saveAnnotation(ann);
@@ -954,16 +1035,21 @@ document.addEventListener("click", async e => {
   if (b.matches(".ann-delete-btn")) {
     e.stopPropagation();
     const annId = b.dataset.annId;
+    const ann = await DB.getAnnotation(annId);
+    if (!ann) return;
+    if (ann.author_pubkey && ann.author_pubkey !== state.signingPublicKey) {
+      toast("Not authorized to delete this comment", "#dc2626"); return;
+    }
     if (!(await confirmDialog("Remove this comment?"))) return;
     const tombId = generate_uuid();
-    const payload = encode_hex(new TextEncoder().encode(annId + tombId + Date.now()));
+    const ts = Date.now();
+    const payload = encode_hex(new TextEncoder().encode(annId + "|" + tombId + "|" + ts));
     try {
       const sig = sign(payload, state.signingSecretKey);
-      const tombstone = { tombstone_id: tombId, target_id: annId, by_pubkey: state.signingPublicKey, reason: "author_removed", timestamp: Date.now(), signature: sig };
+      const tombstone = { tombstone_id: tombId, target_id: annId, by_pubkey: state.signingPublicKey, reason: "author_removed", timestamp: ts, signature: sig };
       await DB.saveTombstone(tombstone);
       Sync.broadcastTombstone(tombstone);
-      const ann = await DB.getAnnotation(annId);
-      if (ann) Map.renderAnnotationThread(ann.pin_id);
+      Map.renderAnnotationThread(ann.pin_id);
       addHistory("Comment removed", annId.slice(0, 8));
     } catch (_) { toast("Failed to remove comment", "#dc2626"); }
   }

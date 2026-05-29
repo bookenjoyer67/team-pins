@@ -7,26 +7,26 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-uhc6LteEic5Iqes7oh3Lj+BLG/Sx+fvUrEFwL5xa+vo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://server.arcgisonline.com blob:; connect-src 'self' blob: ws: wss: https:; media-src 'self' blob:; child-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; font-src 'self'; frame-ancestors 'self';" />
-    <link rel="manifest" href="/piggpin/manifest.json" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-uhc6LteEic5Iqes7oh3Lj+BLG/Sx+fvUrEFwL5xa+vo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://server.arcgisonline.com blob:; connect-src 'self' https: wss: ws://localhost:* ws://127.0.0.1:*; media-src 'self' blob:; child-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; font-src 'self';" />
+    <link rel="manifest" href="/manifest.json" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='12' fill='%232563eb'/></svg>" />
-    <link rel="apple-touch-icon" href="/piggpin/icon-192.png" />
-    <link rel="stylesheet" href="/piggpin/leaflet/leaflet.css" />
-    <link rel="stylesheet" href="/piggpin/leaflet/leaflet.draw.css" />
-    <link rel="stylesheet" href="/piggpin/leaflet/MarkerCluster.css" />
-    <link rel="stylesheet" href="/piggpin/leaflet/MarkerCluster.Default.css" />
+    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="stylesheet" href="/leaflet/leaflet.css" />
+    <link rel="stylesheet" href="/leaflet/leaflet.draw.css" />
+    <link rel="stylesheet" href="/leaflet/MarkerCluster.css" />
+    <link rel="stylesheet" href="/leaflet/MarkerCluster.Default.css" />
     <title>piggPin</title>
     <script>window.process=window.process||{env:{},cwd:()=>'/',platform:'browser',version:'v0.0.0'};window.Buffer=window.Buffer||{isBuffer:()=>!1}</script>
-  <script type="module" crossorigin src="/piggpin/assets/index-DaOh8q6y.js"></script>
-  <link rel="modulepreload" crossorigin href="/piggpin/assets/rolldown-runtime-S-ySWqyJ.js">
-  <link rel="modulepreload" crossorigin href="/piggpin/assets/preload-helper-BwoHSnu5.js">
-  <link rel="modulepreload" crossorigin href="/piggpin/assets/e2e_core-CS2n0wHb.js">
-  <link rel="modulepreload" crossorigin href="/piggpin/assets/db-Bnun5_q8.js">
-  <link rel="modulepreload" crossorigin href="/piggpin/assets/state-CgoyYCYF.js">
-  <link rel="modulepreload" crossorigin href="/piggpin/assets/dialogs-VQ_awSaK.js">
-  <link rel="modulepreload" crossorigin href="/piggpin/assets/map-Cc-0Ji06.js">
-  <link rel="modulepreload" crossorigin href="/piggpin/assets/relay-B0IZ2lfA.js">
-  <link rel="stylesheet" crossorigin href="/piggpin/assets/index-BH7l7Mqb.css">
+  <script type="module" crossorigin src="/assets/index-CpF9SebK.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-S-ySWqyJ.js">
+  <link rel="modulepreload" crossorigin href="/assets/preload-helper-DWTEM3RW.js">
+  <link rel="modulepreload" crossorigin href="/assets/e2e_core-Cq0tZClG.js">
+  <link rel="modulepreload" crossorigin href="/assets/db-32CzJt9p.js">
+  <link rel="modulepreload" crossorigin href="/assets/state-CgoyYCYF.js">
+  <link rel="modulepreload" crossorigin href="/assets/dialogs-DhgAjl5-.js">
+  <link rel="modulepreload" crossorigin href="/assets/map-C5j0__nb.js">
+  <link rel="modulepreload" crossorigin href="/assets/relay-5QCLWVAj.js">
+  <link rel="stylesheet" crossorigin href="/assets/index-BH7l7Mqb.css">
 </head>
 <body>
     <style>
@@ -43,8 +43,8 @@
     <div id="map-container"></div>
     <button id="menu-toggle">☰</button>
     <div id="top-bar" class="hidden"></div>
-    <script src="/piggpin/leaflet/leaflet.js"></script>
-    <script src="/piggpin/leaflet/leaflet.draw.js"></script>
-    <script src="/piggpin/leaflet/leaflet.markercluster.js"></script>
+    <script src="/leaflet/leaflet.js"></script>
+    <script src="/leaflet/leaflet.draw.js"></script>
+    <script src="/leaflet/leaflet.markercluster.js"></script>
 </body>
 </html>

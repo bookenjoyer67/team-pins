@@ -119,8 +119,10 @@ async function readLoop() {
             }
           }
         }
-        // Prevent buffer from growing indefinitely
-        if (buffer.length > 8192) buffer = new Uint8Array(0);
+        // Prevent buffer from growing indefinitely — keep last 8192 bytes
+        if (buffer.length > 8192) {
+          buffer = buffer.slice(buffer.length - 4096);
+        }
       }
     }
   } catch (e) {

@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::time::Instant;
 use uuid::Uuid;
 
 pub struct Share {
-    pub data: Vec<u8>,
+    pub data: Arc<Vec<u8>>,
     pub created: Instant,
     pub ttl_secs: u64,
     pub uses_remaining: Option<u32>,
@@ -29,9 +30,9 @@ impl ShareStore {
                 self.shares.remove(&key);
             }
         }
-        let id = Uuid::new_v4().to_string()[..8].to_string();
+        let id = Uuid::new_v4().to_string();
         self.shares.insert(id.clone(), Share {
-            data,
+            data: Arc::new(data),
             created: Instant::now(),
             ttl_secs: ttl_secs.unwrap_or(self.share_ttl_secs),
             uses_remaining: uses,
@@ -39,7 +40,7 @@ impl ShareStore {
         id
     }
 
-    pub fn get(&mut self, id: &str) -> Option<Vec<u8>> {
+    pub fn get(&mut self, id: &str) -> Option<Arc<Vec<u8>>> {
         let share = self.shares.remove(id)?;
         if share.created.elapsed().as_secs() > share.ttl_secs {
             return None;
@@ -49,20 +50,19 @@ impl ShareStore {
             Some(n) => Some(n - 1),
             None => None,
         };
-        let data = share.data;
+        let data = Arc::clone(&share.data);
         self.shares.insert(id.to_string(), Share {
-            data: data.clone(),
+            data,
             created: share.created,
             ttl_secs: share.ttl_secs,
             uses_remaining: remaining,
         });
-        Some(data)
+        Some(Arc::clone(&self.shares.get(id).unwrap().data))
     }
 
     pub fn cleanup(&mut self) {
         self.shares.retain(|_, s| {
             s.created.elapsed().as_secs() < s.ttl_secs
-                && s.uses_remaining.map_or(true, |u| u > 0)
         });
     }
 }

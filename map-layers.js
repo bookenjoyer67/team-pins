@@ -342,10 +342,11 @@ export async function showDiscoverModal() {
         e.stopPropagation();
         const isPasswordProtected = btn.dataset.passwordProtected === "1";
         let passwordHash = null;
+        let plaintextPass = null;
         if (isPasswordProtected) {
-          const pass = await promptRoomPassword("This community requires a password to join");
-          if (!pass) return;
-          passwordHash = await hashCommunityPassword(pass, btn.dataset.id);
+          plaintextPass = await promptRoomPassword("This community requires a password to join");
+          if (!plaintextPass) return;
+          passwordHash = await hashCommunityPassword(plaintextPass, btn.dataset.id);
         }
         btn.textContent = "Joining...";
         btn.disabled = true;
@@ -358,16 +359,32 @@ export async function showDiscoverModal() {
             return;
           }
           if (result && result.public_key && result.wrapped_dek) {
-            if (!result.secret_key && result.key_derivation !== "pbkdf2") {
-              btn.textContent = "Join";
-              btn.disabled = false;
-              toast("Key exchange requires a direct peer connection — connect to an existing member via WebRTC or use a password-protected community", "#f97316");
-              return;
-            }
             const sid = result.community_id;
+            const isPasswordDerived = result.key_derivation === "pbkdf2";
+            let public_key = result.public_key;
+            let secret_key = "";
+            let myWrappedDek = result.individually_wrapped_dek || "";
+
+            if (isPasswordDerived && plaintextPass) {
+              const { generate_user_keypair_from_password, encode_hex } = await import("./core/pkg/e2e_core.js");
+              const kp = generate_user_keypair_from_password(plaintextPass, sid);
+              public_key = encode_hex(kp.public);
+              secret_key = encode_hex(kp.secret);
+              myWrappedDek = result.wrapped_dek;
+            } else {
+              const { generate_user_keypair, encode_hex } = await import("./core/pkg/e2e_core.js");
+              const kp = generate_user_keypair();
+              public_key = encode_hex(kp.public);
+              secret_key = encode_hex(kp.secret);
+              if (!myWrappedDek) {
+                const { requestMemberDek } = await import("./relay.js");
+                requestMemberDek(sid, public_key);
+              }
+            }
+
             const existing = await DB.getTeam(sid);
             if (!existing) {
-              await DB.saveTeam({ team_id: sid, name: result.name, public_key: result.public_key, secret_key: result.secret_key || "", wrapped_dek: result.wrapped_dek });
+              await DB.saveTeam({ team_id: sid, name: result.name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: "" });
               await DB.saveCommunity({
                 community_id: sid, name: result.name, description: result.description || "",
                 genesis_public_key: result.genesis_public_key || "",
@@ -389,7 +406,11 @@ export async function showDiscoverModal() {
             const { loadPins, loadDrawings } = await import("./map.js");
             await loadPins();
             await loadDrawings();
-            toast("Joined " + result.name, "#16a34a");
+            if (result.needs_key_exchange && !isPasswordDerived && !myWrappedDek) {
+              toast("Joined " + result.name + " — awaiting key exchange", "#f97316");
+            } else {
+              toast("Joined " + result.name, "#16a34a");
+            }
           } else {
             btn.textContent = "Join";
             btn.disabled = false;

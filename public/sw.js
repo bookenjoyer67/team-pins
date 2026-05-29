@@ -56,8 +56,9 @@ self.addEventListener("fetch", (e) => {
   }
 
   if (
-    url.hostname.includes("tile.openstreetmap.org") ||
-    url.hostname.includes("server.arcgisonline.com")
+    url.hostname === "tile.openstreetmap.org" ||
+    url.hostname.endsWith(".tile.openstreetmap.org") ||
+    url.hostname === "server.arcgisonline.com"
   ) {
     e.respondWith(handleTileRequest(e.request));
     return;

@@ -1,7 +1,15 @@
 import * as DB from "./db.js";
 import { state } from "./state.js";
 
+const _gossipListeners = new Map(); // queryId → handler
+const _gossipMultiHandler = (resp) => {
+  for (const [qid, cb] of _gossipListeners) { try { cb(resp); } catch(_) {} }
+};
 const discoveryCache = new Map();
+// Register global handler once
+if (typeof window !== "undefined") {
+  window._gossipResponseHandler = _gossipMultiHandler;
+}
 
 export async function buildCapabilityAnnounce() {
   const communities = [];
@@ -46,6 +54,7 @@ export function handleCapabilityAnnounce(msg) {
 }
 
 export async function queryPeers(bbox, categories, minTrust, maxAge) {
+  const queryId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
   const payload = {
     type: "gossip_query",
     bbox,
@@ -57,17 +66,11 @@ export async function queryPeers(bbox, categories, minTrust, maxAge) {
   _meshBroadcast?.("gossip_query", payload);
   return new Promise(resolve => {
     const gathered = [];
-    const timeout = setTimeout(() => resolve(gathered), 5000);
-    const originalHandler = window._gossipResponseHandler;
-    window._gossipResponseHandler = (resp) => {
-      gathered.push(resp);
-      if (originalHandler) originalHandler(resp);
-    };
-    setTimeout(() => {
-      window._gossipResponseHandler = originalHandler;
-      clearTimeout(timeout);
+    const timeout = setTimeout(() => {
+      _gossipListeners.delete(queryId);
       resolve(gathered);
     }, 5000);
+    _gossipListeners.set(queryId, (resp) => { gathered.push(resp); });
   });
 }
 

@@ -11,7 +11,9 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "build:all": "cd core && wasm-pack build --target web && cd .. && npm run build",
-    "build:wasm": "cd core && wasm-pack build --target web"
+    "build:wasm": "cd core && wasm-pack build --target web",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.1",
@@ -33,6 +35,9 @@
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.1",
     "@vitejs/plugin-basic-ssl": "^2.3.0",
-    "vite": "^8.0.10"
+    "fake-indexeddb": "^6.2.5",
+    "jsdom": "^29.1.1",
+    "vite": "^8.0.10",
+    "vitest": "^4.1.7"
   }
 }

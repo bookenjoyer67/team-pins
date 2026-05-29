@@ -11,3 +11,21 @@ src-tauri/gen/
 *.dmg
 signal-server/config.toml
 signal-server/community_data.json
+
+# secrets & credentials
+.env
+.env.*
+*.keystore
+*.jks
+*.pem
+*.key
+release-key.properties
+credentials*.json
+android/app/release/
+
+# system & IDE
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo

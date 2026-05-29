@@ -212,6 +212,10 @@ export function connect(relayUrl) {
         handleLayerUnpublished(msg);
       } else if (msg.type === "subscribed_sync") {
         handleSubscribedSync(msg);
+      } else if (msg.type === "member_dek_requested") {
+        handleMemberDekRequested(msg);
+      } else if (msg.type === "member_dek_ready") {
+        handleMemberDekReady(msg);
       }
     } catch (err) {
       console.error("[relay] message handler failed:", err, "msg type:", msg?.type);
@@ -503,7 +507,7 @@ async function registerCommunityOn(conn, communityId, published) {
     description: c.description || "",
     genesis_public_key: c.genesis_public_key,
     public_key: team.public_key || "",
-    wrapped_dek: team.wrapped_dek || "",
+    wrapped_dek: team.community_wrapped_dek || team.wrapped_dek || "",
     key_derivation: isPasswordDerived ? "pbkdf2" : "random",
     published,
     members: c.members || [],
@@ -518,9 +522,17 @@ async function registerCommunityOn(conn, communityId, published) {
 async function handleAnnotationVote(msg) {
   const ann = await DB.getAnnotation(msg.annotation_id).catch(() => null);
   if (!ann) return false;
-  if (msg.signature && msg.pubkey && window._verify && window._encode_hex) {
+  if (msg.pubkey) {
+    if (!msg.signature) {
+      console.warn("[relay] annotation_vote: missing signature from", msg.pubkey);
+      return false;
+    }
+    if (!window._verify || !window._encode_hex) {
+      console.warn("[relay] annotation_vote: verification primitives not loaded, rejecting vote");
+      return false;
+    }
     try {
-      const rawPayload = (msg.annotation_id || "") + (msg.direction || "") + (msg.timestamp || "");
+      const rawPayload = msg.annotation_id + "|" + (msg.direction || "") + "|" + (msg.timestamp || "");
       const payloadHex = window._encode_hex(new TextEncoder().encode(rawPayload));
       if (!window._verify(payloadHex, msg.signature, msg.pubkey)) {
         console.warn("[relay] annotation_vote: invalid signature from", msg.pubkey);
@@ -573,39 +585,74 @@ async function handlePinVoteUpdate(msg) {
 }
 
 export function joinCommunity(communityId, passwordHash, relayUrl) {
-  const conn = relayUrl ? connections.get(relayUrl) : getConn();
+  const conn = (relayUrl && connections.get(relayUrl.trim().replace(/\/$/, ""))) || getConn();
   if (!conn || !isAlive(conn)) return Promise.resolve(null);
   return new Promise(resolve => {
     const requestId = crypto.randomUUID();
     const msg = { type: "join_community", community_id: communityId, request_id: requestId };
     if (passwordHash) msg.password_hash = passwordHash;
-    conn.ws.send(JSON.stringify(msg));
+
     let waitingToast = null;
-    const waitingTimer = setTimeout(() => {
+    let toastTimer = null;
+    let timeoutTimer = null;
+    let settled = false;
+
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(toastTimer);
+      clearTimeout(timeoutTimer);
+      if (waitingToast) waitingToast.remove();
+      conn.ws.removeEventListener("message", handler);
+      resolve(result);
+    };
+
+    const handler = (e) => {
+      try {
+        const m = JSON.parse(e.data);
+        if (m.type === "community_joined" && m.community_id === communityId && m.request_id === requestId) {
+          done(m);
+        }
+      } catch (_) { done(null); }
+    };
+
+    toastTimer = setTimeout(() => {
       waitingToast = document.createElement("div");
       waitingToast.textContent = "Connecting to community...";
       waitingToast.style.cssText = "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#2563eb;color:white;padding:10px 20px;border-radius:6px;z-index:3000;font-size:14px;box-shadow:0 2px 10px rgba(0,0,0,0.3);";
       document.body.appendChild(waitingToast);
     }, 3000);
-    const handler = (e) => {
-      try {
-        const m = JSON.parse(e.data);
-        if (m.type === "community_joined" && m.community_id === communityId && m.request_id === requestId) {
-          conn.ws.removeEventListener("message", handler);
-          clearTimeout(waitingTimer);
-          if (waitingToast) waitingToast.remove();
-          resolve(m);
-        }
-      } catch (_) { clearTimeout(waitingTimer); if (waitingToast) waitingToast.remove(); resolve(null); }
-    };
+
+    timeoutTimer = setTimeout(() => done(null), 15000);
+
     conn.ws.addEventListener("message", handler);
-    setTimeout(() => {
-      conn.ws.removeEventListener("message", handler);
-      clearTimeout(waitingTimer);
-      if (waitingToast) waitingToast.remove();
-      resolve(null);
-    }, 15000);
+    if (!isAlive(conn)) { done(null); return; }
+    try { conn.ws.send(JSON.stringify(msg)); } catch (_) { done(null); }
   });
+}
+
+export function requestMemberDek(communityId, memberPubkey) {
+  const conn = getConn();
+  if (!conn || !isAlive(conn)) return false;
+  try { conn.ws.send(JSON.stringify({
+    type: "request_member_dek",
+    community_id: communityId,
+    member_pubkey: memberPubkey,
+  })); } catch (_) { return false; }
+  return true;
+}
+
+export function rewrapMemberDek(communityId, targetPubkey, rewrapDek, signature) {
+  const conn = getConn();
+  if (!conn || !isAlive(conn)) return;
+  const msg = {
+    type: "rewrap_member_dek",
+    community_id: communityId,
+    target_pubkey: targetPubkey,
+    rewrap_dek: rewrapDek,
+  };
+  if (signature) msg.signature = signature;
+  try { conn.ws.send(JSON.stringify(msg)); } catch (_) {}
 }
 
 export function sendAnnotationVote(annotationId, vote) {
@@ -627,10 +674,10 @@ export async function sendPinVote(communityId, pinId, dir) {
   const conn = relayUrl ? connections.get(relayUrl) : getConn();
   if (!conn || !isAlive(conn)) return;
   const ts = Date.now();
-  const payload = pinId + communityId + dir + ts;
+  const payload = encode_hex(new TextEncoder().encode(pinId + "|" + communityId + "|" + dir + "|" + ts));
   let sig = "";
   if (state.signingSecretKey) {
-    const { sign } = await import("./core/pkg/e2e_core.js");
+    const { sign, encode_hex } = await import("./core/pkg/e2e_core.js");
     sig = sign(payload, state.signingSecretKey);
   }
   conn.ws.send(JSON.stringify({
@@ -694,10 +741,10 @@ export async function connectAll() {
 async function handleAuthChallenge(conn, msg) {
   if (!state.signingSecretKey || !state.signingPublicKey) return;
   try {
-    const { sign } = await import("./core/pkg/e2e_core.js");
+    const { sign, encode_hex } = await import("./core/pkg/e2e_core.js");
     const challenge = msg.challenge;
     const ts = msg.ts;
-    const payload = challenge + ts;
+    const payload = encode_hex(new TextEncoder().encode(challenge + ts));
     const signature = sign(payload, state.signingSecretKey);
     if (conn.ws && conn.ws.readyState === WebSocket.OPEN) {
       conn.ws.send(JSON.stringify({
@@ -774,12 +821,66 @@ async function handleTokenCreated(msg) {
   if (window._tokenCreatedHandler) window._tokenCreatedHandler(msg);
 }
 
+// ---- Member DEK exchange ----
+
+async function handleMemberDekRequested(msg) {
+  const { community_id, member_pubkey } = msg;
+  if (!community_id || !member_pubkey) return;
+  const team = await DB.getTeam(community_id);
+  const c = await DB.getCommunity(community_id);
+  if (!team || !c || team.key_derivation === "pbkdf2") return;
+  const communitySecret = team.community_secret_key || team.secret_key;
+  if (!communitySecret) return;
+  try {
+    const communityDek = team.community_wrapped_dek || team.wrapped_dek;
+    const dk = window._unwrap_dek(communityDek, communitySecret);
+    if (!dk) return;
+    const memberDek = window._wrap_dek(dk, member_pubkey);
+    rewrapMemberDek(community_id, member_pubkey, memberDek);
+    console.log("[relay] auto-rewrapped DEK for", member_pubkey, "in", community_id);
+  } catch (_) {}
+}
+
+async function handleMemberDekReady(msg) {
+  const { community_id, member_pubkey, individually_wrapped_dek } = msg;
+  if (!community_id || !individually_wrapped_dek) return;
+
+  const team = await DB.getTeam(community_id);
+  console.log("[relay] member_dek_ready: cid=", community_id, "msg_pubkey=", member_pubkey?.slice(0,16), "team_pubkey=", team?.public_key?.slice(0,16), "team_exists=", !!team);
+  if (!team) return;
+
+  // Check if this individuallly wrapped DEK is for our member key
+  if (member_pubkey === team.public_key) {
+    console.log("[relay] member_dek_ready: storing individually-wrapped DEK for", member_pubkey.slice(0, 16), "in", community_id);
+    team.wrapped_dek = individually_wrapped_dek;
+    await DB.saveTeam(team);
+
+    // Try to decrypt and load immediately
+    try {
+      const dk = window._unwrap_dek(individually_wrapped_dek, team.secret_key);
+      console.log("[relay] member_dek_ready: unwrap returned", !!dk, "currentSet=", state.currentSet, "cid=", community_id);
+      if (dk && community_id === state.currentSet) {
+        state.dek = dk;
+        await window._loadPins?.();
+        await window._loadDrawings?.();
+        window._renderUI?.();
+        window._toast?.("Key exchange complete — pins decrypted", "#16a34a");
+      } else if (dk) {
+        console.log("[relay] key exchange complete for", community_id, "(not current set)");
+      }
+    } catch (_) {}
+  } else {
+    console.log("[relay] member_dek_ready: pubkey mismatch — msg:", member_pubkey?.slice(0,16), "vs team:", team.public_key?.slice(0,16));
+  }
+}
+
 // ---- Option A: Add / Remove members ----
 
 export async function addMember(communityId, pubkey, displayName, role) {
   if (!state.signingSecretKey) return;
-  const { sign } = await import("./core/pkg/e2e_core.js");
-  const payload = communityId + pubkey + role + Date.now();
+  const { sign, encode_hex } = await import("./core/pkg/e2e_core.js");
+  const ts = Date.now();
+  const payload = encode_hex(new TextEncoder().encode(communityId + "|" + pubkey + "|" + role + "|" + ts));
   const signature = sign(payload, state.signingSecretKey);
   const conn = getConn();
   if (!conn || !isAlive(conn)) return;
@@ -790,6 +891,7 @@ export async function addMember(communityId, pubkey, displayName, role) {
     display_name: displayName,
     role,
     signature,
+    timestamp: ts,
   }));
 }
 
@@ -807,9 +909,9 @@ export async function removeMember(communityId, pubkey) {
 
 export async function createInviteToken(communityId, role, expiry, maxUses) {
   if (!state.signingSecretKey) return null;
-  const { sign, generate_uuid } = await import("./core/pkg/e2e_core.js");
+  const { sign, generate_uuid, encode_hex } = await import("./core/pkg/e2e_core.js");
   const nonce = generate_uuid();
-  const payload = communityId + nonce + role + expiry + maxUses;
+  const payload = encode_hex(new TextEncoder().encode(communityId + "|" + nonce + "|" + role + "|" + expiry + "|" + maxUses));
   const signature = sign(payload, state.signingSecretKey);
   const conn = getConn();
   if (!conn || !isAlive(conn)) return null;
@@ -861,8 +963,8 @@ export async function claimMembership(communityId, memberPubkey, memberName, non
 
 export async function updateGovernance(communityId, governance) {
   if (!state.signingSecretKey) return;
-  const { sign } = await import("./core/pkg/e2e_core.js");
-  const payload = communityId + JSON.stringify(governance);
+  const { sign, encode_hex } = await import("./core/pkg/e2e_core.js");
+  const payload = encode_hex(new TextEncoder().encode(communityId + "|" + JSON.stringify(governance)));
   const signature = sign(payload, state.signingSecretKey);
   const conn = getConn();
   if (!conn || !isAlive(conn)) return;

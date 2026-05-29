@@ -541,7 +541,22 @@ export async function switchSet(sid) {
   state.chainLayers.length = 0;
   window._peerMarkerGroup?.clearLayers();
   const t = await DB.getTeam(sid);
-  if (t) state.dek = window._unwrap_dek(t.wrapped_dek, t.secret_key);
+  if (t) {
+    // Auto-migration: only for legacy records where community_secret_key was never stored
+    if (t.secret_key && !("community_secret_key" in t)) {
+      const memberKp = window._generate_user_keypair();
+      const dk = window._unwrap_dek(t.wrapped_dek, t.secret_key);
+      if (dk) {
+        t.community_secret_key = t.secret_key;
+        t.community_public_key = t.public_key;
+        t.secret_key = window._encode_hex(memberKp.secret);
+        t.public_key = window._encode_hex(memberKp.public);
+        t.wrapped_dek = window._wrap_dek(dk, t.public_key);
+        await DB.saveTeam(t);
+      }
+    }
+    state.dek = window._unwrap_dek(t.wrapped_dek, t.secret_key);
+  }
   state.currentCommunity = await DB.getCommunity(sid);
   await loadLayersForSet(sid);
   await loadSchemasForSet(sid);
@@ -581,14 +596,18 @@ export async function switchSet(sid) {
 
 export async function createSet(name) {
   const sid = generate_uuid();
-  const kp = window._generate_user_keypair();
+  const communityKp = window._generate_user_keypair();
+  const memberKp = window._generate_user_keypair();
   const dk = window._generate_dek();
   await DB.saveTeam({
     team_id: sid,
     name,
-    public_key: window._encode_hex(kp.public),
-    secret_key: window._encode_hex(kp.secret),
-    wrapped_dek: window._wrap_dek(dk, window._encode_hex(kp.public)),
+    public_key: window._encode_hex(communityKp.public),
+    secret_key: window._encode_hex(memberKp.secret),
+    wrapped_dek: window._wrap_dek(dk, window._encode_hex(memberKp.public)),
+    community_public_key: window._encode_hex(communityKp.public),
+    community_secret_key: window._encode_hex(communityKp.secret),
+    community_wrapped_dek: window._wrap_dek(dk, window._encode_hex(communityKp.public)),
   });
   await DB.saveCommunity({
     community_id: sid,
@@ -850,6 +869,10 @@ export async function showCommunityDetails(communityId) {
       }
     }
     c.visibility = newVis;
+    // Auto-save relay URL when publishing if not already set
+    if (newVis !== "local" && !c.relay_url) {
+      c.relay_url = (localStorage.getItem("pins-relay-urls") || localStorage.getItem("pins-relay-url") || "").split(",")[0]?.trim() || null;
+    }
     await DB.saveCommunity({ ...c, visibility: newVis, bounds: bounds || c.bounds });
     state.currentCommunity = c;
     if (newVis !== "local") {
@@ -994,22 +1017,31 @@ export async function showCommunityDetails(communityId) {
   };
 
   const shareBtn = document.getElementById("cd-share-link");
-  if (shareBtn) shareBtn.onclick = () => {
+  if (shareBtn) shareBtn.onclick = async () => {
     if (c.visibility === "local" || !c.visibility) {
       toast("Register the community on a relay before sharing (set visibility to Private or above)", "#f97316");
       return;
     }
+    const relayUrl = c.relay_url || (localStorage.getItem("pins-relay-urls") || localStorage.getItem("pins-relay-url") || "").split(",")[0]?.trim();
+    if (!relayUrl) {
+      toast("No relay configured — add a relay URL in ICE Settings or set one in Community Details", "#f97316");
+      return;
+    }
     const nameBytes = new TextEncoder().encode(c.name || "");
     const cidBytes = hexToBytes(c.community_id.replace(/-/g, ""));
-    const relayUrl = c.relay_url || (localStorage.getItem("pins-relay-urls") || localStorage.getItem("pins-relay-url") || "").split(",")[0]?.trim();
-    const relayBytes = relayUrl ? new TextEncoder().encode(relayUrl) : new Uint8Array(0);
-    const flags = c.password_hash ? 1 : 0;
+    const relayBytes = new TextEncoder().encode(relayUrl);
+    const flags = (c.password_hash ? 1 : 0) | 0x04; // bit 2: community_secret_key is embedded
+    // Look up community secret key to embed in the link
+    const team = await DB.getTeam(c.community_id);
+    const communitySk = team?.community_secret_key || team?.secret_key || "";
+    const skBytes = communitySk ? hexToBytes(communitySk) : new Uint8Array(0);
+    const skLen = skBytes.length;
     // Embed current map view as focus data
     const mapCenter = state.map?.getCenter();
     const mapZoom = state.map?.getZoom();
     const viewStr = mapCenter ? `${mapCenter.lat.toFixed(6)},${mapCenter.lng.toFixed(6)},${mapZoom || 5}` : "";
     const viewBytes = viewStr ? new TextEncoder().encode(viewStr) : new Uint8Array(0);
-    const total = 1 + nameBytes.length + 16 + 1 + relayBytes.length + 1 + viewBytes.length;
+    const total = 1 + nameBytes.length + 16 + 1 + relayBytes.length + 1 + 2 + skLen + viewBytes.length;
     const buf = new Uint8Array(total);
     let pos = 0;
     buf[pos++] = nameBytes.length;
@@ -1019,6 +1051,11 @@ export async function showCommunityDetails(communityId) {
     if (relayBytes.length > 0) buf.set(relayBytes, pos);
     pos += relayBytes.length;
     buf[pos++] = flags;
+    // community secret key: 2-byte len + raw bytes (32 for X25519)
+    buf[pos++] = (skLen >> 8) & 0xFF;
+    buf[pos++] = skLen & 0xFF;
+    if (skLen > 0) buf.set(skBytes, pos);
+    pos += skLen;
     if (viewBytes.length > 0) buf.set(viewBytes, pos);
     const b64 = btoa(String.fromCharCode(...buf)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
     const url = window.location.origin + window.location.pathname + "#community=" + b64;
@@ -2440,6 +2477,7 @@ const _redoStack = [];
 const MAX_UNDO = 30;
 
 export function pushUndo(action) {
+  action._set = state.currentSet;
   _undoStack.push(action);
   if (_undoStack.length > MAX_UNDO) _undoStack.shift();
   _redoStack.length = 0;
@@ -2448,6 +2486,7 @@ export function pushUndo(action) {
 export async function undo() {
   const action = _undoStack.pop();
   if (!action) return;
+  if (action._set && action._set !== state.currentSet) { toast("Cannot undo across different maps", "#f97316"); _undoStack.push(action); return; }
   playUndo();
   if (action.kind === "pin") {
     _redoStack.push({
@@ -2485,6 +2524,7 @@ export async function undo() {
 export async function redo() {
   const action = _redoStack.pop();
   if (!action) return;
+  if (action._set && action._set !== state.currentSet) { toast("Cannot redo across different maps", "#f97316"); _redoStack.push(action); return; }
   playRedo();
   if (action.kind === "pin") {
     _undoStack.push({
@@ -2544,11 +2584,12 @@ export async function savePin(lat, lng, title, note, color, media, emoji, layerI
   // Creation attestation
   if (!postedAnonymously && state.signingPublicKey && state.signingSecretKey) {
     const creationPayload = pid + "created" + pin.created_at;
+    const hexPayload = Array.from(new TextEncoder().encode(creationPayload)).map(b => b.toString(16).padStart(2, '0')).join('');
     pin.attestations = [{
       pubkey: state.signingPublicKey,
       type: "created",
       timestamp: pin.created_at,
-      signature: sign(creationPayload, state.signingSecretKey),
+      signature: sign(hexPayload, state.signingSecretKey),
     }];
   }
   const gov = {
@@ -2581,14 +2622,18 @@ export async function savePin(lat, lng, title, note, color, media, emoji, layerI
 }
 
 export async function deletePin(pid) {
-  const pins = await DB.getPins(state.currentSet);
-  const row = pins.find((p) => p.pin_id === pid);
-  if (row) pushUndo({ kind: "pin", type: "delete", pin: row, pid });
-  await DB.deletePin(pid);
-  if (state._decryptedPinCache) state._decryptedPinCache.delete(pid);
-  window._broadcast?.("delete_pin", { pin_id: pid });
-  await loadPins();
-  window._addHistory?.(t("pinDeleted"), pid.slice(0, 8));
+  if (state._deletingPin) return;
+  state._deletingPin = true;
+  try {
+    const pins = await DB.getPins(state.currentSet);
+    const row = pins.find((p) => p.pin_id === pid);
+    if (row) pushUndo({ kind: "pin", type: "delete", pin: row, pid });
+    await DB.deletePin(pid);
+    if (state._decryptedPinCache) state._decryptedPinCache.delete(pid);
+    window._broadcast?.("delete_pin", { pin_id: pid });
+    await loadPins();
+    window._addHistory?.(t("pinDeleted"), pid.slice(0, 8));
+  } finally { state._deletingPin = false; }
   try { navigator.vibrate?.(20); } catch (_) {}
   window._toast?.("Pin deleted. Undo?", "#f97316", 5000, () => { undo(); });
 }
@@ -3900,8 +3945,9 @@ export function applyTimeFilter() {
           const tt = state.timeTo ?? (state.timeFrom ?? now + 10);
           let yearVisible = false;
           for (let y = tf; y <= tt; y++) {
-            const seasonStart = y + (pf < pt ? 0 : (pf > pt ? -1 : 0));
-            if ((seasonStart >= tf - 1) && (y + 1 <= tt + 1)) yearVisible = true;
+            let seasonStart = y + (pf <= pt ? 0 : -1);
+            let seasonEnd = y + (pf <= pt ? 0 : 1);
+            if ((seasonStart <= tt) && (seasonEnd >= tf)) yearVisible = true;
           }
           visible = yearVisible;
         } else {

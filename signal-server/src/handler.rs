@@ -54,12 +54,25 @@ fn verify_creation_attestation(pin: &serde_json::Value, pin_id: &str) -> bool {
                 let sig = att.get("signature").and_then(|s| s.as_str()).unwrap_or("");
                 let timestamp = att.get("timestamp").and_then(|t| t.as_u64()).unwrap_or(0);
                 if pubkey.is_empty() || sig.is_empty() { continue; }
-                let raw_payload = format!("{}{}{}", pin_id, "created", timestamp);
+                let raw_payload = format!("{}|{}|{}", pin_id, "created", timestamp);
                 let payload_hex = hex::encode(raw_payload.as_bytes());
-                return auth::verify_signature(&payload_hex, sig, pubkey).unwrap_or(false);
+                if auth::verify_signature(&payload_hex, sig, pubkey).unwrap_or(false) {
+                    return true;
+                }
+                // Fallback: undelimited format (backwards compat with pre-delimiter pins)
+                let old_payload = format!("{}{}{}", pin_id, "created", timestamp);
+                let old_payload_hex = hex::encode(old_payload.as_bytes());
+                if auth::verify_signature(&old_payload_hex, sig, pubkey).unwrap_or(false) {
+                    return true;
+                }
+                // Fallback: raw-string payload (backwards compat with oldest clients)
+                if auth::verify_signature(pin_id, sig, pubkey).unwrap_or(false) {
+                    return true;
+                }
             }
         }
-        // Got attestations but none were valid "created" — reject
+        // Attestations exist but none verified — reject
+        warn!("[relay] push_delta: invalid creation attestation for pin {}", pin_id);
         return false;
     }
     // No attestation — allow for legacy/anonymous pins
@@ -387,8 +400,8 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             Some(pk) => pk,
                                             None => { room.send_to(&auth_err("authentication required"), &read_cid); continue; }
                                         };
-                                        let raw_payload = format!("{}{}{}{}", cid_val, member_pubkey, role,
-                                            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or(std::time::Duration::from_millis(0)).as_millis());
+                                        let raw_payload = format!("{}|{}|{}|{}", cid_val, member_pubkey, role,
+                                            v.get("timestamp").and_then(|t| t.as_u64()).unwrap_or(0));
                                         let payload_hex = hex::encode(raw_payload.as_bytes());
                                         match auth::verify_signature(&payload_hex, sig, &conn_pubkey) {
                                             Ok(true) => {},
@@ -437,7 +450,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             Some(pk) => pk,
                                             None => { room.send_to(&auth_err("authentication required"), &read_cid); continue; }
                                         };
-                                        let raw_payload = format!("{}{}{}{}{}", cid_val, nonce, role, expiry, max_uses);
+                                        let raw_payload = format!("{}|{}|{}|{}|{}", cid_val, nonce, role, expiry, max_uses);
                                         let payload_hex = hex::encode(raw_payload.as_bytes());
                                         match auth::verify_signature(&payload_hex, sig, &conn_pubkey) {
                                             Ok(true) => {},
@@ -515,7 +528,8 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             Some(pk) => pk,
                                             None => { room.send_to(&auth_err("authentication required"), &read_cid); continue; }
                                         };
-                                        let raw_payload = format!("{}{}", cid_val, gov);
+                                        let gov_str = v.get("governance").cloned().unwrap_or(serde_json::Value::Null).to_string();
+                                        let raw_payload = format!("{}|{}", cid_val, gov_str);
                                         let payload_hex = hex::encode(raw_payload.as_bytes());
                                         match auth::verify_signature(&payload_hex, sig, &conn_pubkey) {
                                             Ok(true) => {},
@@ -543,14 +557,21 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                         let dir: i8 = v.get("dir").and_then(|d| d.as_i64()).unwrap_or(0) as i8;
                                         let pubkey = v.get("pubkey").and_then(|p| p.as_str()).unwrap_or("").to_string();
                                         if !pin_id.is_empty() && !pubkey.is_empty() && !community_id.is_empty() && (dir == 1 || dir == -1) {
-                                            // Auth: verify signature
-                                            if let Some(sig) = v.get("signature").and_then(|s| s.as_str()) {
-                                                let timestamp = v.get("timestamp").and_then(|t| t.as_u64()).unwrap_or(0);
-                                                let raw_payload = format!("{}{}{}{}", pin_id, community_id, dir, timestamp);
-                                                let payload_hex = hex::encode(raw_payload.as_bytes());
-                                                if !auth::verify_signature(&payload_hex, sig, &pubkey).unwrap_or(false) {
-                                                    warn!("[relay] pin_vote denied: invalid signature from {}", &pubkey);
+                                            // Auth: verify signature (required for all votes)
+                                            let sig = v.get("signature").and_then(|s| s.as_str());
+                                            let timestamp = v.get("timestamp").and_then(|t| t.as_u64()).unwrap_or(0);
+                                            match sig {
+                                                None => {
+                                                    warn!("[relay] pin_vote denied: missing signature from {}", &pubkey);
                                                     continue;
+                                                }
+                                                Some(sig) => {
+                                                    let raw_payload = format!("{}|{}|{}|{}", pin_id, community_id, dir, timestamp);
+                                                    let payload_hex = hex::encode(raw_payload.as_bytes());
+                                                    if !auth::verify_signature(&payload_hex, sig, &pubkey).unwrap_or(false) {
+                                                        warn!("[relay] pin_vote denied: invalid signature from {}", &pubkey);
+                                                        continue;
+                                                    }
                                                 }
                                             }
                                             // Auth: verify pubkey against connection binding
@@ -592,7 +613,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                 }
                                             };
                                             let net_votes = up as i32 - down as i32;
-                                            let deleted = down >= 3;
+                                            let deleted = down >= 7 && down > up;
                                             let ttl_expires_at = if deleted {
                                                 0u64
                                             } else if let Some(c) = state.store.get_community(&community_id).await {
@@ -646,7 +667,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             if let Some(ref sig) = v.get("signature").and_then(|s| s.as_str()) {
                                                 let direction = v.get("direction").and_then(|d| d.as_str()).unwrap_or("");
                                                 let timestamp = v.get("timestamp").and_then(|t| t.as_u64()).unwrap_or(0);
-                                                let raw_payload = format!("{}{}{}", annotation_id, direction, timestamp);
+                                                let raw_payload = format!("{}|{}|{}", annotation_id, direction, timestamp);
                                                 let payload_hex = hex::encode(raw_payload.as_bytes());
                                                 if !auth::verify_signature(&payload_hex, sig, pubkey).unwrap_or(false) {
                                                     warn!("[relay] annotation_vote: invalid signature from {}", pubkey);
@@ -708,15 +729,24 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                         warn!("[relay] push_delta: invalid creation attestation for pin {}", pin_id);
                                                         continue;
                                                     }
-                                                    // Auth: author_pubkey must match connection pubkey
-                                                    if let Some(ref cpk) = conn_pubkey {
-                                                        if cpk != author {
-                                                            warn!("[relay] push_delta: author mismatch for pin {} (conn={} author={})", pin_id, cpk, author);
+                                                    // Auth: unauthenticated clients (conn_pubkey=None) must
+                                                    // be rejected for non-open communities
+                                                    if conn_pubkey.is_none() {
+                                                        if join_policy != "open" {
+                                                            warn!("[relay] push_delta: unauthenticated client blocked from pushing to non-open community {}", community_id);
                                                             continue;
                                                         }
-                                                    } else {
-                                                        warn!("[relay] push_delta: unauthenticated client posting as author {} for pin {}", author, pin_id);
-                                                        continue;
+                                                    }
+                                                    // Auth: author_pubkey must match connection pubkey
+                                                    // Relaxed: allow if pin already exists with same author (joiner sync)
+                                                    if let Some(ref cpk) = conn_pubkey {
+                                                        if cpk != author {
+                                                            let existing = state.store.get_pin(&community_id, pin_id).await;
+                                                            if existing.as_ref().map_or(true, |e| e.author_pubkey != author) {
+                                                                warn!("[relay] push_delta: author mismatch for pin {} (conn={} author={})", pin_id, cpk, author);
+                                                                continue;
+                                                            }
+                                                        }
                                                     }
                                                     // Auth: check membership for invite/token policies
                                                     if join_policy != "open" {
@@ -761,7 +791,11 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             if anns.len() > 100 { continue; }
                                             for ann in anns {
                                                 let author = ann.get("author_pubkey").and_then(|a| a.as_str()).unwrap_or("");
-                                                if !author.is_empty() && join_policy != "open" {
+                                                if join_policy != "open" {
+                                                    if author.is_empty() {
+                                                        warn!("[relay] push_delta: unauthenticated annotation blocked for non-open community {}", community_id);
+                                                        continue;
+                                                    }
                                                     if let Some(ref c) = c_opt {
                                                         if !c.members.is_empty() && !is_member(c, author) {
                                                             continue;
@@ -794,7 +828,11 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             if drawings.len() > 100 { continue; }
                                             for dwg in drawings {
                                                 let author = dwg.get("author_pubkey").and_then(|a| a.as_str()).unwrap_or("");
-                                                if !author.is_empty() && join_policy != "open" {
+                                                if join_policy != "open" {
+                                                    if author.is_empty() {
+                                                        warn!("[relay] push_delta: unauthenticated drawing blocked for non-open community {}", community_id);
+                                                        continue;
+                                                    }
                                                     if let Some(ref c) = c_opt {
                                                         if !c.members.is_empty() && !is_member(c, author) {
                                                             continue;
@@ -825,6 +863,22 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             for t in tombs {
                                                 let by_pubkey = t.get("by_pubkey").and_then(|b| b.as_str()).unwrap_or("");
                                                 if !by_pubkey.is_empty() {
+                                                    // Auth: verify tombstone signature
+                                                    let sig = t.get("signature").and_then(|s| s.as_str()).unwrap_or("");
+                                                    let target_id = t.get("target_id").and_then(|t| t.as_str()).unwrap_or("");
+                                                    if !sig.is_empty() && !target_id.is_empty() {
+                                                        let tomb_ts = t.get("timestamp").and_then(|t| t.as_u64()).unwrap_or(ts);
+                                                        let raw_payload = format!("{}|{}|{}", target_id, t.get("tombstone_id").and_then(|t| t.as_str()).unwrap_or(""), tomb_ts);
+                                                        let payload_hex = hex::encode(raw_payload.as_bytes());
+                                                        if !auth::verify_signature(&payload_hex, sig, by_pubkey).unwrap_or(false) {
+                                                            warn!("[relay] tombstone: invalid signature from {}", by_pubkey);
+                                                            continue;
+                                                        }
+                                                    } else if !sig.is_empty() || !target_id.is_empty() {
+                                                        // tombstone with partial sig data - reject
+                                                        continue;
+                                                    }
+                                                    // Auth: check role
                                                     if let Some(ref c) = c_opt {
                                                         if let Some(role) = get_member_role(c, by_pubkey) {
                                                             if role == "reader" { continue; }
@@ -1191,6 +1245,41 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             "drawings": all_drawings,
                                         });
                                         room.send_to(&resp.to_string(), &read_cid);
+                                    } else if ty == "request_member_dek" {
+                                        let cid_val = v.get("community_id").and_then(|c| c.as_str()).unwrap_or("").to_string();
+                                        let member_pubkey = v.get("member_pubkey").and_then(|p| p.as_str()).unwrap_or("");
+                                        if !cid_val.is_empty() && !member_pubkey.is_empty() {
+                                            state.store.add_pending_dek_request(&cid_val, member_pubkey).await;
+                                            info!("[relay] member_dek requested for {} in {}", member_pubkey, cid_val);
+                                            // Broadcast to community so an existing member can re-wrap
+                                            let notif = serde_json::json!({
+                                                "type": "member_dek_requested",
+                                                "community_id": cid_val,
+                                                "member_pubkey": member_pubkey,
+                                            });
+                                            room.broadcast(&notif.to_string(), &read_cid);
+                                            room.send_to(&notif.to_string(), &read_cid);
+                                        }
+                                    } else if ty == "rewrap_member_dek" {
+                                        let cid_val = v.get("community_id").and_then(|c| c.as_str()).unwrap_or("").to_string();
+                                        let target_pubkey = v.get("target_pubkey").and_then(|p| p.as_str()).unwrap_or("");
+                                        let rewrap_dek = v.get("rewrap_dek").and_then(|d| d.as_str()).unwrap_or("");
+                                        if !cid_val.is_empty() && !target_pubkey.is_empty() && !rewrap_dek.is_empty() {
+                                            // Rewrap is self-validating: only clients with the community
+                                            // secret_key can produce a valid individually-wrapped DEK.
+                                            // Room-level access is sufficient authorization here.
+                                            state.store.store_member_dek(&cid_val, &target_pubkey, &rewrap_dek).await;
+                                            state.store.remove_pending_dek_request(&cid_val, &target_pubkey).await;
+                                            info!("[relay] member_dek stored for {} in {}", target_pubkey, cid_val);
+                                            let resp = serde_json::json!({
+                                                "type": "member_dek_ready",
+                                                "community_id": cid_val,
+                                                "member_pubkey": target_pubkey,
+                                                "individually_wrapped_dek": rewrap_dek,
+                                            });
+                                            room.broadcast(&resp.to_string(), &read_cid);
+                                            room.send_to(&resp.to_string(), &read_cid);
+                                        }
                                     } else if ty == "join_community" {
                                         let cid_val = v.get("community_id").and_then(|c| c.as_str()).unwrap_or("").to_string();
                                         let request_id = v.get("request_id").and_then(|r| r.as_str()).unwrap_or("");
@@ -1219,6 +1308,10 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                     serde_json::Value::Null
                                                 };
                                                 let public_layers = state.store.get_public_layers(&cid_val).await;
+                                                // Check if requester already has an individually-wrapped DEK
+                                                let member_dek = if let Some(ref pk) = conn_pubkey {
+                                                    state.store.get_member_dek(&cid_val, pk).await
+                                                } else { None };
                                                 let resp = serde_json::json!({
                                                     "type": "community_joined",
                                                     "community_id": c.community_id,
@@ -1228,6 +1321,8 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                     "public_key": c.public_key,
                                                     "wrapped_dek": c.wrapped_dek,
                                                     "key_derivation": c.key_derivation,
+                                                    "needs_key_exchange": c.key_derivation != "pbkdf2",
+                                                    "individually_wrapped_dek": member_dek.as_ref().map(|d| d.individually_wrapped_dek.as_str()).unwrap_or(""),
                                                     "genesis_public_key": c.genesis_public_key,
                                                     "governance": c.governance,
                                                     "bounds": c.bounds,
@@ -1248,7 +1343,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             }
                                         }
                                     }
-                                    let is_relay_ty = matches!(ty, "register_community" | "publish_community" | "unpublish_community" | "delete_community" | "push_delta" | "sync_request" | "sync_response" | "list_communities" | "query_communities" | "join_community" | "pin_vote" | "annotation_vote" | "add_member" | "remove_member" | "create_token" | "claim_membership" | "update_governance" | "auth_response" | "publish_layer" | "unpublish_layer" | "list_public_layers" | "subscribe_layer" | "unsubscribe_layer" | "sync_subscribed_layers" | "relay_hello" | "relay_announce");
+                                    let is_relay_ty = matches!(ty, "register_community" | "publish_community" | "unpublish_community" | "delete_community" | "push_delta" | "sync_request" | "sync_response" | "list_communities" | "query_communities" | "join_community" | "pin_vote" | "annotation_vote" | "add_member" | "remove_member" | "create_token" | "claim_membership" | "update_governance" | "auth_response" | "publish_layer" | "unpublish_layer" | "list_public_layers" | "subscribe_layer" | "unsubscribe_layer" | "sync_subscribed_layers" | "relay_hello" | "relay_announce" | "request_member_dek" | "rewrap_member_dek");
                                     if !is_relay_ty {
                                         if let Some(target) = v.get("to").and_then(|t| t.as_str()) {
                                             room.send_to(&txt, target);

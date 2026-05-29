@@ -886,7 +886,7 @@ export function dismissInboxItem(itemId) {
   window._renderUI?.();
 }
 
-export function acceptAllInbox() {
+export async function acceptAllInbox() {
   for (const item of meshInbox) {
     if (!item.accepted) {
       item.accepted = true;

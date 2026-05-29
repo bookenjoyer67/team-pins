@@ -33,7 +33,10 @@ impl RateLimiter {
     }
 
     pub fn check_msg(&mut self, ip: &str) -> bool {
-        if self.bans.contains_key(ip) { return false; }
+        if let Some(until) = self.bans.get(ip) {
+            if Instant::now() < *until { return false; }
+            self.bans.remove(ip);
+        }
         let e = self.msgs.entry(ip.to_string()).or_insert((Instant::now(), 0));
         if e.0.elapsed().as_secs() > 1 { *e = (Instant::now(), 0); }
         e.1 += 1;

@@ -338,7 +338,15 @@ export function showSchemaEditorModal(schemaId) {
       const i = parseInt(inp.dataset.i);
       fields[i].label = inp.value || fields[i].label;
       if (!fields[i].key || /^f\d+$/.test(fields[i].key)) {
-        fields[i].key = (inp.value || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 30) || ("f" + (i + 1));
+        let candidate = (inp.value || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 30) || ("f" + (i + 1));
+        // Ensure uniqueness
+        let suffix = 0;
+        const base = candidate.replace(/_\d+$/, "");
+        while (fields.some((f, j) => j !== i && f.key === candidate)) {
+          suffix++;
+          candidate = base + "_" + suffix;
+        }
+        fields[i].key = candidate;
       }
     });
     document.querySelectorAll(".sch-fopts").forEach(inp => {

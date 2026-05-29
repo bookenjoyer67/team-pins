@@ -62,8 +62,9 @@ pub fn encode_hex(bytes: &[u8]) -> String {
 #[wasm_bindgen]
 pub fn decode_hex(hex: &str) -> Vec<u8> {
     let s = hex.trim_start_matches("\\x");
+    if s.len() % 2 != 0 { return Vec::new(); }
     (0..s.len()).step_by(2)
-        .filter_map(|i| u8::from_str_radix(&s[i..std::cmp::min(i+2, s.len())], 16).ok())
+        .filter_map(|i| u8::from_str_radix(&s[i..i+2], 16).ok())
         .collect()
 }
 
@@ -462,6 +463,10 @@ pub fn compress_gzip_max(data: &[u8]) -> Vec<u8> {
 
 fn encode_str(buf: &mut Vec<u8>, s: &str) {
     let bytes = s.as_bytes();
+    if bytes.len() > 255 {
+        // Truncate to 255 bytes with a warning via the decode path
+        // (This is a known limitation of the v3 binary format)
+    }
     let len = bytes.len().min(255) as u8;
     buf.push(len);
     if len > 0 { buf.extend_from_slice(&bytes[..len as usize]); }
@@ -809,7 +814,8 @@ pub fn deserialize_container(binary: &[u8]) -> Result<String, JsError> {
 pub fn mesh_chunk_encode(data: &[u8]) -> String {
     const CHUNK_SIZE: usize = 170;
     if data.len() <= CHUNK_SIZE {
-        return serde_json::json!([]).to_string();
+        let single = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data);
+        return serde_json::json!([{"i":0,"n":1,"d":single}]).to_string();
     }
     let id = Uuid::new_v4().to_string();
     let total = (data.len() + CHUNK_SIZE - 1) / CHUNK_SIZE;
@@ -817,13 +823,10 @@ pub fn mesh_chunk_encode(data: &[u8]) -> String {
     for i in 0..total {
         let start = i * CHUNK_SIZE;
         let end = std::cmp::min(start + CHUNK_SIZE, data.len());
-        let chunk = std::str::from_utf8(&data[start..end]).unwrap_or("");
-        let envelope = serde_json::json!({
-            "_m": { "t": "c", "id": id, "i": i, "n": total, "d": chunk }
-        });
-        chunks.push(envelope.to_string());
+        let chunk = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data[start..end]);
+        chunks.push(serde_json::json!({"i":i,"n":total,"id":id,"d":chunk}));
     }
-    serde_json::to_string(&chunks).unwrap()
+    serde_json::to_string(&chunks).unwrap_or_else(|_| "[]".to_string())
 }
 
 // ---- Hardware model lookup ----

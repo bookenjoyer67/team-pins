@@ -318,8 +318,10 @@ export async function handleMessage(msg, connId) {
       const isPasswordDerived = d.key_derivation === "pbkdf2";
       if (!d || typeof d.public_key !== "string" || typeof d.wrapped_dek !== "string"
         || d.public_key.length > 256 || d.wrapped_dek.length > 512) return;
-      if (!isPasswordDerived && (typeof d.secret_key !== "string" || d.secret_key.length > 256)) return;
+      // For non-PBKDF2, secret_key is optional (per-member model)
+      if (!isPasswordDerived && d.secret_key && d.secret_key.length > 256) return;
       const sid = d.set_id || generate_uuid();
+      let public_key = d.public_key;
       let secret_key = d.secret_key || "";
       if (isPasswordDerived) {
         const existingTeam = await DB.getTeam(sid).catch(() => null);
@@ -328,12 +330,26 @@ export async function handleMessage(msg, connId) {
           const pass = await promptRoomPassword("This community requires a password to join");
           if (!pass) return;
           const kp = generate_user_keypair_from_password(pass, sid);
+          public_key = encode_hex(kp.public);
           secret_key = encode_hex(kp.secret);
         } else {
+          public_key = existingTeam.public_key;
+          secret_key = existingTeam.secret_key;
+        }
+      } else if (!d.secret_key) {
+        // Per-member model: generate own keypair
+        const existingTeam = await DB.getTeam(sid).catch(() => null);
+        if (!existingTeam) {
+          const { generate_user_keypair, encode_hex } = await import("./core/pkg/e2e_core.js");
+          const kp = generate_user_keypair();
+          public_key = encode_hex(kp.public);
+          secret_key = encode_hex(kp.secret);
+        } else {
+          public_key = existingTeam.public_key;
           secret_key = existingTeam.secret_key;
         }
       }
-      await DB.saveTeam({ team_id: sid, name: d.name || sid.slice(0, 8), public_key: d.public_key, secret_key, wrapped_dek: d.wrapped_dek, key_derivation: d.key_derivation || "random" });
+      await DB.saveTeam({ team_id: sid, name: d.name || sid.slice(0, 8), public_key, secret_key, wrapped_dek: d.wrapped_dek, key_derivation: d.key_derivation || "random", community_public_key: d.community_public_key || d.public_key, community_secret_key: d.community_secret_key || "" });
       const existingCommunity = await DB.getCommunity(sid);
       if (!existingCommunity) {
         await DB.saveCommunity({
@@ -367,6 +383,29 @@ export async function handleMessage(msg, connId) {
     }
     case "delete_pin": {
       if (!d || typeof d.pin_id !== "string") return;
+      if (!msg._relay) {
+        const existing = await DB.getPin(d.pin_id).catch(() => null);
+        if (!existing) { console.warn("[sync] delete_pin: pin not found", d.pin_id); return; }
+        if (existing.author_pubkey) {
+          if (!d.by_pubkey || existing.author_pubkey !== d.by_pubkey) {
+            console.warn("[sync] delete_pin: unauthorized deletion of", d.pin_id);
+            return;
+          }
+          if (d.signature && window._verify && window._encode_hex) {
+            try {
+              const rawPayload = d.pin_id + "|" + (d.timestamp || "");
+              const payloadHex = window._encode_hex(new TextEncoder().encode(rawPayload));
+              if (!window._verify(payloadHex, d.signature, d.by_pubkey)) {
+                console.warn("[sync] delete_pin: invalid signature", d.pin_id);
+                return;
+              }
+            } catch (_) { return; }
+          }
+        } else {
+          console.warn("[sync] delete_pin: rejecting legacy pin deletion without author_pubkey", d.pin_id);
+          return;
+        }
+      }
       await DB.deletePin(d.pin_id);
       if (state.currentSet) { await window._loadPins(); window._addHistory?.("Pin deleted (peer)", d.pin_id.slice(0, 8)); }
       if (!msg._relay) relayToOthers(msg, connId);
@@ -382,6 +421,29 @@ export async function handleMessage(msg, connId) {
     }
     case "delete_drawing": {
       if (!d || typeof d.drawing_id !== "string") return;
+      if (!msg._relay) {
+        const existing = await DB.getDrawing(d.drawing_id).catch(() => null);
+        if (!existing) { console.warn("[sync] delete_drawing: drawing not found", d.drawing_id); return; }
+        if (existing.author_pubkey) {
+          if (!d.by_pubkey || existing.author_pubkey !== d.by_pubkey) {
+            console.warn("[sync] delete_drawing: unauthorized deletion of", d.drawing_id);
+            return;
+          }
+          if (d.signature && window._verify && window._encode_hex) {
+            try {
+              const rawPayload = d.drawing_id + "|" + (d.timestamp || "");
+              const payloadHex = window._encode_hex(new TextEncoder().encode(rawPayload));
+              if (!window._verify(payloadHex, d.signature, d.by_pubkey)) {
+                console.warn("[sync] delete_drawing: invalid signature", d.drawing_id);
+                return;
+              }
+            } catch (_) { return; }
+          }
+        } else {
+          console.warn("[sync] delete_drawing: rejecting legacy drawing deletion without author_pubkey", d.drawing_id);
+          return;
+        }
+      }
       await DB.deleteDrawing(d.drawing_id);
       if (state.currentSet) { await window._loadDrawings(); window._addHistory?.("Drawing deleted (peer)", d.drawing_id.slice(0, 8)); }
       if (!msg._relay) relayToOthers(msg, connId);
@@ -483,6 +545,21 @@ export async function handleMessage(msg, connId) {
     }
     case "new_tombstone": {
       if (!d || typeof d.tombstone_id !== "string" || typeof d.target_id !== "string" || typeof d.by_pubkey !== "string") return;
+      const existingAnn = await DB.getAnnotation(d.target_id).catch(() => null);
+      if (existingAnn && existingAnn.author_pubkey && d.by_pubkey !== existingAnn.author_pubkey) {
+        console.warn("[sync] tombstone: pubkey mismatch, rejecting", d.tombstone_id);
+        return;
+      }
+      if (d.signature && window._verify && window._encode_hex) {
+        try {
+          const rawPayload = d.target_id + "|" + d.tombstone_id + "|" + (d.timestamp || "");
+          const payloadHex = window._encode_hex(new TextEncoder().encode(rawPayload));
+          if (!window._verify(payloadHex, d.signature, d.by_pubkey)) {
+            console.warn("[sync] tombstone: invalid signature", d.tombstone_id);
+            return;
+          }
+        } catch (_) { return; }
+      }
       await DB.saveTombstone({ tombstone_id: d.tombstone_id, target_id: d.target_id, by_pubkey: d.by_pubkey, reason: d.reason || "", timestamp: d.timestamp || d.ts || Date.now(), signature: d.signature || "" });
       const ann = await DB.getAnnotation(d.target_id);
       if (ann) window._refreshPinPopup?.(ann.pin_id);
@@ -664,7 +741,21 @@ export async function sendAll(sid, connId) {
 
 export function broadcast(type, data, connId) {
   if (!state.currentSet) return;
-  if (!connId && type !== "map_view") _meshBroadcast?.(type, data);
+  let meshData = data;
+  if (state.signingPublicKey) {
+    if (type === "delete_pin" || type === "delete_drawing") {
+      meshData = { ...data, by_pubkey: state.signingPublicKey };
+      if (state.signingSecretKey) {
+        try {
+          const rawPayload = (data.pin_id || data.drawing_id) + "|" + Date.now();
+          const payloadHex = window._encode_hex?.(new TextEncoder().encode(rawPayload));
+          const sig = window._sign?.(payloadHex, state.signingSecretKey);
+          if (sig) meshData = { ...meshData, signature: sig, timestamp: Date.now() };
+        } catch (_) {}
+      }
+    }
+  }
+  if (!connId && type !== "map_view") _meshBroadcast?.(type, meshData);
 
   if (type === "new_pin") {
     window._relayPushDelta?.(state.currentSet, [{ ...data, team_id: undefined, set_id: undefined, ts: undefined }], [], [], [], [], []);
@@ -1036,19 +1127,23 @@ export async function shareMap() {
   });
 }
 
-function generateCommunityLinkUrl(community) {
+function generateCommunityLinkUrl(community, communitySk) {
   if (!community || community.visibility === "local" || !community.visibility) return null;
   const nameBytes = new TextEncoder().encode(community.name || "");
   const cidBytes = hexToBytes((community.community_id || "").replace(/-/g, ""));
   if (cidBytes.length !== 16) return null;
-  const relayUrl = community.relay_url || (localStorage.getItem("pins-relay-urls") || localStorage.getItem("pins-relay-url") || "").split(",")[0]?.trim();
+  const relayUrl = community.relay_url
+    || (localStorage.getItem("pins-relay-urls") || localStorage.getItem("pins-relay-url") || "").split(",")[0]?.trim()
+    || "";
   const relayBytes = relayUrl ? new TextEncoder().encode(relayUrl) : new Uint8Array(0);
-  const flags = community.password_hash ? 1 : 0;
+  const flags = (community.password_hash ? 1 : 0) | (communitySk ? 0x04 : 0);
+  const skBytes = communitySk ? hexToBytes(communitySk) : new Uint8Array(0);
+  const skLen = skBytes.length;
   const mapCenter = state.map?.getCenter();
   const mapZoom = state.map?.getZoom();
   const viewStr = mapCenter ? `${mapCenter.lat.toFixed(6)},${mapCenter.lng.toFixed(6)},${mapZoom || 5}` : "";
   const viewBytes = viewStr ? new TextEncoder().encode(viewStr) : new Uint8Array(0);
-  const total = 1 + nameBytes.length + 16 + 1 + relayBytes.length + 1 + viewBytes.length;
+  const total = 1 + nameBytes.length + 16 + 1 + relayBytes.length + 1 + 2 + skLen + viewBytes.length;
   const buf = new Uint8Array(total);
   let pos = 0;
   buf[pos++] = nameBytes.length;
@@ -1058,6 +1153,11 @@ function generateCommunityLinkUrl(community) {
   if (relayBytes.length > 0) buf.set(relayBytes, pos);
   pos += relayBytes.length;
   buf[pos++] = flags;
+  // community secret key: 2-byte len + raw bytes (32 for X25519)
+  buf[pos++] = (skLen >> 8) & 0xFF;
+  buf[pos++] = skLen & 0xFF;
+  if (skLen > 0) buf.set(skBytes, pos);
+  pos += skLen;
   if (viewBytes.length > 0) buf.set(viewBytes, pos);
   const b64 = btoa(String.fromCharCode(...buf)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
   return window.location.origin + window.location.pathname + "#community=" + b64;
@@ -1211,8 +1311,10 @@ function showShareMethodDialog(compressed, tooLarge, bgm, preview = {}, jsonPayl
   }
 
   if (hasExistingCommunity && isCommunityPublished) {
-    document.getElementById("sm-community").onclick = () => {
-      const url = generateCommunityLinkUrl(community);
+    document.getElementById("sm-community").onclick = async () => {
+      const team = await DB.getTeam(community.community_id);
+      const communitySk = team?.community_secret_key || team?.secret_key || "";
+      const url = generateCommunityLinkUrl(community, communitySk);
       if (url) {
         copy(url, "Community link copied to clipboard");
         import("./core/pkg/e2e_core.js").then(mod => {

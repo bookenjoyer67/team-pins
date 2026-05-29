@@ -1,3 +1,4 @@
+use pbkdf2::pbkdf2_hmac;
 use sha2::{Digest, Sha256};
 
 pub fn unix_millis() -> u64 {
@@ -29,7 +30,9 @@ pub fn json_left(cid: &str) -> String {
 
 pub fn json_auth_challenge() -> (String, String, u64) {
     let mut buf = [0u8; 32];
-    getrandom::getrandom(&mut buf).unwrap_or_default();
+    if getrandom::getrandom(&mut buf).is_err() {
+        return (json_err("entropy failure"), String::new(), 0);
+    }
     let challenge = hex::encode(buf);
     let ts = unix_millis();
     (serde_json::json!({"type":"auth_challenge","challenge":challenge,"ts":ts}).to_string(), challenge, ts)
@@ -58,17 +61,23 @@ pub fn json_claim_denied(reason: &str) -> String {
 }
 
 pub fn hash_password(pw: &str) -> String {
-    let mut buf = [0u8; 16];
-    getrandom::getrandom(&mut buf).unwrap_or_default();
-    let salt = hex::encode(buf);
-    let hash = hex::encode(Sha256::digest(format!("{}:{}", salt, pw).as_bytes()));
-    format!("{}:{}", salt, hash)
+    let mut salt = [0u8; 16];
+    if getrandom::getrandom(&mut salt).is_err() {
+        return String::new();
+    }
+    let mut hash = [0u8; 32];
+    pbkdf2_hmac::<Sha256>(pw.as_bytes(), &salt, 210_000, &mut hash);
+    format!("{}:{}", hex::encode(&salt), hex::encode(&hash))
 }
 
 pub fn check_password(stored: &str, pw: &str) -> bool {
-    if let Some((salt, hash)) = stored.split_once(':') {
-        hex::encode(Sha256::digest(format!("{}:{}", salt, pw).as_bytes())) == hash
+    if let Some((salt_hex, hash_hex)) = stored.split_once(':') {
+        let salt = match hex::decode(salt_hex) { Ok(s) => s, Err(_) => { return false; } };
+        let mut hash = [0u8; 32];
+        pbkdf2_hmac::<Sha256>(pw.as_bytes(), &salt, 210_000, &mut hash);
+        hex::encode(&hash) == hash_hex
     } else {
+        // legacy fallback: raw SHA256 stored password
         hex::encode(Sha256::digest(pw.as_bytes())) == stored
     }
 }

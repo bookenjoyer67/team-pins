@@ -1,5 +1,5 @@
-const PRECACHE_URLS = ["/assets/db-Bnun5_q8.js","/assets/dialogs-VQ_awSaK.js","/assets/e2e_core-CS2n0wHb.js","/assets/e2e_core-yCBg0J1-.js","/assets/e2e_core_bg-DMF39_NH.wasm","/assets/gossip-DbwcQ0iU.js","/assets/index-BH7l7Mqb.css","/assets/index-DaOh8q6y.js","/assets/map-Cc-0Ji06.js","/assets/preload-helper-BwoHSnu5.js","/assets/relay-B0IZ2lfA.js","/assets/rolldown-runtime-S-ySWqyJ.js","/assets/state-CgoyYCYF.js","/bgm.mp3","/icon-192.png","/icon-512.png","/index.html","/leaflet/MarkerCluster.Default.css","/leaflet/MarkerCluster.css","/leaflet/images/layers-2x.png","/leaflet/images/layers.png","/leaflet/images/marker-icon-2x.png","/leaflet/images/marker-icon.png","/leaflet/images/marker-shadow.png","/leaflet/images/spritesheet-2x.png","/leaflet/images/spritesheet.png","/leaflet/images/spritesheet.svg","/leaflet/leaflet.css","/leaflet/leaflet.draw.css","/leaflet/leaflet.draw.js","/leaflet/leaflet.js","/leaflet/leaflet.markercluster.js","/manifest.json"];
-const APP_CACHE = "pins-app-ed7ee667";
+const PRECACHE_URLS = ["/assets/db-32CzJt9p.js","/assets/dialogs-DhgAjl5-.js","/assets/e2e_core-B-tj7vAD.js","/assets/e2e_core-Cq0tZClG.js","/assets/e2e_core_bg-DMF39_NH.wasm","/assets/gossip-o4PO6MdV.js","/assets/index-BH7l7Mqb.css","/assets/index-CpF9SebK.js","/assets/map-C5j0__nb.js","/assets/preload-helper-DWTEM3RW.js","/assets/relay-5QCLWVAj.js","/assets/rolldown-runtime-S-ySWqyJ.js","/assets/state-CgoyYCYF.js","/bgm.mp3","/icon-192.png","/icon-512.png","/index.html","/leaflet/MarkerCluster.Default.css","/leaflet/MarkerCluster.css","/leaflet/images/layers-2x.png","/leaflet/images/layers.png","/leaflet/images/marker-icon-2x.png","/leaflet/images/marker-icon.png","/leaflet/images/marker-shadow.png","/leaflet/images/spritesheet-2x.png","/leaflet/images/spritesheet.png","/leaflet/images/spritesheet.svg","/leaflet/leaflet.css","/leaflet/leaflet.draw.css","/leaflet/leaflet.draw.js","/leaflet/leaflet.js","/leaflet/leaflet.markercluster.js","/manifest.json"];
+const APP_CACHE = "pins-app-2fd2f741";
 const TILE_CACHE = "pins-tiles-v1";
 const TILE_MAX = 200;
 
@@ -13,7 +13,12 @@ self.addEventListener("install", (e) => {
       });
     })
   );
-  self.skipWaiting();
+});
+
+self.addEventListener("message", (e) => {
+  if (e.data && e.data.type === "SKIP_WAITING") {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener("activate", (e) => {
@@ -51,8 +56,9 @@ self.addEventListener("fetch", (e) => {
   }
 
   if (
-    url.hostname.includes("tile.openstreetmap.org") ||
-    url.hostname.includes("server.arcgisonline.com")
+    url.hostname === "tile.openstreetmap.org" ||
+    url.hostname.endsWith(".tile.openstreetmap.org") ||
+    url.hostname === "server.arcgisonline.com"
   ) {
     e.respondWith(handleTileRequest(e.request));
     return;

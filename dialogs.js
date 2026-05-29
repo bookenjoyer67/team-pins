@@ -40,10 +40,11 @@ export function promptRoomPassword(title) {
     ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">${escapeHtml(title)}</h3><input id="rm-pwd-input" type="password" placeholder="${t("password")}" style="width:100%;padding:6px;margin-bottom:12px;box-sizing:border-box;" /><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="rm-pwd-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="rm-pwd-ok" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("ok")}</button></div></div>`;
     document.body.appendChild(ov);
     const clean = (v) => { ov.remove(); resolve(v); };
-    document.getElementById("rm-pwd-input").focus();
-    document.getElementById("rm-pwd-input").addEventListener("keydown", e => { if (e.key === "Enter") clean(document.getElementById("rm-pwd-input").value); });
-    document.getElementById("rm-pwd-cancel").onclick = () => clean("");
-    document.getElementById("rm-pwd-ok").onclick = () => clean(document.getElementById("rm-pwd-input").value);
+    const input = ov.querySelector("#rm-pwd-input");
+    input.focus();
+    input.addEventListener("keydown", e => { if (e.key === "Enter") clean(input.value); });
+    ov.querySelector("#rm-pwd-cancel").onclick = () => clean("");
+    ov.querySelector("#rm-pwd-ok").onclick = () => clean(input.value);
     ov.onclick = (e) => { if (e.target === ov) clean(""); };
     ov.addEventListener("keydown", (e) => { if (e.key === "Escape") clean(""); });
   });
@@ -197,7 +198,7 @@ export function showQRAnswerDialog(title, answer, qrSvg) {
   document.body.appendChild(ov);
   document.getElementById("qr-ans-ta").value = answer;
   const ansBox = document.getElementById("qr-ans-box");
-  if (qrSvg) {
+  if (qrSvg && qrSvg.startsWith("<svg")) {
     ansBox.innerHTML = qrSvg;
     const svg = ansBox.querySelector("svg");
     if (svg) {

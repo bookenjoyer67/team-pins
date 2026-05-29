@@ -53,6 +53,13 @@ pub struct StoredDrawing {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemberDek {
+    pub member_pubkey: String,
+    pub individually_wrapped_dek: String,
+    pub stored_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredTombstone {
     pub tombstone_id: String,
     pub target_id: String,
@@ -129,6 +136,8 @@ struct SnapshotData {
     pub tokens: HashMap<String, Vec<InviteToken>>,
     pub public_layers: HashMap<String, Vec<PublicLayer>>,
     pub layer_subscriptions: HashMap<String, Vec<LayerSubscription>>,
+    pub member_deks: HashMap<String, HashMap<String, MemberDek>>,
+    pub pending_dek_requests: HashMap<String, Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -142,6 +151,8 @@ pub struct PersistentStore {
     pub tokens: RwLock<HashMap<String, Vec<InviteToken>>>,
     pub public_layers: RwLock<HashMap<String, Vec<PublicLayer>>>,
     pub layer_subscriptions: RwLock<HashMap<String, Vec<LayerSubscription>>>,
+    pub member_deks: RwLock<HashMap<String, HashMap<String, MemberDek>>>,
+    pub pending_dek_requests: RwLock<HashMap<String, Vec<String>>>,
     snapshot_path: Option<PathBuf>,
     dirty: std::sync::atomic::AtomicBool,
 }
@@ -166,13 +177,15 @@ impl PersistentStore {
                         tokens: RwLock::new(snap.tokens),
                         public_layers: RwLock::new(snap.public_layers),
                         layer_subscriptions: RwLock::new(snap.layer_subscriptions),
+                        member_deks: RwLock::new(snap.member_deks),
+                        pending_dek_requests: RwLock::new(snap.pending_dek_requests),
                         snapshot_path,
                         dirty: std::sync::atomic::AtomicBool::new(false),
                     };
                 }
             }
         }
-        Self { communities: RwLock::new(HashMap::new()), pins: RwLock::new(HashMap::new()), annotations: RwLock::new(HashMap::new()), drawings: RwLock::new(HashMap::new()), tombstones: RwLock::new(HashMap::new()), votes: RwLock::new(HashMap::new()), tokens: RwLock::new(HashMap::new()), public_layers: RwLock::new(HashMap::new()), layer_subscriptions: RwLock::new(HashMap::new()), snapshot_path, dirty: std::sync::atomic::AtomicBool::new(false) }
+        Self { communities: RwLock::new(HashMap::new()), pins: RwLock::new(HashMap::new()), annotations: RwLock::new(HashMap::new()), drawings: RwLock::new(HashMap::new()), tombstones: RwLock::new(HashMap::new()), votes: RwLock::new(HashMap::new()), tokens: RwLock::new(HashMap::new()), public_layers: RwLock::new(HashMap::new()), layer_subscriptions: RwLock::new(HashMap::new()), member_deks: RwLock::new(HashMap::new()), pending_dek_requests: RwLock::new(HashMap::new()), snapshot_path, dirty: std::sync::atomic::AtomicBool::new(false) }
     }
 
     pub async fn save_snapshot(&self) {
@@ -192,6 +205,8 @@ impl PersistentStore {
                 tokens: self.tokens.read().await.clone(),
                 public_layers: self.public_layers.read().await.clone(),
                 layer_subscriptions: self.layer_subscriptions.read().await.clone(),
+                member_deks: self.member_deks.read().await.clone(),
+                pending_dek_requests: self.pending_dek_requests.read().await.clone(),
             };
             if let Ok(json) = serde_json::to_string_pretty(&snap) {
                 let tmp = path.with_extension("tmp");
@@ -611,5 +626,61 @@ impl PersistentStore {
             }
         }
         result
+    }
+
+    // ---- Member DEK exchange ----
+
+    pub async fn store_member_dek(&self, community_id: &str, member_pubkey: &str, wrapped_dek: &str) {
+        let mut deks = self.member_deks.write().await;
+        let entry = deks.entry(community_id.to_string()).or_default();
+        entry.insert(member_pubkey.to_string(), MemberDek {
+            member_pubkey: member_pubkey.to_string(),
+            individually_wrapped_dek: wrapped_dek.to_string(),
+            stored_at: crate::messages::unix_millis(),
+        });
+        self.mark_dirty();
+    }
+
+    pub async fn get_member_dek(&self, community_id: &str, member_pubkey: &str) -> Option<MemberDek> {
+        self.member_deks.read().await
+            .get(community_id)
+            .and_then(|map| map.get(member_pubkey).cloned())
+    }
+
+    pub async fn add_pending_dek_request(&self, community_id: &str, member_pubkey: &str) {
+        let mut pending = self.pending_dek_requests.write().await;
+        let list = pending.entry(community_id.to_string()).or_default();
+        if !list.contains(&member_pubkey.to_string()) {
+            list.push(member_pubkey.to_string());
+        }
+        self.mark_dirty();
+    }
+
+    pub async fn take_pending_dek_requests(&self, community_id: &str) -> Vec<String> {
+        let mut pending = self.pending_dek_requests.write().await;
+        pending.remove(community_id).unwrap_or_default()
+    }
+
+    pub async fn remove_pending_dek_request(&self, community_id: &str, member_pubkey: &str) {
+        let mut pending = self.pending_dek_requests.write().await;
+        if let Some(list) = pending.get_mut(community_id) {
+            list.retain(|p| p != member_pubkey);
+        }
+        self.mark_dirty();
+    }
+
+    pub async fn get_member_deks_for_community(&self, community_id: &str) -> Vec<MemberDek> {
+        self.member_deks.read().await
+            .get(community_id)
+            .map(|map| map.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    pub async fn delete_member_dek(&self, community_id: &str, member_pubkey: &str) {
+        let mut deks = self.member_deks.write().await;
+        if let Some(map) = deks.get_mut(community_id) {
+            map.remove(member_pubkey);
+        }
+        self.mark_dirty();
     }
 }
