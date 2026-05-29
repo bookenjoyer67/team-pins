@@ -61,10 +61,14 @@ pub fn encode_hex(bytes: &[u8]) -> String {
 
 #[wasm_bindgen]
 pub fn decode_hex(hex: &str) -> Vec<u8> {
+    decode_hex_vec(hex).unwrap_or_default()
+}
+
+fn decode_hex_vec(hex: &str) -> Result<Vec<u8>, JsError> {
     let s = hex.trim_start_matches("\\x");
-    if s.len() % 2 != 0 { return Vec::new(); }
+    if s.len() % 2 != 0 { return Err(js_err("invalid hex length")); }
     (0..s.len()).step_by(2)
-        .filter_map(|i| u8::from_str_radix(&s[i..i+2], 16).ok())
+        .map(|i| u8::from_str_radix(&s[i..i+2], 16).map_err(|_| js_err("invalid hex character")))
         .collect()
 }
 
@@ -85,6 +89,16 @@ pub fn generate_qr_svg(data: &str) -> String {
     }
 }
 
+fn generate_qr_svg_result(data: &str) -> Option<String> {
+    match QrCode::with_error_correction_level(data.as_bytes(), EcLevel::L) {
+        Ok(code) => Some(code.render::<svg::Color>()
+            .min_dimensions(200, 200)
+            .quiet_zone(false)
+            .build()),
+        Err(_) => None,
+    }
+}
+
 pub fn derive_password_key(password: &str, salt: &[u8]) -> Vec<u8> {
     let mut key = [0u8; 32];
     pbkdf2_hmac::<Sha256>(password.as_bytes(), salt, 210_000, &mut key);
@@ -92,47 +106,47 @@ pub fn derive_password_key(password: &str, salt: &[u8]) -> Vec<u8> {
 }
 
 #[wasm_bindgen]
-pub fn encrypt_with_password(plain: &str, password: &str) -> JsValue {
+pub fn encrypt_with_password(plain: &str, password: &str) -> Result<JsValue, JsError> {
     let mut salt = [0u8; 16];
     OsRng.fill_bytes(&mut salt);
     let key = derive_password_key(password, &salt);
-    let encrypted = encrypt_bytes_inner(plain.as_bytes(), &key).unwrap();
-    serde_wasm_bindgen::to_value(&EncryptedOutput {
+    let encrypted = encrypt_bytes_inner(plain.as_bytes(), &key)?;
+    Ok(serde_wasm_bindgen::to_value(&EncryptedOutput {
         ciphertext: encode_hex(&encrypted.ciphertext),
         nonce: encode_hex(&encrypted.nonce),
         salt: encode_hex(&salt),
-    }).unwrap()
+    })?)
 }
 
 #[wasm_bindgen]
 pub fn decrypt_with_password(ciphertext_hex: &str, nonce_hex: &str, salt_hex: &str, password: &str) -> Result<String, JsError> {
-    let salt = decode_hex(salt_hex);
+    let salt = decode_hex_vec(salt_hex)?;
     let key = derive_password_key(password, &salt);
-    let ct = decode_hex(ciphertext_hex);
-    let nc = decode_hex(nonce_hex);
+    let ct = decode_hex_vec(ciphertext_hex)?;
+    let nc = decode_hex_vec(nonce_hex)?;
     let plain = decrypt_bytes(&ct, &nc, &key)?;
     String::from_utf8(plain).map_err(js_err)
 }
 
 #[wasm_bindgen]
-pub fn encrypt_bytes_with_password(data: &[u8], password: &str) -> JsValue {
+pub fn encrypt_bytes_with_password(data: &[u8], password: &str) -> Result<JsValue, JsError> {
     let mut salt = [0u8; 16];
     OsRng.fill_bytes(&mut salt);
     let key = derive_password_key(password, &salt);
-    let encrypted = encrypt_bytes_inner(data, &key).unwrap();
-    serde_wasm_bindgen::to_value(&EncryptedOutput {
+    let encrypted = encrypt_bytes_inner(data, &key)?;
+    Ok(serde_wasm_bindgen::to_value(&EncryptedOutput {
         ciphertext: encode_hex(&encrypted.ciphertext),
         nonce: encode_hex(&encrypted.nonce),
         salt: encode_hex(&salt),
-    }).unwrap()
+    })?)
 }
 
 #[wasm_bindgen]
 pub fn decrypt_bytes_with_password(ciphertext_hex: &str, nonce_hex: &str, salt_hex: &str, password: &str) -> Result<Vec<u8>, JsError> {
-    let salt = decode_hex(salt_hex);
+    let salt = decode_hex_vec(salt_hex)?;
     let key = derive_password_key(password, &salt);
-    let ct = decode_hex(ciphertext_hex);
-    let nc = decode_hex(nonce_hex);
+    let ct = decode_hex_vec(ciphertext_hex)?;
+    let nc = decode_hex_vec(nonce_hex)?;
     decrypt_bytes(&ct, &nc, &key)
 }
 
@@ -145,7 +159,7 @@ pub fn generate_user_keypair() -> JsValue {
         public: public.as_bytes().to_vec(),
         secret: secret.to_bytes().to_vec(),
     };
-    serde_wasm_bindgen::to_value(&kp).unwrap()
+    serde_wasm_bindgen::to_value(&kp).unwrap_or(JsValue::UNDEFINED)
 }
 
 #[wasm_bindgen]
@@ -159,7 +173,7 @@ pub fn generate_user_keypair_from_password(password: &str, community_id: &str) -
         public: public.as_bytes().to_vec(),
         secret: secret.to_bytes().to_vec(),
     };
-    serde_wasm_bindgen::to_value(&kp).unwrap()
+    serde_wasm_bindgen::to_value(&kp).unwrap_or(JsValue::UNDEFINED)
 }
 
 #[wasm_bindgen]
@@ -179,19 +193,20 @@ struct SigningKeyPair {
 
 #[wasm_bindgen]
 pub fn generate_signing_keypair() -> JsValue {
-    let signing_key = SigningKey::generate(&mut OsRng);
+    let mut rng = OsRng;
+    let signing_key = SigningKey::generate(&mut rng);
     let verifying_key = signing_key.verifying_key();
     let kp = SigningKeyPair {
         public: encode_hex(&verifying_key.to_bytes()),
         secret: encode_hex(&signing_key.to_bytes()),
     };
-    serde_wasm_bindgen::to_value(&kp).unwrap()
+    serde_wasm_bindgen::to_value(&kp).unwrap_or(JsValue::UNDEFINED)
 }
 
 #[wasm_bindgen]
 pub fn sign(payload_hex: &str, secret_key_hex: &str) -> Result<String, JsError> {
-    let payload = decode_hex(payload_hex);
-    let secret_bytes = decode_hex(secret_key_hex);
+    let payload = decode_hex_vec(payload_hex)?;
+    let secret_bytes = decode_hex_vec(secret_key_hex)?;
     let sk_arr: [u8; 32] = secret_bytes.as_slice().try_into().map_err(js_err)?;
     let signing_key = SigningKey::from_bytes(&sk_arr);
     let signature = signing_key.sign(&payload);
@@ -200,9 +215,9 @@ pub fn sign(payload_hex: &str, secret_key_hex: &str) -> Result<String, JsError> 
 
 #[wasm_bindgen]
 pub fn verify(payload_hex: &str, signature_hex: &str, public_key_hex: &str) -> Result<bool, JsError> {
-    let payload = decode_hex(payload_hex);
-    let sig_bytes = decode_hex(signature_hex);
-    let pk_bytes = decode_hex(public_key_hex);
+    let payload = decode_hex_vec(payload_hex)?;
+    let sig_bytes = decode_hex_vec(signature_hex)?;
+    let pk_bytes = decode_hex_vec(public_key_hex)?;
     let sig_arr: [u8; 64] = sig_bytes.as_slice().try_into().map_err(js_err)?;
     let pk_arr: [u8; 32] = pk_bytes.as_slice().try_into().map_err(js_err)?;
     let sig = Signature::from_bytes(&sig_arr);
@@ -235,17 +250,7 @@ pub fn encrypt_annotation(text: &str, author_name: &str, annotation_type: &str, 
         nonce: encode_hex(&encrypted.nonce),
         salt: String::new(),
     };
-    Ok(serde_wasm_bindgen::to_value(&result).unwrap())
-}
-
-#[wasm_bindgen]
-pub fn decrypt_annotation(ciphertext_hex: &str, nonce_hex: &str, dek: &[u8]) -> Result<JsValue, JsError> {
-    let ciphertext = decode_hex(ciphertext_hex);
-    let nonce = decode_hex(nonce_hex);
-    let plain = decrypt_bytes(&ciphertext, &nonce, dek)?;
-    let s = String::from_utf8(plain).map_err(js_err)?;
-    let data: AnnotationData = serde_json::from_str(&s).map_err(js_err)?;
-    Ok(serde_wasm_bindgen::to_value(&data).unwrap())
+    Ok(serde_wasm_bindgen::to_value(&result).map_err(js_err)?)
 }
 
 // ---- ECIES (for wrapping DEKs) ----
@@ -253,6 +258,9 @@ fn ecies_seal(plaintext: &[u8], recipient_pub: &PublicKey) -> Result<Vec<u8>, Js
     let ephemeral_sk = StaticSecret::random_from_rng(OsRng);
     let ephemeral_pk = PublicKey::from(&ephemeral_sk);
     let dh_shared = ephemeral_sk.diffie_hellman(recipient_pub);
+    if dh_shared.as_bytes().iter().all(|&b| b == 0) {
+        return Err(js_err("invalid public key (low-order point)"));
+    }
     let okm = derive_ecies_key(dh_shared.as_bytes())?;
     let cipher = ChaCha20Poly1305::new_from_slice(&okm).map_err(js_err)?;
     let mut nonce_bytes = [0u8; 12];
@@ -273,6 +281,9 @@ fn ecies_open(sealed: &[u8], recipient_sk: &StaticSecret) -> Result<Vec<u8>, JsE
     let ct = &sealed[44..];
     let ephemeral_pk = PublicKey::from(ephemeral_pk_bytes);
     let dh_shared = recipient_sk.diffie_hellman(&ephemeral_pk);
+    if dh_shared.as_bytes().iter().all(|&b| b == 0) {
+        return Err(js_err("invalid public key (low-order point)"));
+    }
     let okm = derive_ecies_key(dh_shared.as_bytes())?;
     let cipher = ChaCha20Poly1305::new_from_slice(&okm).map_err(js_err)?;
     let nonce = Nonce::from_slice(&nonce_bytes);
@@ -290,7 +301,7 @@ fn derive_ecies_key(dh_bytes: &[u8]) -> Result<Vec<u8>, JsError> {
 // ---- DEK wrapping (all-in-one: takes hex keys, returns hex) ----
 #[wasm_bindgen]
 pub fn wrap_dek(dek: &[u8], public_key_hex: &str) -> Result<String, JsError> {
-    let pk_bytes = decode_hex(public_key_hex);
+    let pk_bytes = decode_hex_vec(public_key_hex)?;
     let pk = PublicKey::from(<[u8; 32]>::try_from(pk_bytes.as_slice()).map_err(js_err)?);
     let sealed = ecies_seal(dek, &pk)?;
     Ok(encode_hex(&sealed))
@@ -298,10 +309,20 @@ pub fn wrap_dek(dek: &[u8], public_key_hex: &str) -> Result<String, JsError> {
 
 #[wasm_bindgen]
 pub fn unwrap_dek(wrapped_hex: &str, secret_key_hex: &str) -> Result<Vec<u8>, JsError> {
-    let sealed = decode_hex(wrapped_hex);
-    let sk_bytes = decode_hex(secret_key_hex);
+    let sealed = decode_hex_vec(wrapped_hex)?;
+    let sk_bytes = decode_hex_vec(secret_key_hex)?;
     let sk = StaticSecret::from(<[u8; 32]>::try_from(sk_bytes.as_slice()).map_err(js_err)?);
     ecies_open(&sealed, &sk)
+}
+
+#[wasm_bindgen]
+pub fn decrypt_annotation(ciphertext_hex: &str, nonce_hex: &str, dek: &[u8]) -> Result<JsValue, JsError> {
+    let ciphertext = decode_hex_vec(ciphertext_hex)?;
+    let nonce = decode_hex_vec(nonce_hex)?;
+    let plain = decrypt_bytes(&ciphertext, &nonce, dek)?;
+    let s = String::from_utf8(plain).map_err(js_err)?;
+    let data: AnnotationData = serde_json::from_str(&s).map_err(js_err)?;
+    Ok(serde_wasm_bindgen::to_value(&data).map_err(js_err)?)
 }
 
 // ---- Pin encrypt/decrypt (takes structured data, returns hex) ----
@@ -321,17 +342,17 @@ pub fn encrypt_pin_data(title: &str, note: &str, lat: f64, lng: f64, color: &str
         nonce: encode_hex(&encrypted.nonce),
         salt: String::new(),
     };
-    Ok(serde_wasm_bindgen::to_value(&result).unwrap())
+    Ok(serde_wasm_bindgen::to_value(&result).map_err(js_err)?)
 }
 
 #[wasm_bindgen]
 pub fn decrypt_pin_data(ciphertext_hex: &str, nonce_hex: &str, dek: &[u8]) -> Result<JsValue, JsError> {
-    let ciphertext = decode_hex(ciphertext_hex);
-    let nonce = decode_hex(nonce_hex);
+    let ciphertext = decode_hex_vec(ciphertext_hex)?;
+    let nonce = decode_hex_vec(nonce_hex)?;
     let plain = decrypt_bytes(&ciphertext, &nonce, dek)?;
     let s = String::from_utf8(plain).map_err(js_err)?;
     let v: PinOutput = serde_json::from_str(&s).map_err(js_err)?;
-    Ok(serde_wasm_bindgen::to_value(&v).unwrap())
+    Ok(serde_wasm_bindgen::to_value(&v).map_err(js_err)?)
 }
 
 // ---- GeoJSON encrypt/decrypt (takes string, returns hex) ----
@@ -343,13 +364,13 @@ pub fn encrypt_geojson(geojson_str: &str, dek: &[u8]) -> Result<JsValue, JsError
         nonce: encode_hex(&encrypted.nonce),
         salt: String::new(),
     };
-    Ok(serde_wasm_bindgen::to_value(&result).unwrap())
+    Ok(serde_wasm_bindgen::to_value(&result).map_err(js_err)?)
 }
 
 #[wasm_bindgen]
 pub fn decrypt_geojson(ciphertext_hex: &str, nonce_hex: &str, dek: &[u8]) -> Result<String, JsError> {
-    let ciphertext = decode_hex(ciphertext_hex);
-    let nonce = decode_hex(nonce_hex);
+    let ciphertext = decode_hex_vec(ciphertext_hex)?;
+    let nonce = decode_hex_vec(nonce_hex)?;
     let plain = decrypt_bytes(&ciphertext, &nonce, dek)?;
     String::from_utf8(plain).map_err(js_err)
 }
@@ -381,13 +402,13 @@ pub fn encrypt_raw_bytes(plain: &[u8], dek: &[u8]) -> Result<JsValue, JsError> {
         nonce: encode_hex(&encrypted.nonce),
         salt: String::new(),
     };
-    Ok(serde_wasm_bindgen::to_value(&result).unwrap())
+    Ok(serde_wasm_bindgen::to_value(&result).map_err(js_err)?)
 }
 
 #[wasm_bindgen]
 pub fn decrypt_raw_bytes(ciphertext_hex: &str, nonce_hex: &str, dek: &[u8]) -> Result<Vec<u8>, JsError> {
-    let ciphertext = decode_hex(ciphertext_hex);
-    let nonce = decode_hex(nonce_hex);
+    let ciphertext = decode_hex_vec(ciphertext_hex)?;
+    let nonce = decode_hex_vec(nonce_hex)?;
     Ok(decrypt_bytes(&ciphertext, &nonce, dek)?)
 }
 
@@ -440,7 +461,7 @@ pub fn simplify_freehand(path_json: &str, tolerance: f64) -> String {
         return path_json.to_string();
     }
     let simplified = douglas_peucker(&points, tolerance);
-    serde_json::to_string(&simplified).unwrap()
+    serde_json::to_string(&simplified).unwrap_or_else(|_| "null".to_string())
 }
 
 // ---- Gzip compression ----
@@ -448,15 +469,15 @@ pub fn simplify_freehand(path_json: &str, tolerance: f64) -> String {
 #[wasm_bindgen]
 pub fn compress_gzip(data: &[u8]) -> Vec<u8> {
     let mut e = GzEncoder::new(Vec::new(), Compression::default());
-    e.write_all(data).unwrap();
-    e.finish().unwrap()
+    e.write_all(data).unwrap_or(());
+    e.finish().unwrap_or_default()
 }
 
 #[wasm_bindgen]
 pub fn compress_gzip_max(data: &[u8]) -> Vec<u8> {
     let mut e = GzEncoder::new(Vec::new(), Compression::best());
-    e.write_all(data).unwrap();
-    e.finish().unwrap()
+    e.write_all(data).unwrap_or(());
+    e.finish().unwrap_or_default()
 }
 
 // ---- Binary container serialization ----
@@ -464,12 +485,17 @@ pub fn compress_gzip_max(data: &[u8]) -> Vec<u8> {
 fn encode_str(buf: &mut Vec<u8>, s: &str) {
     let bytes = s.as_bytes();
     if bytes.len() > 255 {
-        // Truncate to 255 bytes with a warning via the decode path
-        // (This is a known limitation of the v3 binary format)
+        let mut len = 255;
+        while len > 0 && !s.is_char_boundary(len) {
+            len -= 1;
+        }
+        buf.push(len as u8);
+        buf.extend_from_slice(&bytes[..len]);
+    } else {
+        let len = bytes.len().min(255) as u8;
+        buf.push(len);
+        buf.extend_from_slice(&bytes[..len as usize]);
     }
-    let len = bytes.len().min(255) as u8;
-    buf.push(len);
-    if len > 0 { buf.extend_from_slice(&bytes[..len as usize]); }
 }
 
 fn decode_str(buf: &[u8], off: &mut usize) -> String {
@@ -487,9 +513,9 @@ fn decode_str(buf: &[u8], off: &mut usize) -> String {
 }
 
 fn encode_bytes16(buf: &mut Vec<u8>, data: &[u8]) {
-    let len = data.len() as u16;
+    let len = std::cmp::min(data.len(), u16::MAX as usize) as u16;
     buf.extend_from_slice(&len.to_le_bytes());
-    buf.extend_from_slice(data);
+    buf.extend_from_slice(&data[..len as usize]);
 }
 
 fn decode_bytes16(buf: &[u8], off: &mut usize) -> Vec<u8> {
@@ -507,9 +533,10 @@ fn decode_bytes16(buf: &[u8], off: &mut usize) -> Vec<u8> {
 }
 
 fn encode_bytes32(buf: &mut Vec<u8>, data: &[u8]) {
+    assert!(data.len() <= 50_000_000, "data too large for bytes32");
     let len = data.len() as u32;
     buf.extend_from_slice(&len.to_le_bytes());
-    buf.extend_from_slice(data);
+    buf.extend_from_slice(&data[..len as usize]);
 }
 
 fn decode_bytes32(buf: &[u8], off: &mut usize) -> Vec<u8> {
@@ -589,6 +616,7 @@ pub fn serialize_container(json: &str) -> Result<Vec<u8>, JsError> {
     }
 
     let pins = data.get("pins").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    if pins.len() > u16::MAX as usize { return Err(js_err("too many pins")); }
     buf.extend_from_slice(&(pins.len() as u16).to_le_bytes());
     for p in &pins {
         encode_str(&mut buf, p.get("pin_id").and_then(|v| v.as_str()).unwrap_or(""));
@@ -611,6 +639,7 @@ pub fn serialize_container(json: &str) -> Result<Vec<u8>, JsError> {
     }
 
     let drawings = data.get("drawings").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    if drawings.len() > u16::MAX as usize { return Err(js_err("too many drawings")); }
     buf.extend_from_slice(&(drawings.len() as u16).to_le_bytes());
     for d in &drawings {
         encode_str(&mut buf, d.get("drawing_id").and_then(|v| v.as_str()).unwrap_or(""));
@@ -631,6 +660,7 @@ pub fn serialize_container(json: &str) -> Result<Vec<u8>, JsError> {
 
     // layers
     let layers = data.get("layers").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    if layers.len() > u16::MAX as usize { return Err(js_err("too many layers")); }
     buf.extend_from_slice(&(layers.len() as u16).to_le_bytes());
     for l in &layers {
         encode_str(&mut buf, l.get("layer_id").and_then(|v| v.as_str()).unwrap_or(""));
@@ -650,6 +680,7 @@ pub fn serialize_container(json: &str) -> Result<Vec<u8>, JsError> {
 
     // schemas
     let schemas = data.get("schemas").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    if schemas.len() > u16::MAX as usize { return Err(js_err("too many schemas")); }
     buf.extend_from_slice(&(schemas.len() as u16).to_le_bytes());
     for s in &schemas {
         encode_str(&mut buf, s.get("schema_id").and_then(|v| v.as_str()).unwrap_or(""));
@@ -681,6 +712,7 @@ pub fn deserialize_container(binary: &[u8]) -> Result<String, JsError> {
     let mut map = serde_json::Map::new();
     map.insert("name".into(), serde_json::Value::String(name));
 
+    if off >= binary.len() { return Err(js_err("truncated binary: has_keys")); }
     let has_keys = binary[off]; off += 1;
     if has_keys == 1 {
         let pk = encode_hex(&decode_bytes16(binary, &mut off));
@@ -693,19 +725,24 @@ pub fn deserialize_container(binary: &[u8]) -> Result<String, JsError> {
         map.insert("keys".into(), serde_json::Value::Object(keys));
     }
 
+    if off >= binary.len() { return Err(js_err("truncated binary: has_center")); }
     let has_center = binary[off]; off += 1;
     if has_center == 1 {
-        let lat = f64::from_le_bytes(binary[off..off+8].try_into().unwrap()); off += 8;
-        let lng = f64::from_le_bytes(binary[off..off+8].try_into().unwrap()); off += 8;
+        if off + 16 > binary.len() { return Err(js_err("truncated binary: center coords")); }
+        let lat = f64::from_le_bytes(binary[off..off+8].try_into().map_err(|_| js_err("truncated binary: center"))?); off += 8;
+        let lng = f64::from_le_bytes(binary[off..off+8].try_into().map_err(|_| js_err("truncated binary: center"))?); off += 8;
         map.insert("map_center".into(), serde_json::json!([lat, lng]));
     }
 
+    if off >= binary.len() { return Err(js_err("truncated binary: has_zoom")); }
     let has_zoom = binary[off]; off += 1;
     if has_zoom == 1 {
-        let zoom = f32::from_le_bytes(binary[off..off+4].try_into().unwrap()); off += 4;
+        if off + 4 > binary.len() { return Err(js_err("truncated binary: zoom")); }
+        let zoom = f32::from_le_bytes(binary[off..off+4].try_into().map_err(|_| js_err("truncated binary: zoom"))?); off += 4;
         map.insert("map_zoom".into(), serde_json::json!(zoom));
     }
 
+    if off + 2 > binary.len() { return Err(js_err("truncated binary: pin_count")); }
     let pin_count = u16::from_le_bytes([binary[off], binary[off+1]]) as usize; off += 2;
     let mut pins = Vec::new();
     for _ in 0..pin_count {
@@ -719,6 +756,7 @@ pub fn deserialize_container(binary: &[u8]) -> Result<String, JsError> {
             let layer_id = decode_str(binary, &mut off);
             if !layer_id.is_empty() { pin.insert("layer_id".into(), layer_id.into()); }
         }
+        if off >= binary.len() { return Err(js_err("truncated binary: pin has_media")); }
         let has_media = binary[off]; off += 1;
         if has_media == 1 {
             let mut media = serde_json::Map::new();
@@ -732,6 +770,7 @@ pub fn deserialize_container(binary: &[u8]) -> Result<String, JsError> {
     }
     map.insert("pins".into(), serde_json::Value::Array(pins));
 
+    if off + 2 > binary.len() { return Err(js_err("truncated binary: dwg_count")); }
     let dwg_count = u16::from_le_bytes([binary[off], binary[off+1]]) as usize; off += 2;
     let mut drawings = Vec::new();
     for _ in 0..dwg_count {
@@ -743,6 +782,7 @@ pub fn deserialize_container(binary: &[u8]) -> Result<String, JsError> {
             let layer_id = decode_str(binary, &mut off);
             if !layer_id.is_empty() { d.insert("layer_id".into(), layer_id.into()); }
         }
+        if off >= binary.len() { return Err(js_err("truncated binary: dwg has_media")); }
         let has_media = binary[off]; off += 1;
         if has_media == 1 {
             let mut media = serde_json::Map::new();
@@ -757,6 +797,7 @@ pub fn deserialize_container(binary: &[u8]) -> Result<String, JsError> {
     map.insert("drawings".into(), serde_json::Value::Array(drawings));
 
     if version >= 3 {
+        if off + 2 > binary.len() { return Err(js_err("truncated binary: layer_count")); }
         let layer_count = u16::from_le_bytes([binary[off], binary[off+1]]) as usize; off += 2;
         let mut layers = Vec::new();
         for _ in 0..layer_count {
@@ -764,10 +805,13 @@ pub fn deserialize_container(binary: &[u8]) -> Result<String, JsError> {
             l.insert("layer_id".into(), decode_str(binary, &mut off).into());
             l.insert("name".into(), decode_str(binary, &mut off).into());
             l.insert("color".into(), decode_str(binary, &mut off).into());
+            if off >= binary.len() { return Err(js_err("truncated binary: layer visible")); }
             let visible = binary[off]; off += 1;
             l.insert("visible".into(), serde_json::Value::Bool(visible == 1));
-            let opacity = f32::from_le_bytes(binary[off..off+4].try_into().unwrap()); off += 4;
+            if off + 4 > binary.len() { return Err(js_err("truncated binary: layer opacity")); }
+            let opacity = f32::from_le_bytes(binary[off..off+4].try_into().map_err(|_| js_err("truncated binary: opacity"))?); off += 4;
             l.insert("opacity".into(), serde_json::json!(opacity));
+            if off >= binary.len() { return Err(js_err("truncated binary: layer has_schema")); }
             let has_schema = binary[off]; off += 1;
             if has_schema == 1 {
                 l.insert("default_schema_id".into(), decode_str(binary, &mut off).into());
@@ -776,12 +820,14 @@ pub fn deserialize_container(binary: &[u8]) -> Result<String, JsError> {
         }
         map.insert("layers".into(), serde_json::Value::Array(layers));
 
+        if off + 2 > binary.len() { return Err(js_err("truncated binary: schema_count")); }
         let schema_count = u16::from_le_bytes([binary[off], binary[off+1]]) as usize; off += 2;
         let mut schemas = Vec::new();
         for _ in 0..schema_count {
             let mut s = serde_json::Map::new();
             s.insert("schema_id".into(), decode_str(binary, &mut off).into());
             s.insert("name".into(), decode_str(binary, &mut off).into());
+            if off >= binary.len() { return Err(js_err("truncated binary: schema field_count")); }
             let field_count = binary[off] as usize; off += 1;
             let mut fields = Vec::new();
             for _ in 0..field_count {
@@ -789,6 +835,7 @@ pub fn deserialize_container(binary: &[u8]) -> Result<String, JsError> {
                 f.insert("key".into(), decode_str(binary, &mut off).into());
                 f.insert("label".into(), decode_str(binary, &mut off).into());
                 f.insert("type".into(), decode_str(binary, &mut off).into());
+                if off >= binary.len() { return Err(js_err("truncated binary: schema opt_count")); }
                 let opt_count = binary[off] as usize; off += 1;
                 let mut options: Vec<serde_json::Value> = Vec::new();
                 for _ in 0..opt_count {
@@ -857,7 +904,8 @@ pub fn hw_model_name(model: u32) -> String {
 pub fn decompress_gzip(data: &[u8]) -> Result<Vec<u8>, JsError> {
     let d = GzDecoder::new(data);
     let mut out = Vec::new();
-    d.take(50_000_000).read_to_end(&mut out).map_err(js_err)?;
+    let mut limited = d.take(50_000_000);
+    limited.read_to_end(&mut out).map_err(js_err)?;
     Ok(out)
 }
 
@@ -870,6 +918,7 @@ fn haversine_m(lat1: f64, lng1: f64, lat2: f64, lng2: f64) -> f64 {
     let d_lng = (lng2 - lng1).to_radians();
     let a = (d_lat / 2.0).sin().powi(2)
         + lat1.to_radians().cos() * lat2.to_radians().cos() * (d_lng / 2.0).sin().powi(2);
+    let a = a.min(1.0).max(0.0);
     EARTH_R * 2.0 * a.sqrt().atan2((1.0 - a).sqrt())
 }
 
@@ -918,13 +967,15 @@ pub fn compute_geometry(geojson_json: &str) -> String {
     if let Some(geom) = v.get("geometry").or_else(|| v.get("coordinates").and(Some(&v))) {
         let t = geom.get("type").and_then(|t| t.as_str()).unwrap_or("");
         let pts: Vec<[f64; 2]> = if t == "Polygon" {
-            geom.get("coordinates").and_then(|c| c[0].as_array()).map(|a| a.iter().filter_map(|p: &serde_json::Value| {
-                Some([p[0].as_f64()?, p[1].as_f64()?])
-            }).collect::<Vec<_>>()).unwrap_or_default()
-        } else if t == "LineString" {
-            geom.get("coordinates").and_then(|c| c.as_array()).map(|a| a.iter().filter_map(|p: &serde_json::Value| {
-                Some([p[0].as_f64()?, p[1].as_f64()?])
-            }).collect::<Vec<_>>()).unwrap_or_default()
+        geom.get("coordinates").and_then(|c| c.as_array().and_then(|a| a.get(0)).and_then(|r| r.as_array())).map(|a| a.iter().filter_map(|p| {
+            let arr = p.as_array()?;
+            Some([arr.get(0)?.as_f64()?, arr.get(1)?.as_f64()?])
+        }).collect::<Vec<_>>()).unwrap_or_default()
+    } else if t == "LineString" {
+        geom.get("coordinates").and_then(|c| c.as_array()).map(|a| a.iter().filter_map(|p| {
+            let arr = p.as_array()?;
+            Some([arr.get(0)?.as_f64()?, arr.get(1)?.as_f64()?])
+        }).collect::<Vec<_>>()).unwrap_or_default()
         } else { vec![] };
         if !pts.is_empty() {
             if t == "Polygon" {
@@ -937,13 +988,14 @@ pub fn compute_geometry(geojson_json: &str) -> String {
             }
         }
     }
-    if let Some(pt) = v.get("point") {
-        let px = pt[0].as_f64().unwrap_or(0.0);
-        let py = pt[1].as_f64().unwrap_or(0.0);
+    if let Some(pt) = v.get("point").and_then(|p| p.as_array()) {
+        let px = pt.get(0).and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let py = pt.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0);
         if let Some(geom) = v.get("geometry") {
             let t = geom.get("type").and_then(|t| t.as_str()).unwrap_or("");
-            let poly_pts: Vec<[f64; 2]> = geom.get("coordinates").and_then(|c| c[0].as_array()).map(|a| a.iter().filter_map(|p: &serde_json::Value| {
-                Some([p[0].as_f64()?, p[1].as_f64()?])
+            let poly_pts: Vec<[f64; 2]> = geom.get("coordinates").and_then(|c| c.as_array().and_then(|a| a.get(0)).and_then(|r| r.as_array())).map(|a| a.iter().filter_map(|p| {
+                let arr = p.as_array()?;
+                Some([arr.get(0)?.as_f64()?, arr.get(1)?.as_f64()?])
             }).collect::<Vec<_>>()).unwrap_or_default();
             if !poly_pts.is_empty() {
                 let inside = point_in_poly(&[px, py], &poly_pts);
@@ -951,7 +1003,7 @@ pub fn compute_geometry(geojson_json: &str) -> String {
             }
         }
     }
-    serde_json::to_string(&result).unwrap()
+    serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
 #[wasm_bindgen]
@@ -988,7 +1040,7 @@ pub fn detect_freehand_shape(points_json: &str) -> String {
             "type": "circle",
             "center": [cx, cy],
             "radius": radius_m
-        })).unwrap();
+        })).unwrap_or_else(|_| "null".to_string());
     }
 
     // Rectangle detection (only if circle was rejected)
@@ -1014,7 +1066,7 @@ pub fn detect_freehand_shape(points_json: &str) -> String {
         return serde_json::to_string(&serde_json::json!({
             "type": "rectangle",
             "corners": [[min_lng, min_lat], [max_lng, min_lat], [max_lng, max_lat], [min_lng, max_lat]]
-        })).unwrap();
+        })).unwrap_or_else(|_| "null".to_string());
     }
 
     "null".to_string()

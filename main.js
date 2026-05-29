@@ -18,12 +18,6 @@ import * as Relay from "./relay.js";
 let Mesh = null;
 const votedPins = {};
 
-function getVotedPins() {
-  const cid = state.currentSet || "_global";
-  if (!votedPins[cid]) votedPins[cid] = {};
-  return votedPins[cid];
-}
-
 function clearVotedPins(cid) {
   if (cid && votedPins[cid]) delete votedPins[cid];
 }
@@ -35,6 +29,10 @@ function bytesToUuid(bytes) {
 
 function saveRelayToList(url) {
   if (!url) return;
+  try {
+    const parsed = new URL(url.trim());
+    if (!["https:", "wss:", "ws:"].includes(parsed.protocol)) return;
+  } catch (_) { return; }
   const normalized = url.trim().replace(/\/$/, "");
   const list = Relay.getSavedRelayUrls();
   if (!list.includes(normalized)) {
@@ -393,7 +391,7 @@ wasmReady.then(async () => {
           const raw = atob(b64);
           let buf;
           try { buf = new Uint8Array(raw.split("").map(c => c.charCodeAt(0))); } catch (_) {}
-          let cidUuid, name, pw, restoredRelayUrl = "", inviteTokenRestore = null, focusLat = null, focusLng = null, focusZoom = 15;
+          let cidUuid, name, pw, restoredRelayUrl = "", inviteTokenRestore = null, focusLat = null, focusLng = null, focusZoom = 15, embeddedCommunitySk = null;
           if (buf && buf.length >= 19) {
             let pos = 0;
             const nlen = buf[pos++];
@@ -406,7 +404,16 @@ wasmReady.then(async () => {
             pos += relayLen;
             pw = !!(buf[pos] & 1);
             const isInviteRestore = !!(buf[pos] & 2);
+            const hasCommunitySkRestore = !!(buf[pos] & 0x04);
             pos++;
+            if (hasCommunitySkRestore && buf.length > pos + 1) {
+              const skLen = (buf[pos] << 8) | buf[pos + 1];
+              pos += 2;
+              if (skLen > 0 && buf.length >= pos + skLen) {
+                embeddedCommunitySk = Array.from(buf.slice(pos, pos + skLen)).map(b => b.toString(16).padStart(2, "0")).join("");
+                pos += skLen;
+              }
+            }
             if (isInviteRestore && buf.length > pos) {
               const roleLen = buf[pos++];
               pos += roleLen;
@@ -427,7 +434,8 @@ wasmReady.then(async () => {
               if (parts.length >= 2) {
                 focusLat = parseFloat(parts[0]);
                 focusLng = parseFloat(parts[1]);
-                if (parts.length >= 3) focusZoom = parseInt(parts[2]) || 15;
+                const v = parseInt(parts[2], 10);
+                if (parts.length >= 3) focusZoom = isNaN(v) ? 15 : v;
               }
             }
           } else {
@@ -479,7 +487,7 @@ wasmReady.then(async () => {
                 myWrappedDek = result.wrapped_dek;
               } else {
                 // Per-member keypair: generate own keypair
-                const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex } = await import("./core/pkg/e2e_core.js");
+                const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex, decrypt_with_password, decode_hex } = await import("./core/pkg/e2e_core.js");
                 const kp = generate_user_keypair();
                 public_key = encode_hex(kp.public);
                 secret_key = encode_hex(kp.secret);
@@ -491,6 +499,21 @@ wasmReady.then(async () => {
                     if (dk) {
                       myWrappedDek = wrap_dek(dk, public_key);
                       // Upload our re-wrapped DEK to relay so we can sponsor future members
+                      import("./relay.js").then(r => {
+                        r.rewrapMemberDek(sid, public_key, myWrappedDek);
+                      }).catch(e => { console.warn("DEK rewrap failed:", e); });
+                    }
+                  } catch (_) {}
+                }
+
+                // Try join_wrapped_dek as fallback (server-side bootstrap DEK)
+                if (!myWrappedDek && result.join_wrapped_dek) {
+                  try {
+                    const parts = result.join_wrapped_dek.split(":");
+                    if (parts.length === 3) {
+                      const dekHex = decrypt_with_password(parts[0], parts[1], parts[2], sid);
+                      const dkBytes = decode_hex(dekHex);
+                      myWrappedDek = wrap_dek(dkBytes, public_key);
                       import("./relay.js").then(r => {
                         r.rewrapMemberDek(sid, public_key, myWrappedDek);
                       }).catch(() => {});
@@ -552,7 +575,7 @@ wasmReady.then(async () => {
       while (b64.length % 4) b64 += "=";
       const code = atob(b64);
       const { setId, connId, code: answer, compact } = await Peer.acceptOffer(code, state.user.id, state.displayName);
-      window._pendingJoinSet = setId;
+      window._pendingJoinSet = true;
       roomChannel.postMessage({ type: "answer", answer, connId, name: state.displayName, tabId });
       const aqr = generate_qr_svg(compact || answer);
       showQRAnswerDialog("Connection Ready", compact || answer, aqr);
@@ -652,7 +675,7 @@ wasmReady.then(async () => {
           if (parts.length >= 2) {
             focusLat = parseFloat(parts[0]);
             focusLng = parseFloat(parts[1]);
-            if (parts.length >= 3) focusZoom = parseInt(parts[2]) || 15;
+            if (parts.length >= 3) focusZoom = parseInt(parts[2], 10) || 15;
           }
         }
       } else {
@@ -742,7 +765,7 @@ wasmReady.then(async () => {
         secret_key = encode_hex(kp.secret);
         myWrappedDek = result.wrapped_dek;
       } else {
-        const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex } = await import("./core/pkg/e2e_core.js");
+        const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex, decrypt_with_password, decode_hex } = await import("./core/pkg/e2e_core.js");
         const kp = generate_user_keypair();
         public_key = encode_hex(kp.public);
         secret_key = encode_hex(kp.secret);
@@ -752,6 +775,21 @@ wasmReady.then(async () => {
             const dk = unwrap_dek(result.wrapped_dek, embeddedCommunitySk);
             if (dk) {
               myWrappedDek = wrap_dek(dk, public_key);
+              import("./relay.js").then(r => {
+                r.rewrapMemberDek(sid, public_key, myWrappedDek);
+              }).catch(e => { console.warn("DEK rewrap failed:", e); });
+            }
+          } catch (_) {}
+        }
+
+        // Try join_wrapped_dek as fallback (server-side bootstrap DEK)
+        if (!myWrappedDek && result.join_wrapped_dek) {
+          try {
+            const parts = result.join_wrapped_dek.split(":");
+            if (parts.length === 3) {
+              const dekHex = decrypt_with_password(parts[0], parts[1], parts[2], sid);
+              const dkBytes = decode_hex(dekHex);
+              myWrappedDek = wrap_dek(dkBytes, public_key);
               import("./relay.js").then(r => {
                 r.rewrapMemberDek(sid, public_key, myWrappedDek);
               }).catch(() => {});
@@ -767,7 +805,7 @@ wasmReady.then(async () => {
       const existing = await DB.getTeam(sid);
       if (!existing) {
         await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "" });
-        await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "", visibility: "private", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [] });
+        await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "", visibility: "private", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [], relay_url: linkRelayUrl || null });
         await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: "Default", color: "#2563eb", visible: true, opacity: 1.0 }]);
         window._names[sid] = (result.name || name) + " (← joined)";
       }
@@ -827,7 +865,7 @@ document.addEventListener("keydown", e => {
   if (key === "Delete" || key === "Backspace") { if (!isEmbed) { Map.deleteSelected?.(); e.preventDefault(); } }
   if (key === "d" && !e.ctrlKey && !e.metaKey) { toggleTheme(); e.preventDefault(); }
   if (e.ctrlKey && key === "z") { if (!isEmbed) { Map.undo?.(); e.preventDefault(); } }
-  if (e.ctrlKey && (key === "y" || (key === "z" && e.shiftKey))) { if (!isEmbed) { Map.redo?.(); e.preventDefault(); } }
+  if (e.ctrlKey && (e.code === "KeyY" || (key === "z" && e.shiftKey))) { if (!isEmbed) { Map.redo?.(); e.preventDefault(); } }
 });
 
 function wireGlobals() {
@@ -839,8 +877,9 @@ function wireGlobals() {
   window._renderPeerList = renderPeerList;
   window._showHostModal = showHostModal;
   window._showJoinModal = showJoinModal;
-  window._showIceDialog = () => showIceServerDialog(servers => { Peer.setIceServers(servers); relayUrl = localStorage.getItem("pins-relay-url") || ""; });
+  window._showIceDialog = () => showIceServerDialog(servers => { Peer.setIceServers(servers); relayUrl = Relay.getSavedRelayUrls()[0] || localStorage.getItem("pins-relay-url") || ""; });
   window._toggleSound = toggleSound;
+  window._isSoundEnabled = () => { try { return isSoundEnabled(); } catch (_) { return false; } };
   window._toggleTheme = toggleTheme;
   window._loadPins = Map.loadPins;
   window._loadDrawings = Map.loadDrawings;
@@ -904,7 +943,7 @@ function wireGlobals() {
   window._toast = toast;
 }
 
-document.addEventListener("click", async e => {
+document.addEventListener("click", async e => { try {
   if (e.target.closest(".metric-toggle")) {
     e.preventDefault();
     e.stopPropagation();
@@ -924,11 +963,11 @@ document.addEventListener("click", async e => {
     if (a) { e.preventDefault(); Map.downloadDrawingAttachment(a.dataset.did); }
     return;
   }
-  if (b.matches(".edit-pin-btn")) { e.stopPropagation(); Map.showEditPinForm(b.dataset.pid); }
-  if (b.matches(".delete-pin-btn")) { e.stopPropagation(); if (await confirmDialog(t("deleteConfirm"))) { await Map.deletePin(b.dataset.pid); state.map.closePopup(); } }
-  if (b.matches(".edit-dwg-btn")) { e.stopPropagation(); Map.showEditDrawingForm(b.dataset.did); }
-  if (b.matches(".delete-dwg-btn")) { e.stopPropagation(); if (await confirmDialog(t("deleteConfirm"))) { await Map.deleteDrawing(b.dataset.did); state.map.closePopup(); } }
-  if (b.matches(".pin-expand-btn")) { e.stopPropagation(); Map.showPinDetailModal(b.dataset.pid); }
+  if (b.matches(".edit-pin-btn")) { e.stopPropagation(); Map.showEditPinForm(b.dataset.pid); return; }
+  if (b.matches(".delete-pin-btn")) { e.stopPropagation(); if (await confirmDialog(t("deleteConfirm"))) { await Map.deletePin(b.dataset.pid); state.map.closePopup(); } return; }
+  if (b.matches(".edit-dwg-btn")) { e.stopPropagation(); Map.showEditDrawingForm(b.dataset.did); return; }
+  if (b.matches(".delete-dwg-btn")) { e.stopPropagation(); if (await confirmDialog(t("deleteConfirm"))) { await Map.deleteDrawing(b.dataset.did); state.map.closePopup(); } return; }
+  if (b.matches(".pin-expand-btn")) { e.stopPropagation(); Map.showPinDetailModal(b.dataset.pid); return; }
 
   if (b.matches(".attest-confirm-btn") || b.matches(".attest-dispute-btn") || b.matches(".attest-flag-btn")) {
     e.stopPropagation();
@@ -1005,7 +1044,7 @@ document.addEventListener("click", async e => {
       if (input) input.value = "";
       Map.renderAnnotationThread(pinId);
       addHistory("Comment added", text.slice(0, 30));
-    } catch (_) { toast("Failed to post comment", "#dc2626"); }
+    } catch (e) { console.warn("Comment post failed:", e); toast("Failed to post comment", "#dc2626"); }
     b.disabled = false;
     b.textContent = "Post";
   }
@@ -1053,7 +1092,7 @@ document.addEventListener("click", async e => {
       addHistory("Comment removed", annId.slice(0, 8));
     } catch (_) { toast("Failed to remove comment", "#dc2626"); }
   }
-});
+} catch(err) { console.error("[click handler]", err); } });
 
 export function renderUI() {
   try {
@@ -1105,7 +1144,7 @@ export function renderUI() {
       if (now - (state._nominatimLastCall || 0) < 2000) return;
       state._nominatimLastCall = now;
       const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`;
-      fetch(url).then(r => r.json()).then(results => {
+      fetch(url, { headers: { "User-Agent": "piggPin/0.0.1" } }).then(r => r.json()).then(results => {
         if (!results.length) return;
         const bbox = results[0].boundingbox;
         if (bbox) state.map.fitBounds([[bbox[0], bbox[2]], [bbox[1], bbox[3]]]);
@@ -1383,6 +1422,10 @@ export function renderPeerList() {
   el.className = "visible";
 
   let html = "";
+  if (Peer.connectionCount() > 0) {
+    const on = state.followMap;
+    html += `<button class="peer-follow-toggle${on ? " on" : ""}" id="peer-follow-btn">${on ? "● " + (t("following") || "Following") : "○ " + (t("follow") || "Follow")}</button>`;
+  }
   if (online.length > 0) {
     html += `<h4>${t("peers")} (${online.length})</h4>`;
     html += online.map(p => `<div class="peer-row"><span class="peer-dot online"></span>${escapeHtml(p.name)} — ${escapeHtml(window._names?.[p.setId] || p.setId?.slice(0, 8) || "?")}</div>`).join("");
@@ -1396,6 +1439,13 @@ export function renderPeerList() {
     html += offline.map(p => `<div class="peer-row"><span class="peer-dot offline"></span>${escapeHtml(p.name)} <span style="color:#888;font-size:10px;">(${t("offline")})</span> <button class="forget-peer" data-uid="${escapeHtml(p.userId)}" style="margin-left:4px;padding:0 4px;border:none;background:none;color:#dc2626;cursor:pointer;font-size:10px;">×</button></div>`).join("");
   }
   el.innerHTML = html;
+  const followBtn = document.getElementById("peer-follow-btn");
+  if (followBtn) {
+    followBtn.onclick = () => {
+      state.followMap = !state.followMap;
+      renderPeerList();
+    };
+  }
   el.querySelectorAll(".forget-peer").forEach(b => {
     b.onclick = async () => { await DB.deleteKnownPeer(b.dataset.uid); state.peers.delete("known_" + b.dataset.uid); renderPeerList(); };
   });
@@ -1433,7 +1483,6 @@ async function pushAllLocalData() {
     }));
     if (pinData.length || annData.length || drawingData.length) {
       await Relay.pushDelta(c.community_id, pinData, annData, drawingData, [], [], []);
-      console.log("[relay] pushed local data for", c.name, "pins:", pinData.length, "ann:", annData.length, "dwg:", drawingData.length);
     }
   }
 }

@@ -1,6 +1,6 @@
 const PRECACHE_URLS = __PRECACHE_URLS__;
 const APP_CACHE = "pins-app-__VERSION__";
-const TILE_CACHE = "pins-tiles-v1";
+const TILE_CACHE = "pins-tiles-__VERSION__";
 const TILE_MAX = 200;
 
 self.addEventListener("install", (e) => {
@@ -26,12 +26,18 @@ self.addEventListener("activate", (e) => {
     caches.keys().then((keys) =>
       Promise.all(
         keys
-          .filter((k) => k !== APP_CACHE && k !== TILE_CACHE)
+          .filter((k) => k !== APP_CACHE && !k.startsWith("pins-tiles"))
           .map((k) => caches.delete(k))
       )
     ).then(() => self.clients.claim())
   );
 });
+
+function isTileHost(hostname) {
+  return hostname === "tile.openstreetmap.org"
+    || hostname.endsWith(".tile.openstreetmap.org")
+    || hostname === "server.arcgisonline.com";
+}
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
@@ -44,7 +50,11 @@ self.addEventListener("fetch", (e) => {
         .then((res) => {
           if (res.ok && res.type !== "opaqueredirect") {
             const clone = res.clone();
-            caches.open(APP_CACHE).then((c) => c.put(e.request, clone));
+            clone.text().then((body) => {
+              if (body.length < 5_000_000) {
+                caches.open(APP_CACHE).then((c) => c.put(e.request, new Response(body, { headers: res.headers })));
+              }
+            });
           }
           return res;
         })
@@ -55,49 +65,24 @@ self.addEventListener("fetch", (e) => {
     return;
   }
 
-  if (
-    url.hostname === "tile.openstreetmap.org" ||
-    url.hostname.endsWith(".tile.openstreetmap.org") ||
-    url.hostname === "server.arcgisonline.com"
-  ) {
+  if (isTileHost(url.hostname)) {
     e.respondWith(handleTileRequest(e.request));
     return;
   }
 
   if (url.pathname.startsWith("/assets/") || url.pathname.endsWith(".wasm")) {
     e.respondWith(
-      caches.match(e.request).then((r) => {
-        if (r) return r;
-        return fetch(e.request).then((res) => {
+      fetch(e.request)
+        .then((res) => {
           if (res.ok) {
             const clone = res.clone();
             caches.open(APP_CACHE).then((c) => c.put(e.request, clone));
           }
           return res;
-        });
-      })
+        })
+        .catch(() => caches.match(e.request))
     );
     return;
-  }
-
-  e.respondWith(
-    fetch(e.request)
-      .then((res) => {
-        if (res.ok) {
-          const clone = res.clone();
-          caches.open(APP_CACHE).then((c) => c.put(e.request, clone));
-        }
-        return res;
-      })
-      .catch(() =>
-        caches.match(e.request).then((r) => r || caches.match("/index.html"))
-      )
-  );
-});
-
-self.addEventListener("message", (e) => {
-  if (e.data && e.data.type === "SKIP_WAITING") {
-    self.skipWaiting();
   }
 });
 

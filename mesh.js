@@ -5,7 +5,7 @@ import { mesh_chunk_encode, hw_model_name, reticulum_generate_identity, reticulu
 import { rnodeConnect, rnodeSend, rnodeDisconnect, isRnodeConnected } from "./mesh_rnode.js";
 import * as DB from "./db.js";
 import * as Sync from "./sync.js";
-import { toast } from "./dialogs.js";
+import { toast, escapeHtml } from "./dialogs.js";
 import { state } from "./state.js";
 import L from "leaflet";
 
@@ -35,8 +35,9 @@ let _announceTimer = null;
 const ANNOUNCE_INTERVAL = 300000; // 5 minutes
 
 const meshChunkStore = new Map();
+let _meshChunkCleanup = null;
 
-setInterval(() => {
+_meshChunkCleanup = setInterval(() => {
   const now = Date.now();
   for (const [id, entry] of meshChunkStore) {
     if (now - entry.ts > 60000) meshChunkStore.delete(id);
@@ -249,6 +250,7 @@ export async function connectMesh() {
 export async function disconnectMesh() {
   stopAnnounceTimer();
   disconnectMeshWS();
+  if (_meshChunkCleanup) { clearInterval(_meshChunkCleanup); _meshChunkCleanup = null; }
   await rnodeDisconnect().catch(() => {});
   if (!meshDevice) return;
   Sync.setMeshBroadcast(null);
@@ -355,25 +357,6 @@ async function shareKeysOnConnect() {
   }
 }
 
-async function shareKeysViaReticulum() {
-  if (!state.currentSet) return;
-  const t = await DB.getTeam(state.currentSet);
-  if (!t) return;
-  const c = await DB.getCommunity(state.currentSet);
-  const isPasswordDerived = t.key_derivation === "pbkdf2";
-  const name = window._names?.[state.currentSet] || state.currentSet.slice(0, 8);
-  meshBroadcast("keys", {
-    set_id: state.currentSet, name,
-    public_key: t.public_key,
-    wrapped_dek: t.wrapped_dek,
-    key_derivation: isPasswordDerived ? "pbkdf2" : "random",
-    genesis_public_key: c?.genesis_public_key || state.signingPublicKey,
-    governance: c?.governance || null,
-    relay_nodes: c?.relay_nodes || [],
-  });
-  toast("🔑 Map keys shared via Reticulum", "#7c3aed");
-}
-
 // Build and send an announce packet
 function sendAnnounce() {
   const addr = deriveAddress();
@@ -457,7 +440,7 @@ export function connectMeshWS(relayUrl) {
     meshWsConnected = false;
     window._renderUI?.();
   };
-  meshWs.onerror = () => {};
+  meshWs.onerror = () => { console.warn("[mesh] WebSocket error, will attempt reconnect"); };
 }
 
 export function disconnectMeshWS() {
@@ -486,7 +469,7 @@ function handleBridgeMessage(msg) {
   const from = msg.from;
   const type = msg.type;
   // Skip only if from is truly missing — allow announces and uplinks without from
-  if (from == null && type !== "mesh_uplink" && type !== "mesh_announce") return;
+  if ((from === null || from === undefined) && type !== "mesh_uplink" && type !== "mesh_announce") return;
 
   // Get or create peer entry
   let entry = meshPeers.get(from);
@@ -573,16 +556,6 @@ function handleBridgeMessage(msg) {
       }
       break;
     }
-    case "mesh_rnode": {
-      // Data from another PWA's RNode radio via the WS relay
-      if (msg.data && !msg._relay) {
-        handleMeshPacket({ from: 0, data: msg.data, to: 0xFFFFFFFF });
-        if (isRnodeConnected()) {
-          rnodeSend(msg.data);
-        }
-      }
-      break;
-    }
     case "mesh_announce": {
       // Self-sovereign discovery — no MQTT needed
       const addr = msg.id;
@@ -659,7 +632,8 @@ function clearMeshMarkers() {
 
 function meshNodeIcon(nodeNum, entry) {
   const c = "#7c3aed";
-  const label = (entry.shortName || entry.name || `Node ${nodeNum}`).slice(0, 4);
+  const label = (entry.shortName || entry.name || `Node ${nodeNum}`).slice(0, 4)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 36"><path fill="${c}" d="M12 0C5.4 0 0 5.4 0 12c0 9 12 24 12 24s12-15 12-24c0-6.6-5.4-12-12-12z"/><text x="12" y="14" text-anchor="middle" fill="#fff" font-size="7" font-weight="bold">${label}</text></svg>`;
   return L.icon({ iconUrl: `data:image/svg+xml,${encodeURIComponent(svg)}`, iconSize: [24, 36], iconAnchor: [12, 36], popupAnchor: [0, -36] });
 }
@@ -682,7 +656,7 @@ function upsertMeshMarker(nodeNum, entry) {
 }
 
 function meshNodePopup(nodeNum, entry) {
-  const name = entry.name || `Node ${nodeNum}`;
+  const name = escapeHtml(entry.name || `Node ${nodeNum}`);
   const hw = hw_model_name(entry.hwModel || 0);
   let info = `<b>${name}</b><br><small>${hw} | #${nodeNum}</small>`;
   if (entry.snr) info += `<br>SNR: ${entry.snr.toFixed(1)} dB`;
@@ -783,7 +757,7 @@ function meshBroadcast(type, data) {
   }
 
   // Serial mesh: only send when directly targeting a node (off-grid direct)
-  if (meshDevice && meshTargetNode) {
+  if (meshDevice && meshTargetNode !== null && meshTargetNode !== undefined) {
     const destination = String(meshTargetNode);
     const enc = new TextEncoder();
     const chunksJson = mesh_chunk_encode(enc.encode(msg));
@@ -838,19 +812,23 @@ function addToInbox(msg, nodeNum) {
   }
 
   const entry = {
-    id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    id: Date.now().toString(36) + crypto.randomUUID().slice(0, 8),
     type: msg.type,
     data: msg.data,
     from: nodeNum,
     ts: Date.now(),
     accepted: false,
   };
+  const MAX_INBOX = 200;
+  if (meshInbox.length >= MAX_INBOX) {
+    meshInbox.shift();
+  }
   meshInbox.push(entry);
   meshInboxUnread++;
 
   const peer = meshPeers.get(nodeNum);
   const peerName = peer?.name || `Node ${nodeNum}`;
-  toast(`📥 ${peerName}: ${msg.type}`, "#7c3aed");
+  toast(`\u{1F4E5} ${escapeHtml(peerName)}: ${msg.type}`, "#7c3aed");
   console.log("[mesh] inbox ←", msg.type, "from", peerName);
 
   window._renderUI?.();
@@ -900,6 +878,5 @@ export async function acceptAllInbox() {
 }
 
 window.addEventListener("pagehide", () => {
-  disconnectMeshWS();
   disconnectMesh();
 });

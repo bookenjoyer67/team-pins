@@ -12,10 +12,13 @@ echo "=== Building PiggPin for platform: $PLATFORM ==="
 # Step 1: Build WASM crypto core
 echo "--- Building WASM crypto core ---"
 cd "$ROOT/core"
-if ! command -v wasm-pack &>/dev/null; then
-  echo "Installing wasm-pack..."
-  curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-fi
+  if ! command -v wasm-pack &>/dev/null && ! command -v cargo &>/dev/null; then
+    echo "wasm-pack not found. Install with: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | bash"
+    exit 1
+  fi
+  if ! command -v wasm-pack &>/dev/null; then
+    cargo install wasm-pack --version 0.13.1 --locked
+  fi
 wasm-pack build --target web
 cd "$ROOT"
 
@@ -54,7 +57,7 @@ case "$PLATFORM" in
     echo "--- Building Android APK ---"
     npx cap sync android
     cd "$ROOT/android"
-    ./gradlew assembleRelease 2>/dev/null || ./gradlew assembleDebug
+    ./gradlew assembleRelease
     echo ""
     echo "Android artifacts:"
     echo "  APK: android/app/build/outputs/apk/release/app-release.apk"

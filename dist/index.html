@@ -7,7 +7,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="mobile-web-app-capable" content="yes" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-uhc6LteEic5Iqes7oh3Lj+BLG/Sx+fvUrEFwL5xa+vo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://server.arcgisonline.com blob:; connect-src 'self' https: wss: ws://localhost:* ws://127.0.0.1:*; media-src 'self' blob:; child-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; font-src 'self';" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-uhc6LteEic5Iqes7oh3Lj+BLG/Sx+fvUrEFwL5xa+vo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://server.arcgisonline.com blob:; connect-src 'self' https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://server.arcgisonline.com https://mqtt.meshtastic.org https://metered.ca wss: ws://localhost:9000 ws://127.0.0.1:9000 ws://localhost:5173 ws://127.0.0.1:5173; media-src 'self' blob:; child-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none';" />
     <link rel="manifest" href="/manifest.json" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='12' fill='%232563eb'/></svg>" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
@@ -17,16 +17,15 @@
     <link rel="stylesheet" href="/leaflet/MarkerCluster.Default.css" />
     <title>piggPin</title>
     <script>window.process=window.process||{env:{},cwd:()=>'/',platform:'browser',version:'v0.0.0'};window.Buffer=window.Buffer||{isBuffer:()=>!1}</script>
-  <script type="module" crossorigin src="/assets/index-CpF9SebK.js"></script>
+  <script type="module" crossorigin src="/assets/index-Umo_FXgu.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-S-ySWqyJ.js">
-  <link rel="modulepreload" crossorigin href="/assets/preload-helper-DWTEM3RW.js">
-  <link rel="modulepreload" crossorigin href="/assets/e2e_core-Cq0tZClG.js">
-  <link rel="modulepreload" crossorigin href="/assets/db-32CzJt9p.js">
+  <link rel="modulepreload" crossorigin href="/assets/e2e_core-COsq3nFF.js">
   <link rel="modulepreload" crossorigin href="/assets/state-CgoyYCYF.js">
-  <link rel="modulepreload" crossorigin href="/assets/dialogs-DhgAjl5-.js">
-  <link rel="modulepreload" crossorigin href="/assets/map-C5j0__nb.js">
-  <link rel="modulepreload" crossorigin href="/assets/relay-5QCLWVAj.js">
-  <link rel="stylesheet" crossorigin href="/assets/index-BH7l7Mqb.css">
+  <link rel="modulepreload" crossorigin href="/assets/dialogs-rGACzdGg.js">
+  <link rel="modulepreload" crossorigin href="/assets/db-DosHoC8Y.js">
+  <link rel="modulepreload" crossorigin href="/assets/map-JaKxKWJi.js">
+  <link rel="modulepreload" crossorigin href="/assets/relay-ChT2q5nA.js">
+  <link rel="stylesheet" crossorigin href="/assets/index-CNh5uWQ-.css">
 </head>
 <body>
     <style>
@@ -41,7 +40,7 @@
     <div id="peer-list"></div>
     <div id="history-panel"></div>
     <div id="map-container"></div>
-    <button id="menu-toggle">☰</button>
+    <button id="menu-toggle" aria-label="Toggle menu">☰</button>
     <div id="top-bar" class="hidden"></div>
     <script src="/leaflet/leaflet.js"></script>
     <script src="/leaflet/leaflet.draw.js"></script>

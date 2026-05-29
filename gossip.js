@@ -43,10 +43,15 @@ export async function sendCapabilityAnnounce(targetConnId) {
 
 export function handleCapabilityAnnounce(msg) {
   if (!msg || !msg.communities) return;
+  const MAX_CACHE = 500;
   for (const c of msg.communities) {
     const key = c.community_id;
     const existing = discoveryCache.get(key);
     if (!existing || existing.ts < msg.ts) {
+      if (discoveryCache.size >= MAX_CACHE) {
+        const firstKey = discoveryCache.keys().next().value;
+        if (firstKey) discoveryCache.delete(firstKey);
+      }
       discoveryCache.set(key, { ...c, ts: msg.ts, peer_id: msg.peer_id });
     }
   }
@@ -54,7 +59,11 @@ export function handleCapabilityAnnounce(msg) {
 }
 
 export async function queryPeers(bbox, categories, minTrust, maxAge) {
-  const queryId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+  const queryId = crypto.randomUUID ? crypto.randomUUID() : (() => {
+    const a = new Uint32Array(4);
+    crypto.getRandomValues(a);
+    return Array.from(a, n => n.toString(36)).join('').slice(0, 36);
+  })();
   const payload = {
     type: "gossip_query",
     bbox,

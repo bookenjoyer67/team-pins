@@ -9,7 +9,7 @@
     "beforeBuildCommand": "npm run build:all"
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "title": "PiggPin",
@@ -22,7 +22,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://server.arcgisonline.com blob:; connect-src 'self' blob: ws: wss: https://*.tile.openstreetmap.org https://server.arcgisonline.com; media-src 'self' blob:; child-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; font-src 'self'"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: https://*.tile.openstreetmap.org https://server.arcgisonline.com blob:; connect-src 'self' blob: wss://*.meshtastic.org wss://metered.ca https://*.tile.openstreetmap.org https://server.arcgisonline.com ws://localhost:9000 ws://127.0.0.1:9000 ws://localhost:5173 ws://127.0.0.1:5173; media-src 'self' blob:; child-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; font-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'; object-src 'none'"
     }
   },
   "bundle": {

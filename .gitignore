@@ -29,3 +29,7 @@ android/app/release/
 .idea/
 *.swp
 *.swo
+
+# Android
+android/local.properties
+android/.gradle/

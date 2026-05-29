@@ -1,8 +1,19 @@
-import init, { generate_qr_svg } from "./core/pkg/e2e_core.js";
+import { generate_qr_svg } from "./core/pkg/e2e_core.js";
 import * as Peer from "./peer.js";
 import * as QR from "./qr.js";
 import { state } from "./state.js";
 import { t } from "./i18n.js";
+
+function safeInsertSvg(container, svgString) {
+  if (!container || !svgString) return;
+  container.textContent = "";
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svgString, "image/svg+xml");
+  const svgEl = doc.documentElement;
+  if (!svgEl || svgEl.tagName !== "svg") return;
+  svgEl.querySelectorAll("script, [onload], [onerror], [onclick], [onmouseover], foreignObject").forEach(el => el.remove());
+  container.appendChild(svgEl);
+}
 
 export function escapeHtml(str) {
   if (str == null) return "";
@@ -37,7 +48,7 @@ export function promptRoomPassword(title) {
     const ov = document.createElement("div");
     ov.style.cssText =
       "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
-    ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">${escapeHtml(title)}</h3><input id="rm-pwd-input" type="password" placeholder="${t("password")}" style="width:100%;padding:6px;margin-bottom:12px;box-sizing:border-box;" /><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="rm-pwd-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="rm-pwd-ok" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("ok")}</button></div></div>`;
+    ov.innerHTML = `<div class="modal-responsive" style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">${escapeHtml(title)}</h3><input id="rm-pwd-input" type="password" placeholder="${t("password")}" style="width:100%;padding:6px;margin-bottom:12px;box-sizing:border-box;" /><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="rm-pwd-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="rm-pwd-ok" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("ok")}</button></div></div>`;
     document.body.appendChild(ov);
     const clean = (v) => { ov.remove(); resolve(v); };
     const input = ov.querySelector("#rm-pwd-input");
@@ -57,7 +68,7 @@ export function showPasswordDialog(title, cb, checkboxLabel) {
   const extra = checkboxLabel
     ? `<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);margin-bottom:12px;"><input type="checkbox" id="pwd-check" checked /> ${escapeHtml(checkboxLabel)}</label>`
     : "";
-  ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">${escapeHtml(title)}</h3><input id="pwd-input" type="password" placeholder="${t("password")}" style="width:100%;padding:6px;margin-bottom:12px;box-sizing:border-box;" />${extra}<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="pwd-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="pwd-go" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("ok")}</button></div></div>`;
+  ov.innerHTML = `<div class="modal-responsive" style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">${escapeHtml(title)}</h3><input id="pwd-input" type="password" placeholder="${t("password")}" style="width:100%;padding:6px;margin-bottom:12px;box-sizing:border-box;" />${extra}<div style="display:flex;gap:8px;justify-content:flex-end;"><button id="pwd-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="pwd-go" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("ok")}</button></div></div>`;
   document.body.appendChild(ov);
   document.getElementById("pwd-input").focus();
   const clean = (v, c) => { ov.remove(); cb(v, c); };
@@ -101,7 +112,7 @@ export function promptSetPassword(currentLabel) {
     const ov = document.createElement("div");
     ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2100;display:flex;align-items:center;justify-content:center;";
     const label = currentLabel || "Set community password";
-    ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+    ov.innerHTML = `<div class="modal-responsive" style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
       <h3 style="margin:0 0 4px;">${escapeHtml(label)}</h3>
       <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px;">Anyone joining this community via the relay will need this password.</p>
       <input id="ps-pass" type="password" placeholder="Password" style="width:100%;padding:6px;margin-bottom:6px;box-sizing:border-box;" autocomplete="new-password" />
@@ -135,7 +146,7 @@ export function showPeerPaste(title, cb) {
   const ov = document.createElement("div");
   ov.style.cssText =
     "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
-  ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:360px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">${escapeHtml(title)}</h3><textarea id="paste-area" rows="4" style="width:100%;padding:6px;margin-bottom:12px;box-sizing:border-box;font-size:11px;resize:vertical;"></textarea><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="paste-go" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("submit")}</button><button id="paste-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button></div></div>`;
+  ov.innerHTML = `<div class="modal-responsive" style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:360px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">${escapeHtml(title)}</h3><textarea id="paste-area" rows="4" style="width:100%;padding:6px;margin-bottom:12px;box-sizing:border-box;font-size:11px;resize:vertical;"></textarea><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="paste-go" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("submit")}</button><button id="paste-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button></div></div>`;
   document.body.appendChild(ov);
   const clean = () => ov.remove();
   document.getElementById("paste-cancel").onclick = clean;
@@ -194,12 +205,12 @@ export function showQRAnswerDialog(title, answer, qrSvg) {
   const ov = document.createElement("div");
   ov.style.cssText =
     "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
-  ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:360px;max-width:420px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${escapeHtml(title)}</h3><div id="qr-ans-box" style="text-align:center;margin-bottom:12px;min-height:32px;"></div><textarea id="qr-ans-ta" readonly rows="3" style="width:100%;padding:6px;margin-bottom:12px;box-sizing:border-box;font-size:11px;resize:vertical;"></textarea><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="qr-ans-copy" style="padding:6px 14px;border:none;background:#7c3aed;color:white;border-radius:4px;cursor:pointer;">${t("copyAnswer")}</button><button id="qr-ans-close" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("close")}</button></div></div>`;
+  ov.innerHTML = `<div class="modal-responsive" style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:360px;max-width:420px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${escapeHtml(title)}</h3><div id="qr-ans-box" style="text-align:center;margin-bottom:12px;min-height:32px;"></div><textarea id="qr-ans-ta" readonly rows="3" style="width:100%;padding:6px;margin-bottom:12px;box-sizing:border-box;font-size:11px;resize:vertical;"></textarea><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="qr-ans-copy" style="padding:6px 14px;border:none;background:#7c3aed;color:white;border-radius:4px;cursor:pointer;">${t("copyAnswer")}</button><button id="qr-ans-close" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("close")}</button></div></div>`;
   document.body.appendChild(ov);
   document.getElementById("qr-ans-ta").value = answer;
   const ansBox = document.getElementById("qr-ans-box");
   if (qrSvg && qrSvg.startsWith("<svg")) {
-    ansBox.innerHTML = qrSvg;
+    safeInsertSvg(ansBox, qrSvg);
     const svg = ansBox.querySelector("svg");
     if (svg) {
       svg.style.maxWidth = "200px";
@@ -221,13 +232,13 @@ export function showQRHostDialog(connId, code, compact, link, callbacks) {
   const ov = document.createElement("div");
   ov.style.cssText =
     "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
-  ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:360px;max-width:420px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${t("hostGroup")}</h3><div id="qr-host-box" style="text-align:center;margin-bottom:12px;min-height:32px;"></div><textarea id="qr-host-ct" readonly rows="3" style="width:100%;padding:6px;margin-bottom:4px;box-sizing:border-box;font-size:11px;resize:vertical;"></textarea><div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;"><button id="qr-host-link" style="padding:4px 10px;border:1px solid #059669;background:var(--bg-card);color:#059669;border-radius:4px;cursor:pointer;font-size:12px;">${t("copyLink")}</button><button id="qr-host-code" style="padding:4px 10px;border:1px solid #9ca3af;background:var(--bg-card);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:12px;">${t("copyCode")}</button><button id="qr-host-scan" style="padding:4px 10px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:4px;cursor:pointer;font-size:12px;">${t("scanResponseQR")}</button></div><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="qr-host-paste" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("pasteAnswer")}</button><button id="qr-host-close" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("close")}</button></div></div>`;
+  ov.innerHTML = `<div class="modal-responsive" style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:360px;max-width:420px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${t("hostGroup")}</h3><div id="qr-host-box" style="text-align:center;margin-bottom:12px;min-height:32px;"></div><textarea id="qr-host-ct" readonly rows="3" style="width:100%;padding:6px;margin-bottom:4px;box-sizing:border-box;font-size:11px;resize:vertical;"></textarea><div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;"><button id="qr-host-link" style="padding:4px 10px;border:1px solid #059669;background:var(--bg-card);color:#059669;border-radius:4px;cursor:pointer;font-size:12px;">${t("copyLink")}</button><button id="qr-host-code" style="padding:4px 10px;border:1px solid #9ca3af;background:var(--bg-card);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:12px;">${t("copyCode")}</button><button id="qr-host-scan" style="padding:4px 10px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:4px;cursor:pointer;font-size:12px;">${t("scanResponseQR")}</button></div><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="qr-host-paste" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("pasteAnswer")}</button><button id="qr-host-close" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("close")}</button></div></div>`;
   document.body.appendChild(ov);
   document.getElementById("qr-host-ct").value = compact;
   const qrBox = document.getElementById("qr-host-box");
   const qrSvg = generate_qr_svg(link);
   if (qrSvg) {
-    qrBox.innerHTML = qrSvg;
+    safeInsertSvg(qrBox, qrSvg);
     const svg = qrBox.querySelector("svg");
     if (svg) {
       svg.style.maxWidth = "200px";
@@ -285,7 +296,7 @@ export function showQRJoinDialog(callbacks) {
   const ov = document.createElement("div");
   ov.style.cssText =
     "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
-  ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:360px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${t("joinPeer")}</h3><p style="font-size:13px;color:var(--text-dim);margin:0 0 16px;">${t("joinPeerDescription")}</p><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="qr-join-scan" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("scanHostQRBtn")}</button><button id="qr-join-paste" style="padding:6px 14px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:4px;cursor:pointer;">${t("pasteCodeBtn")}</button><button id="qr-join-close" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button></div></div>`;
+  ov.innerHTML = `<div class="modal-responsive" style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:360px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${t("joinPeer")}</h3><p style="font-size:13px;color:var(--text-dim);margin:0 0 16px;">${t("joinPeerDescription")}</p><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="qr-join-scan" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("scanHostQRBtn")}</button><button id="qr-join-paste" style="padding:6px 14px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:4px;cursor:pointer;">${t("pasteCodeBtn")}</button><button id="qr-join-close" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button></div></div>`;
   document.body.appendChild(ov);
   const clean = () => ov.remove();
   const handleCode = async (raw) => {
@@ -301,7 +312,7 @@ export function showQRJoinDialog(callbacks) {
     clean();
     ov.style.cssText =
       "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
-    ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">${t("joinPeer")}</h3><p style="color:var(--text-dim);font-size:13px;">${t("connecting")}</p></div>`;
+    ov.innerHTML = `<div class="modal-responsive" style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">${t("joinPeer")}</h3><p style="color:var(--text-dim);font-size:13px;">${t("connecting")}</p></div>`;
     document.body.appendChild(ov);
     try {
       const { setId, compact } = await Peer.acceptOffer(
@@ -309,6 +320,7 @@ export function showQRJoinDialog(callbacks) {
         state.user.id,
         state.displayName,
       );
+      window._pendingJoinSet = true;
       ov.remove();
       const aqr = generate_qr_svg(compact);
       showQRAnswerDialog("Send Back", compact, aqr);
@@ -341,7 +353,7 @@ export function confirmDialog(message) {
     const ov = document.createElement("div");
     ov.style.cssText =
       "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;";
-    ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:280px;width:min(88vw,400px);box-shadow:0 4px 20px rgba(0,0,0,0.3);"><p style="margin:0 0 16px;font-size:14px;color:var(--text);line-height:1.4;">${escapeHtml(message)}</p><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="cfm-cancel" style="padding:8px 16px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;font-size:14px;">${t("cancel")}</button><button id="cfm-ok" style="padding:8px 16px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;font-size:14px;">${t("ok")}</button></div></div>`;
+    ov.innerHTML = `<div class="modal-responsive" style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:280px;width:min(88vw,400px);box-shadow:0 4px 20px rgba(0,0,0,0.3);"><p style="margin:0 0 16px;font-size:14px;color:var(--text);line-height:1.4;">${escapeHtml(message)}</p><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="cfm-cancel" style="padding:8px 16px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;font-size:14px;">${t("cancel")}</button><button id="cfm-ok" style="padding:8px 16px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;font-size:14px;">${t("ok")}</button></div></div>`;
     document.body.appendChild(ov);
     const clean = (v) => { ov.remove(); resolve(v); };
     document.getElementById("cfm-ok").focus();
@@ -357,7 +369,7 @@ export function alertDialog(message) {
     const ov = document.createElement("div");
     ov.style.cssText =
       "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;";
-    ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:280px;width:min(88vw,400px);box-shadow:0 4px 20px rgba(0,0,0,0.3);"><p style="margin:0 0 16px;font-size:14px;color:var(--text);line-height:1.4;">${escapeHtml(message)}</p><div style="display:flex;justify-content:flex-end;"><button id="alt-ok" style="padding:8px 24px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;font-size:14px;">${t("ok")}</button></div></div>`;
+    ov.innerHTML = `<div class="modal-responsive" style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:280px;width:min(88vw,400px);box-shadow:0 4px 20px rgba(0,0,0,0.3);"><p style="margin:0 0 16px;font-size:14px;color:var(--text);line-height:1.4;">${escapeHtml(message)}</p><div style="display:flex;justify-content:flex-end;"><button id="alt-ok" style="padding:8px 24px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;font-size:14px;">${t("ok")}</button></div></div>`;
     document.body.appendChild(ov);
     const clean = () => { ov.remove(); resolve(); };
     document.getElementById("alt-ok").focus();
@@ -370,7 +382,7 @@ export function alertDialog(message) {
 export function showProgressDialog(title) {
   const ov = document.createElement("div");
   ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;";
-  ov.innerHTML = `<div style="background:var(--bg-card);padding:24px;border-radius:8px;min-width:340px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+  ov.innerHTML = `<div class="modal-responsive" style="background:var(--bg-card);padding:24px;border-radius:8px;min-width:340px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
     <h3 id="prog-title" style="margin:0 0 16px;font-size:15px;">${escapeHtml(title)}</h3>
     <div style="background:var(--border-light);border-radius:4px;height:8px;overflow:hidden;margin-bottom:8px;">
       <div id="prog-bar" style="background:#2563eb;height:100%;width:0%;transition:width 0.3s ease;"></div>
@@ -420,7 +432,7 @@ export function showIceServerDialog(onSave) {
           <input class="relay-url" data-i="0" placeholder="wss://signal.catperson.online" style="flex:1;padding:4px;border:1px solid var(--border);border-radius:3px;font-size:12px;" />
           <button class="relay-remove" data-i="0" style="padding:2px 6px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:12px;">×</button>
         </div>`;
-    ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:420px;max-width:480px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 4px;">${t("iceTurnServers")}</h3><p style="font-size:11px;color:var(--text-dim);margin:0 0 4px;">${t("iceDescription")} <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API/Protocols" target="_blank" rel="noopener" style="color:#2563eb;">${t("whatIsRTC")}</a></p><div id="ice-rows">${rows}</div><button id="ice-add" style="padding:4px 10px;border:1px dashed #9ca3af;background:transparent;color:var(--text-dim);border-radius:3px;cursor:pointer;font-size:12px;margin-bottom:12px;">${t("addServer")}</button><div style="margin-bottom:12px;border-top:1px solid #e5e7eb;padding-top:8px;"><label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px;">Signal relay servers</label><div id="relay-rows">${relayRows}</div><button id="relay-add" style="padding:4px 10px;border:1px dashed #9ca3af;background:transparent;color:var(--text-dim);border-radius:3px;cursor:pointer;font-size:12px;margin-top:4px;">+ Add relay</button></div><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="ice-reset" style="padding:6px 14px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:4px;cursor:pointer;">${t("reset")}</button><button id="ice-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="ice-save" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("save")}</button></div></div>`;
+    ov.innerHTML = `<div class="modal-responsive" style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:420px;max-width:480px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 4px;">${t("iceTurnServers")}</h3><p style="font-size:11px;color:var(--text-dim);margin:0 0 4px;">${t("iceDescription")} <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebRTC_API/Protocols" target="_blank" rel="noopener" style="color:#2563eb;">${t("whatIsRTC")}</a></p><div id="ice-rows">${rows}</div><button id="ice-add" style="padding:4px 10px;border:1px dashed #9ca3af;background:transparent;color:var(--text-dim);border-radius:3px;cursor:pointer;font-size:12px;margin-bottom:12px;">${t("addServer")}</button><div style="margin-bottom:12px;border-top:1px solid #e5e7eb;padding-top:8px;"><label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:4px;">Signal relay servers</label><div id="relay-rows">${relayRows}</div><button id="relay-add" style="padding:4px 10px;border:1px dashed #9ca3af;background:transparent;color:var(--text-dim);border-radius:3px;cursor:pointer;font-size:12px;margin-top:4px;">+ Add relay</button></div><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="ice-reset" style="padding:6px 14px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:4px;cursor:pointer;">${t("reset")}</button><button id="ice-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="ice-save" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("save")}</button></div></div>`;
   }
   renderContent();
   document.body.appendChild(ov);
@@ -462,7 +474,7 @@ export function showIceServerDialog(onSave) {
       return;
     }
     if (e.target.classList.contains("ice-remove")) {
-      servers.splice(parseInt(e.target.dataset.i), 1);
+      servers.splice(parseInt(e.target.dataset.i, 10), 1);
       renderContent();
       return;
     }
@@ -475,7 +487,7 @@ export function showIceServerDialog(onSave) {
       return;
     }
     if (e.target.classList.contains("relay-remove")) {
-      relayUrls.splice(parseInt(e.target.dataset.i), 1);
+      relayUrls.splice(parseInt(e.target.dataset.i, 10), 1);
       renderContent();
       return;
     }

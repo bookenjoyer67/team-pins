@@ -217,7 +217,7 @@ function createToolbar() {
   slider.style.cssText =
     "width:100px;accent-color:var(--blue);cursor:pointer;";
   slider.oninput = () => {
-    const v = parseInt(slider.value);
+    const v = parseInt(slider.value, 10);
     setWidth(v);
     sliderLabel.textContent = v;
   };

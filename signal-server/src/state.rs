@@ -16,6 +16,7 @@ pub struct AppState {
     pub config: Config,
     pub store: PersistentStore,
     pub mesh_uplink: RwLock<Option<mpsc::Sender<String>>>,       // MQTT bridge
+    #[allow(dead_code)]
     pub reticulum_inject: RwLock<Option<mpsc::Sender<String>>>,  // Reticulum translator
     pub mqtt_client: RwLock<Option<Arc<AsyncClient>>>,
     pub peer_relay_txs: RwLock<HashMap<String, mpsc::Sender<tokio_tungstenite::tungstenite::Message>>>,

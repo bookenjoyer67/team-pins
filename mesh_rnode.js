@@ -112,16 +112,15 @@ async function readLoop() {
             if (frame.port === 0 && frame.data.length > 0) {
               // Data frame
               const text = new TextDecoder().decode(frame.data);
-              console.log("[rnode] data frame:", text.slice(0, 100));
               rnodeOnReceive?.(text, 0);
             } else if (frame.port === 1) {
               // ACK frame — could be used later for delivery confirmation
             }
           }
         }
-        // Prevent buffer from growing indefinitely — keep last 8192 bytes
-        if (buffer.length > 8192) {
-          buffer = buffer.slice(buffer.length - 4096);
+        // Prevent buffer from growing indefinitely
+        if (buffer.length > 4096) {
+          buffer = buffer.slice(buffer.length - 2048);
         }
       }
     }

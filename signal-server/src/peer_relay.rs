@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -43,11 +42,17 @@ async fn connect_peer_loop(state: Arc<AppState>, url: String) {
     loop {
         info!("[peer_relay] connecting to peer: {}", url);
         match connect_async(&url).await {
-            Ok((mut ws_stream, _)) => {
+            Ok((ws_stream, _)) => {
                 info!("[peer_relay] connected to peer: {}", url);
                 backoff = Duration::from_secs(state.config.peer_relays.reconnect_delay_secs);
 
-                let (mut ws_tx, mut ws_rx) = ws_stream.split();
+                // Clean up any previous entry before inserting new one
+                {
+                    let mut txs = state.peer_relay_txs.write().await;
+                    txs.remove(&url);
+                }
+
+                let (mut ws_tx, ws_rx) = ws_stream.split();
                 let (tx, mut rx) = mpsc::channel::<Message>(1024);
 
                 // Register this peer
@@ -60,19 +65,16 @@ async fn connect_peer_loop(state: Arc<AppState>, url: String) {
                 send_hello(&state, &url).await;
 
                 // Spawn write half
-                let write_state = state.clone();
-                let write_url = url.clone();
+let _write_state = state.clone();
+let _write_url = url.clone();
                 let write_handle = tokio::spawn(async move {
                     while let Some(msg) = rx.recv().await {
                         if ws_tx.send(msg).await.is_err() { break; }
                     }
-                    // Cleanup on write disconnect
-                    let mut txs = write_state.peer_relay_txs.write().await;
-                    txs.remove(&write_url);
                 });
 
                 // Read loop: forward incoming messages
-                let read_state = state.clone();
+                let _read_state = state.clone();
                 let read_url = url.clone();
                 let mut peer_rx = ws_rx;
                 while let Some(msg) = peer_rx.next().await {
@@ -139,7 +141,9 @@ async fn send_hello(state: &AppState, peer_url: &str) {
 
     let txs = state.peer_relay_txs.read().await;
     if let Some(tx) = txs.get(peer_url) {
-        let _ = tx.send(Message::Text(announce)).await;
+        if tx.send(Message::Text(announce)).await.is_err() {
+            warn!("[peer_relay] failed to send hello to {}", peer_url);
+        }
     }
 }
 
@@ -153,12 +157,9 @@ async fn announce_communities(state: &AppState) {
         comm_data.push(serde_json::json!({
             "community_id": c.community_id,
             "name": c.name,
-            "description": c.description,
             "bounds": c.bounds,
             "member_count": c.members.len(),
             "has_public_layers": has_public,
-            "governance": c.governance,
-            "password_protected": c.password_hash.is_some(),
         }));
     }
     let announce = serde_json::json!({

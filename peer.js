@@ -1,10 +1,12 @@
 // WebRTC multi-peer manager
+import { compress_gzip, decompress_gzip } from "./core/pkg/e2e_core.js";
+
 const defaultConfig = {
   iceServers: [
     { urls: "stun:stun.freeswitch.org:3478" },
     { urls: "stun:stun.nextcloud.com:443" },
     {
-      urls: ["turn:openrelay.metered.ca:443", "turn:openrelay.metered.ca:80"],
+      urls: ["turns:openrelay.metered.ca:443?transport=tcp", "turns:openrelay.metered.ca:80?transport=tcp"],
       username: "openrelayproject",
       credential: "openrelayproject",
     },
@@ -55,9 +57,14 @@ function setupDataChannel(connId, dc) {
     try {
       const msg = JSON.parse(e.data);
       if (msg.type === "_ice" && Array.isArray(msg.data)) {
-        for (const c of msg.data) conn?.pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
-        return;
-      }
+         for (const c of msg.data) {
+           const candidateStr = c?.candidate || "";
+           if (/[a-f0-9\.:]+$/.test(candidateStr) && !/ (10\.|172\.1[6-9]|172\.2[0-9]|172\.3[0-1]|192\.168\.|127\.|0\.|169\.254\.|::1|f[c-d][0-9a-f]{2}|FE80|FEC0)/i.test(candidateStr)) {
+             conn?.pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+           }
+         }
+         return;
+       }
       onMessage?.(msg, connId);
     } catch (_) {}
   };
@@ -84,20 +91,33 @@ function decodeSignal(blob) {
 
 function signalSdpToDesc(signal) {
   const raw = atob(signal.sdp);
+  // Try gzip-decompressed format first (new), fall back to raw (old)
+  let sdpText;
   try {
-    const parsed = JSON.parse(raw);
+    const bytes = Uint8Array.from(raw.split("").map(c => c.charCodeAt(0)));
+    sdpText = new TextDecoder().decode(decompress_gzip(bytes));
+  } catch (_) {
+    sdpText = raw;
+  }
+  try {
+    const parsed = JSON.parse(sdpText);
     if (parsed && typeof parsed === "object" && parsed.type && parsed.sdp) return parsed;
   } catch (_) {}
-  return { type: signal.type, sdp: raw };
+  return { type: signal.type, sdp: sdpText };
 }
 
 function compact(type, connId, sdp) {
-  return (type === "offer" ? "o" : "a") + "|" + connId + "|" + btoa(sdp);
+  const compressed = compress_gzip(new TextEncoder().encode(sdp));
+  let bin = "";
+  for (let i = 0; i < compressed.length; i += 4096) {
+    bin += String.fromCharCode(...compressed.slice(i, Math.min(i + 4096, compressed.length)));
+  }
+  return (type === "offer" ? "o" : "a") + "|" + connId + "|" + btoa(bin);
 }
 
 function waitForEarlyIce(pc) {
   return new Promise(resolve => {
-    if (pc.iceGatheringState === "complete") return resolve();
+    if (pc.iceGatheringState === "complete") { resolve(); return; }
     const done = () => { clearTimeout(timer); pc.removeEventListener("icegatheringstatechange", check); resolve(); };
     const check = () => { if (pc.iceGatheringState === "complete") done(); };
     const timer = setTimeout(done, 2000);

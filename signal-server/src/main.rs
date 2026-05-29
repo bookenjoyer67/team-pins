@@ -144,7 +144,7 @@ async fn main() {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            flush_state.store.flush_snapshot().await;
+            flush_state.store.flush_if_dirty().await;
         }
     });
 
@@ -175,7 +175,10 @@ async fn main() {
 
     let main_handle = tokio::spawn(async move {
         while let Ok((stream, addr)) = listener.accept().await {
-            let permit = main_state.conn_semaphore.clone().acquire_owned().await;
+            let permit = match tokio::time::timeout(Duration::from_secs(10), main_state.conn_semaphore.clone().acquire_owned()).await {
+                Ok(p) => p,
+                Err(_) => { continue; }
+            };
             let s = main_state.clone();
             tokio::spawn(async move {
                 let _permit = permit;

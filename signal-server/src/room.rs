@@ -34,6 +34,7 @@ impl Room {
         }
     }
     
+    #[allow(dead_code)]
     pub fn broadcast_with_info(&self, txt: &str, exclude: &str, info: &str) {
         let msg = Message::Text(txt.to_string());
         let mut sent = 0;
@@ -52,7 +53,9 @@ impl Room {
 
     pub fn send_to(&self, txt: &str, target: &str) {
         if let Some(c) = self.clients.get(target) {
-            let _ = c.tx.try_send(Message::Text(txt.to_string()));
+            if c.tx.try_send(Message::Text(txt.to_string())).is_err() {
+                warn!("[room] send_to drop for client {} (channel full)", c.id);
+            }
         }
     }
 
@@ -62,7 +65,9 @@ impl Room {
             if cid != exclude {
                 if let Some(ref pk) = c.pubkey {
                     if community.members.iter().any(|m| m.pubkey == *pk) {
-                        let _ = c.tx.try_send(msg.clone());
+                        if c.tx.try_send(msg.clone()).is_err() {
+                            warn!("[room] broadcast_to_members drop for client {} (channel full)", c.id);
+                        }
                     }
                 }
             }

@@ -118,7 +118,9 @@ const TUTORIAL_PINS = [
 function hexToBytes(hex) {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+    const v = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
+    if (isNaN(v)) return new Uint8Array(0);
+    bytes[i] = v;
   }
   return bytes;
 }
@@ -234,8 +236,8 @@ export async function compressVideoBytes(bytes, mimeType, fileName) {
       w = Math.round(w * r);
       h = Math.round(h * r);
     }
-    w = w - (w % 2);
-    h = h - (h % 2);
+    w = Math.max(2, w - (w % 2));
+    h = Math.max(2, h - (h % 2));
     const canvas = document.createElement("canvas");
     canvas.width = w;
     canvas.height = h;
@@ -415,11 +417,10 @@ export function initMap() {
           map_center: [map.getCenter().lat, map.getCenter().lng],
           map_zoom: map.getZoom(),
         });
-      if (state.followMap)
-        window._broadcast?.("map_view", {
-          center: [map.getCenter().lat, map.getCenter().lng],
-          zoom: map.getZoom(),
-        });
+      window._broadcast?.("map_view", {
+        center: [map.getCenter().lat, map.getCenter().lng],
+        zoom: map.getZoom(),
+      });
       import("./gossip.js").then(g => g.notifyMapPan(map.getCenter().lat, map.getCenter().lng, map.getZoom())).catch(() => {});
     }, 500);
   });
@@ -564,8 +565,9 @@ export async function switchSet(sid) {
   if (s && s.map_center && state.map) {
     state.suppressMapSync = true;
     state.map.setView(s.map_center, s.map_zoom || 5);
+    const token = (state._syncToken = (state._syncToken || 0) + 1);
     setTimeout(() => {
-      state.suppressMapSync = false;
+      if (state._syncToken === token) { state.suppressMapSync = false; }
     }, 600);
   }
   await loadPins();
@@ -994,7 +996,7 @@ export async function showCommunityDetails(communityId) {
   const ttlSaveBtn = document.getElementById("cd-ttl-save");
   if (ttlSaveBtn) ttlSaveBtn.onclick = async () => {
     gov.ttl_enabled = document.getElementById("cd-ttl-enabled")?.checked || false;
-    gov.ttl_base_mins = (v => isNaN(v) ? 10080 : v)(parseInt(document.getElementById("cd-ttl-base")?.value));
+    gov.ttl_base_mins = (v => isNaN(v) ? 10080 : v)(parseInt(document.getElementById("cd-ttl-base")?.value, 10));
     c.governance = gov;
     await DB.saveCommunity(c);
     state.currentCommunity = c;
@@ -1078,7 +1080,20 @@ export async function showCommunityDetails(communityId) {
       navigator.clipboard.writeText(url).then(() => toast("Link copied", "#16a34a")).catch(() => {});
     };
     import("./core/pkg/e2e_core.js").then(mod => {
-      document.getElementById("cm-qr-svg").innerHTML = mod.generate_qr_svg(url) || "";
+      const svgEl = document.getElementById("cm-qr-svg");
+      if (svgEl) {
+        const svgStr = mod.generate_qr_svg(url) || "";
+        svgEl.textContent = "";
+        if (svgStr) {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(svgStr, "image/svg+xml");
+          const el = doc.documentElement;
+          if (el && el.tagName === "svg") {
+            el.querySelectorAll("script, [onload], [onclick], foreignObject").forEach(e => e.remove());
+            svgEl.appendChild(el);
+          }
+        }
+      }
     }).catch(() => {});
   };
 
@@ -1086,8 +1101,8 @@ export async function showCommunityDetails(communityId) {
   const genTokenBtn = document.getElementById("cd-gen-token-btn");
   if (genTokenBtn) genTokenBtn.onclick = async () => {
     const role = document.getElementById("cd-token-role")?.value || "contributor";
-    const expiry = parseInt(document.getElementById("cd-token-expiry")?.value) || 0;
-    const maxUses = parseInt(document.getElementById("cd-token-uses")?.value) || 1;
+    const expiry = parseInt(document.getElementById("cd-token-expiry")?.value, 10) || 0;
+    const maxUses = parseInt(document.getElementById("cd-token-uses")?.value, 10) || 1;
     const expTs = expiry > 0 ? Date.now() + expiry : 0;
     genTokenBtn.textContent = "Generating...";
     genTokenBtn.disabled = true;
@@ -1556,10 +1571,10 @@ export function startSlideshow(pinIds, opts = {}) {
     ctrlRow.querySelector("#tour-exit").onclick = cleanup;
 
     ctrlRow.querySelectorAll("#slideshow-dots [data-slide]").forEach(dot => {
-      dot.onclick = () => { playing = false; stopTimer(); goTo(parseInt(dot.dataset.slide)); renderControls(); };
+      dot.onclick = () => { playing = false; stopTimer(); goTo(parseInt(dot.dataset.slide, 10)); renderControls(); };
     });
     ctrlRow.querySelectorAll("#slideshow-dots [data-jump]").forEach(dot => {
-      dot.onclick = () => { playing = false; stopTimer(); goTo(parseInt(dot.dataset.jump)); renderControls(); };
+      dot.onclick = () => { playing = false; stopTimer(); goTo(parseInt(dot.dataset.jump, 10)); renderControls(); };
     });
 
     // Quick-nav popout triggered by ☰ button
@@ -1587,7 +1602,7 @@ export function startSlideshow(pinIds, opts = {}) {
       quickNav.querySelectorAll("[data-sld]").forEach(row => {
         row.onclick = () => {
           playing = false; stopTimer();
-          goTo(parseInt(row.dataset.sld));
+          goTo(parseInt(row.dataset.sld, 10));
           renderControls();
           closeQuickNav();
         };
@@ -1719,7 +1734,7 @@ function editSlideOrder(pinIds, currentIndex, onSave) {
 
     listEl.querySelectorAll(".reorder-up").forEach((btn) => {
       btn.onclick = (e) => {
-        const i = parseInt(btn.dataset.i);
+        const i = parseInt(btn.dataset.i, 10);
         if (i > 0) {
           [order[i], order[i - 1]] = [order[i - 1], order[i]];
           renderList();
@@ -1729,7 +1744,7 @@ function editSlideOrder(pinIds, currentIndex, onSave) {
 
     listEl.querySelectorAll(".reorder-down").forEach((btn) => {
       btn.onclick = (e) => {
-        const i = parseInt(btn.dataset.i);
+        const i = parseInt(btn.dataset.i, 10);
         if (i < order.length - 1) {
           [order[i], order[i + 1]] = [order[i + 1], order[i]];
           renderList();
@@ -2147,7 +2162,7 @@ export async function loadPins() {
               mh = `<br><video src="${url}" controls style="max-width:200px;max-height:150px;margin-top:4px;"></video>`;
             else if (tag === "audio")
               mh = `<br><audio src="${url}" controls style="width:100%;max-width:200px;"></audio>`;
-                } catch (e) { console.warn("[popup] media render failed:", e.message); ov.innerHTML += `<div style="color:#dc2626;font-size:11px;margin-top:4px;">Media unavailable</div>`; }
+                } catch (e) { console.warn("[popup] media render failed:", e.message); }
               }
             } catch (e) { console.warn("[popup] media decrypt failed:", e.message); }
           }
@@ -2583,7 +2598,7 @@ export async function savePin(lat, lng, title, note, color, media, emoji, layerI
 
   // Creation attestation
   if (!postedAnonymously && state.signingPublicKey && state.signingSecretKey) {
-    const creationPayload = pid + "created" + pin.created_at;
+    const creationPayload = pid + "|" + "created" + "|" + pin.created_at;
     const hexPayload = Array.from(new TextEncoder().encode(creationPayload)).map(b => b.toString(16).padStart(2, '0')).join('');
     pin.attestations = [{
       pubkey: state.signingPublicKey,
@@ -2607,8 +2622,8 @@ export async function savePin(lat, lng, title, note, color, media, emoji, layerI
     const cdEnc = encrypt_raw_bytes(new TextEncoder().encode(JSON.stringify(customData)), state.dek);
     pin.custom_data = { ciphertext: cdEnc.ciphertext, nonce: cdEnc.nonce };
   }
-  if (validFrom !== null && validFrom !== undefined && validFrom !== "") pin.valid_from = parseInt(validFrom);
-  if (validUntil !== null && validUntil !== undefined && validUntil !== "") pin.valid_until = parseInt(validUntil);
+  if (validFrom !== null && validFrom !== undefined && validFrom !== "") pin.valid_from = parseInt(validFrom, 10);
+  if (validUntil !== null && validUntil !== undefined && validUntil !== "") pin.valid_until = parseInt(validUntil, 10);
   if (media) pin.media = media;
   if (emoji) pin.emoji = emoji;
   await DB.savePin(pin);
@@ -2672,9 +2687,9 @@ export async function updatePin(pid, title, note, color, media, emoji, layerId, 
   else if (row.media) updated.media = row.media;
   if (emoji !== undefined) updated.emoji = emoji;
   else if (row.emoji) updated.emoji = row.emoji;
-  if (validFrom !== undefined) updated.valid_from = validFrom !== "" ? parseInt(validFrom) : null;
+  if (validFrom !== undefined) updated.valid_from = validFrom !== "" ? parseInt(validFrom, 10) : null;
   else if (row.valid_from !== undefined) updated.valid_from = row.valid_from;
-  if (validUntil !== undefined) updated.valid_until = validUntil !== "" ? parseInt(validUntil) : null;
+  if (validUntil !== undefined) updated.valid_until = validUntil !== "" ? parseInt(validUntil, 10) : null;
   else if (row.valid_until !== undefined) updated.valid_until = row.valid_until;
   if (row.author_pubkey) updated.author_pubkey = row.author_pubkey;
   await DB.savePin(updated);
@@ -3744,7 +3759,7 @@ export function addPinButton() {
       try {
         const resp = await fetch(
           `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`,
-          { signal: searchAbort.signal },
+          { signal: searchAbort.signal, headers: { "User-Agent": "piggPin/0.0.1" } },
         );
         const results = await resp.json();
         if (!results.length) return;
@@ -3988,8 +4003,8 @@ export function applyTimeFilter() {
 function readTimeInputs() {
   const fromEl = document.getElementById("time-from");
   const toEl = document.getElementById("time-to");
-  state.timeFrom = fromEl?.value ? parseInt(fromEl.value) : null;
-  state.timeTo = toEl?.value ? parseInt(toEl.value) : null;
+  state.timeFrom = fromEl?.value ? parseInt(fromEl.value, 10) : null;
+  state.timeTo = toEl?.value ? parseInt(toEl.value, 10) : null;
 }
 
 export function addTimeSlider() {
@@ -4084,7 +4099,7 @@ export function addTrustFilter() {
     applyTimeFilter();
   };
   document.getElementById("trust-threshold").oninput = (e) => {
-    const val = parseInt(e.target.value) / 10;
+    const val = parseInt(e.target.value, 10) / 10;
     state.minTrustScore = val;
     document.getElementById("trust-val").textContent = val.toFixed(1);
     applyTimeFilter();
@@ -4136,8 +4151,8 @@ export function generateLocationMarker(lat, lng, communityId) {
   document.getElementById("loc-print").onclick = () => {
     const w = window.open("", "_blank", "width=400,height=500");
     if (w) {
-      w.document.write(`<html><body style="text-align:center;font-family:sans-serif;padding:20px;">${ov.querySelector("div").innerHTML}</body></html>`);
-      w.document.close();
+      w.document.body.innerHTML = ov.querySelector("div").innerHTML;
+      w.document.body.style.cssText = "text-align:center;font-family:sans-serif;padding:20px;";
       w.print();
     }
   };

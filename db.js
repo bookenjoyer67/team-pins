@@ -9,9 +9,11 @@ export function setMigrationSigningPubkey(pubkey) {
   _migrationSigningPubkey = pubkey;
 }
 
+let _dbPromise = null;
+
 function openDB() {
-  return new Promise((resolve, reject) => {
-    if (db) return resolve(db);
+  if (_dbPromise) return _dbPromise;
+  _dbPromise = new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const d = e.target.result;
@@ -104,13 +106,14 @@ function openDB() {
       }
     };
     req.onsuccess = (e) => { db = e.target.result; resolve(db); };
-    req.onerror = () => { db = null; reject(req.error); };
-    req.onblocked = () => { db = null; reject(new Error("Database blocked by another connection")); };
+    req.onerror = () => { _dbPromise = null; reject(req.error); };
+    req.onblocked = () => { _dbPromise = null; reject(new Error("Database blocked by another connection")); };
 
     setTimeout(() => {
-      if (!db) reject(new Error("Database open timed out"));
+      if (!db) { _dbPromise = null; reject(new Error("Database open timed out")); }
     }, 30000);
   });
+  return _dbPromise;
 }
 
 function tx(store, mode = "readonly") {
@@ -118,6 +121,7 @@ function tx(store, mode = "readonly") {
     return db.transaction(store, mode).objectStore(store);
   } catch (e) {
     db = null;
+    _dbPromise = null;
     throw e;
   }
 }
@@ -225,7 +229,7 @@ export async function renameTeam(teamId, newName) {
 
 export async function deleteTeam(teamId) {
   await openDB();
-  const txn = db.transaction(["teams", "pins", "drawings", "settings", "layers", "schemas", "communities", "annotations", "tombstones"], "readwrite");
+  const txn = db.transaction(["teams", "pins", "drawings", "settings", "layers", "schemas", "communities", "annotations", "tombstones", "subscribed_layers", "layer_deks", "chains"], "readwrite");
   const pinKeys = await promisify(txn.objectStore("pins").index("team_id").getAllKeys(teamId));
   for (const key of pinKeys) {
     const annKeys = await promisify(txn.objectStore("annotations").index("pin_id").getAllKeys(key));
@@ -401,10 +405,7 @@ export async function saveSigningKey(kp) {
 }
 
 function generateUUIDCompat() {
-  return crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
-    const r = Math.random() * 16 | 0;
-    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
-  });
+  return crypto.randomUUID();
 }
 
 // --- settings ---

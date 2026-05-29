@@ -80,6 +80,12 @@ button, input, textarea, select { font-family: inherit; }
 #peer-list .peer-dot.online { background: #16a34a; }
 #peer-list .peer-dot.offline { background: var(--text-muted); }
 #peer-list .peer-dot.community { background: #2563eb; }
+.peer-follow-toggle {
+  display: block; width: 100%; padding: 3px 6px; border: 1px solid var(--border);
+  background: var(--bg-input); color: var(--text); border-radius: 4px;
+  cursor: pointer; font-size: 11px; text-align: left; margin-bottom: 6px;
+}
+.peer-follow-toggle.on { color: #16a34a; border-color: #16a34a; }
 .leaflet-control-zoom { margin-top: 42px !important; }
 .leaflet-control-layers { margin-top: 0px !important; margin-left: 2px !important; }
 .leaflet-control-layers-toggle { width: 30px !important; height: 30px !important; background-size: 18px 18px !important; }
@@ -438,11 +444,7 @@ body.dark input[type="text"][style*="position:absolute"]::placeholder {
     max-width: 94vw !important;
     width: 92vw !important;
   }
-  div[style*="min-width:300px"][style*="max-width"],
-  div[style*="min-width:320px"][style*="max-width"],
-  div[style*="min-width:340px"][style*="max-width"],
-  div[style*="min-width:360px"][style*="max-width"],
-  div[style*="min-width:420px"][style*="max-width"] {
+  .modal-responsive {
     max-width: 94vw !important;
     width: 92vw !important;
   }
@@ -511,8 +513,8 @@ body.dark input[type="text"][style*="position:absolute"]::placeholder {
   position: fixed; top: 0; left: 0; right: 0; z-index: 999;
 }
 
-/* Remove old top bar / menu toggle remnants */
-#top-bar { display: none !important; }
+/* Top bar / menu toggle */
+#top-bar { display: none; }
 #menu-toggle { display: none !important; }
 
 /* Adjust Leaflet controls for thin top bar */
@@ -561,7 +563,8 @@ body.drawer-expanded .leaflet-control-container {
 .slideshow-fullscreen #drawer-collapsed,
 .slideshow-fullscreen #drawer-expanded,
 .slideshow-fullscreen #install-banner,
-.slideshow-fullscreen .leaflet-control-container .leaflet-control:not(.leaflet-control-attribution) {
+.slideshow-fullscreen .leaflet-control-container .leaflet-control-zoom,
+.slideshow-fullscreen .leaflet-control-container .leaflet-draw {
   display: none !important;
 }
 

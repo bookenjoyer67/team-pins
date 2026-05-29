@@ -5,9 +5,6 @@ function directPeers() {
   for (const peer of state.peers.values()) {
     if (peer.userId && !peer.offline) pubkeys.add(peer.userId);
   }
-  for (const peer of state.peers.values()) {
-    if (peer.userId && peer.offline) pubkeys.add(peer.userId);
-  }
   return pubkeys;
 }
 

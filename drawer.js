@@ -8,6 +8,7 @@ import * as Relay from "./relay.js";
 import * as Mesh from "./mesh.js";
 import * as Sync from "./sync.js";
 import * as DB from "./db.js";
+import { generate_qr_svg } from "./core/pkg/e2e_core.js";
 
 const COLLAPSED_WIDTH = "32px";
 const EXPANDED_WIDTH = "200px";
@@ -68,9 +69,13 @@ const SECTIONS = [
       { id: "relay", icon: "⚡", label: "Relay", action: () => window._showIceDialog?.() },
       { id: "rotate", icon: "🔄", label: "Rotate Keys", action: () => Sync.rotateSetKeys() },
       { id: "name", icon: "👤", label: "Name", action: showNameModal },
-      { id: "sound", icon: "🔊", label: "Sound", action: () => window._toggleSound?.() },
+      { id: "sound", icon: "🔊", label: "Sound",
+        active: () => window._isSoundEnabled?.() || false,
+        action: () => { const on = window._toggleSound?.(); toast(on ? "Sound ON" : "Sound MUTED", on ? "#16a34a" : "#9ca3af"); } },
       { id: "theme", icon: "🌓", label: "Theme", action: () => window._toggleTheme?.() },
       { id: "language", icon: "🌐", label: "Language", action: showLangChooser },
+      { id: "github", icon: "🐙", label: "GitHub", action: () => window.open("https://github.com/bookenjoyer67/team-pins", "_blank") },
+      { id: "donate", icon: "💸", label: "Donate", action: showDonateModal },
     ],
   },
 ];
@@ -384,13 +389,41 @@ function showLangChooser() {
   });
 }
 
+function showDonateModal() {
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;";
+  const qrSvg = generate_qr_svg("https://cash.app/$catpeoplerock");
+  ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:280px;box-shadow:0 4px 20px rgba(0,0,0,0.3);text-align:center;">
+    <h3 style="margin:0 0 16px;font-size:16px;">Support piggPin</h3>
+    <div style="display:inline-block;background:white;padding:12px;border-radius:8px;margin-bottom:12px;">${qrSvg}</div>
+    <div style="font-size:18px;font-weight:600;margin-bottom:16px;color:var(--text);">$catpeoplerock</div>
+    <div style="display:flex;gap:8px;justify-content:center;">
+      <button id="donate-copy-tag" style="padding:8px 16px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;font-size:13px;">Copy Tag</button>
+      <button id="donate-close" style="padding:8px 16px;border:1px solid var(--border);background:var(--border-light);color:var(--text);border-radius:4px;cursor:pointer;font-size:13px;">Close</button>
+    </div>
+  </div>`;
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  ov.addEventListener("keydown", (e) => { if (e.key === "Escape") ov.remove(); });
+  document.body.appendChild(ov);
+
+  document.getElementById("donate-copy-tag").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText("$catpeoplerock");
+      toast("Copied to clipboard", "#16a34a");
+    } catch {
+      toast("Failed to copy", "#dc2626");
+    }
+  };
+  document.getElementById("donate-close").onclick = () => ov.remove();
+}
+
 // --- Refresh active states ---
 
 export function refreshToolStates() {
   const el = _drawerEl;
   if (!el) return;
   el.querySelectorAll(".drawer-tool-toggle").forEach(btn => {
-    const section = SECTIONS.find(s => s.id === "tools");
+    const section = SECTIONS.find(s => s.id === "tools") || SECTIONS.find(s => s.id === "settings");
     const item = section?.items.find(t => t.id === btn.dataset.tool);
     if (item?.active) {
       const on = item.active();
@@ -647,8 +680,8 @@ function createTimeSlider() {
   document.getElementById("drawer-time-apply").onclick = () => {
     const f = document.getElementById("drawer-time-from")?.value;
     const t = document.getElementById("drawer-time-to")?.value;
-    state.timeFrom = f ? parseInt(f) : null;
-    state.timeTo = t ? parseInt(t) : null;
+        state.timeFrom = f ? parseInt(f, 10) : null;
+        state.timeTo = t ? parseInt(t, 10) : null;
     Map.applyTimeFilter();
   };
 }
@@ -668,7 +701,7 @@ function createTrustSlider() {
   const slider = document.getElementById("drawer-trust-slider-input");
   const label = document.getElementById("drawer-trust-slider-label");
   slider.oninput = () => {
-    const v = parseInt(slider.value);
+    const v = parseInt(slider.value, 10);
     state.minTrustScore = v > 0 ? v / 10 : null;
     label.textContent = v > 0 ? (v / 10).toFixed(1) : "off";
     Map.applyTrustFilter?.();
@@ -697,8 +730,10 @@ export function open() {
   _drawerEl.style.width = EXPANDED_WIDTH;
   _drawerEl.style.background = "var(--bg-card)";
   _drawerEl.style.borderLeft = "1px solid var(--border)";
-  document.getElementById("drawer-collapsed").style.display = "none";
-  document.getElementById("drawer-expanded").style.display = "flex";
+  const collapsed = document.getElementById("drawer-collapsed");
+  if (collapsed) collapsed.style.display = "none";
+  const expanded = document.getElementById("drawer-expanded");
+  if (expanded) expanded.style.display = "flex";
   _overlayEl.style.display = "block";
   document.body.classList.add("drawer-expanded");
   refreshToolStates();
@@ -718,8 +753,10 @@ export function close() {
   _drawerEl.style.width = COLLAPSED_WIDTH;
   _drawerEl.style.background = "transparent";
   _drawerEl.style.borderLeft = "none";
-  document.getElementById("drawer-collapsed").style.display = "flex";
-  document.getElementById("drawer-expanded").style.display = "none";
+  const collapsed = document.getElementById("drawer-collapsed");
+  if (collapsed) collapsed.style.display = "flex";
+  const expanded = document.getElementById("drawer-expanded");
+  if (expanded) expanded.style.display = "none";
   _overlayEl.style.display = "none";
   document.body.classList.remove("drawer-expanded");
 }

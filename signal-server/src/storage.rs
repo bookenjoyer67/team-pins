@@ -85,6 +85,7 @@ pub struct CommunityConfig {
     pub governance: serde_json::Value,
     pub bounds: Option<Vec<f64>>,
     pub password_hash: Option<String>,
+    pub join_wrapped_dek: Option<String>,
     pub used_token_nonces: Vec<String>,
 }
 
@@ -160,28 +161,39 @@ pub struct PersistentStore {
 impl PersistentStore {
     pub fn new(snapshot_path: Option<PathBuf>) -> Self {
         if let Some(ref path) = snapshot_path {
-            if let Ok(data) = std::fs::read_to_string(path) {
-                if let Ok(snap) = serde_json::from_str::<SnapshotData>(&data) {
-                    let mut communities = HashMap::new();
-                    for c in snap.communities {
-                        communities.insert(c.community_id.clone(), c);
+            if let Ok(meta) = std::fs::metadata(path) {
+                if meta.len() > 100_000_000 {
+                    tracing::error!("[relay] snapshot file too large ({} bytes), data lost — starting fresh", meta.len());
+                } else if let Ok(data) = std::fs::read_to_string(path) {
+                    let bak = path.with_extension("json.bak");
+                    let _ = std::fs::write(&bak, &data);
+                    match serde_json::from_str::<SnapshotData>(&data) {
+                        Ok(snap) => {
+                        let mut communities = HashMap::new();
+                        for c in snap.communities {
+                            communities.insert(c.community_id.clone(), c);
+                        }
+                        tracing::info!("[relay] loaded snapshot: {} communities", communities.len());
+                        return Self {
+                            communities: RwLock::new(communities),
+                            pins: RwLock::new(snap.pins),
+                            annotations: RwLock::new(snap.annotations),
+                            drawings: RwLock::new(snap.drawings),
+                            tombstones: RwLock::new(snap.tombstones),
+                            votes: RwLock::new(snap.votes),
+                            tokens: RwLock::new(snap.tokens),
+                            public_layers: RwLock::new(snap.public_layers),
+                            layer_subscriptions: RwLock::new(snap.layer_subscriptions),
+                            member_deks: RwLock::new(snap.member_deks),
+                            pending_dek_requests: RwLock::new(snap.pending_dek_requests),
+                            snapshot_path,
+                            dirty: std::sync::atomic::AtomicBool::new(false),
+                        };
+                        }
+                        Err(e) => {
+                            tracing::error!("[relay] snapshot parse failed: {} (backup saved to {})", e, bak.display());
+                        }
                     }
-                    tracing::info!("[relay] loaded snapshot: {} communities", communities.len());
-                    return Self {
-                        communities: RwLock::new(communities),
-                        pins: RwLock::new(snap.pins),
-                        annotations: RwLock::new(snap.annotations),
-                        drawings: RwLock::new(snap.drawings),
-                        tombstones: RwLock::new(snap.tombstones),
-                        votes: RwLock::new(snap.votes),
-                        tokens: RwLock::new(snap.tokens),
-                        public_layers: RwLock::new(snap.public_layers),
-                        layer_subscriptions: RwLock::new(snap.layer_subscriptions),
-                        member_deks: RwLock::new(snap.member_deks),
-                        pending_dek_requests: RwLock::new(snap.pending_dek_requests),
-                        snapshot_path,
-                        dirty: std::sync::atomic::AtomicBool::new(false),
-                    };
                 }
             }
         }
@@ -209,26 +221,51 @@ impl PersistentStore {
                 pending_dek_requests: self.pending_dek_requests.read().await.clone(),
             };
             if let Ok(json) = serde_json::to_string_pretty(&snap) {
-                let tmp = path.with_extension("tmp");
-                let _ = std::fs::write(&tmp, &json);
-                let _ = std::fs::rename(&tmp, path);
+                let tmp = path.with_file_name(
+                    path.file_name().map(|n| {
+                        let mut s = n.to_os_string();
+                        s.push(".tmp");
+                        s
+                    }).unwrap_or_else(|| std::ffi::OsString::from("snapshot.json.tmp"))
+                );
+                if std::fs::write(&tmp, &json).is_err() {
+                    tracing::error!("[relay] failed to write snapshot to {}", tmp.display());
+                } else if std::fs::rename(&tmp, path).is_err() {
+                    tracing::error!("[relay] failed to rename snapshot from {} to {}", tmp.display(), path.display());
+                }
             }
         }
     }
 
     pub fn mark_dirty(&self) {
-        self.dirty.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.dirty.store(true, std::sync::atomic::Ordering::Release);
     }
 
-    pub async fn flush_snapshot(&self) {
-        if self.dirty.swap(false, std::sync::atomic::Ordering::SeqCst) {
+    pub async fn flush_if_dirty(&self) {
+        if self.dirty.swap(false, std::sync::atomic::Ordering::AcqRel) {
             self.save_snapshot().await;
         }
     }
 
     pub async fn register_community(&self, config: CommunityConfig) {
         {
-            self.communities.write().await.insert(config.community_id.clone(), config);
+            let mut map = self.communities.write().await;
+            if let Some(existing) = map.get_mut(&config.community_id) {
+                existing.name = config.name;
+                existing.description = config.description;
+                existing.published = config.published;
+                existing.public_key = config.public_key;
+                existing.wrapped_dek = config.wrapped_dek;
+                existing.key_derivation = config.key_derivation;
+                existing.governance = config.governance;
+                existing.bounds = config.bounds;
+                existing.password_hash = config.password_hash;
+                existing.genesis_public_key = config.genesis_public_key;
+                existing.owner_pubkey = config.owner_pubkey;
+                existing.join_wrapped_dek = config.join_wrapped_dek;
+            } else {
+                map.insert(config.community_id.clone(), config);
+            }
         }
         self.mark_dirty();
     }
@@ -252,6 +289,16 @@ impl PersistentStore {
             // Clean votes for this community
             let prefix = format!("{}:", community_id);
             self.votes.write().await.retain(|k, _| !k.starts_with(&prefix));
+            // Clean tombstones for this community (keyed by tombstone_id UUID)
+            self.tombstones.write().await.retain(|_, t| t.community_id != community_id);
+            // Clean tokens for this community (keyed by community_id directly)
+            self.tokens.write().await.remove(community_id);
+            // Clean public layers and subscriptions
+            self.public_layers.write().await.remove(community_id);
+            self.layer_subscriptions.write().await.retain(|k, _| !k.starts_with(&prefix));
+            // Clean member DEKs and pending requests (keyed by community_id directly)
+            self.member_deks.write().await.remove(community_id);
+            self.pending_dek_requests.write().await.remove(community_id);
         }
         self.mark_dirty();
     }
@@ -264,6 +311,14 @@ impl PersistentStore {
             }
             let vote_key = format!("{}:{}", community_id, pin_id);
             self.votes.write().await.remove(&vote_key);
+            // Cascade-delete annotations linked to this pin
+            if let Some(list) = self.annotations.write().await.get_mut(community_id) {
+                list.retain(|a| a.pin_id != pin_id);
+            }
+            // Cascade-delete tombstones targeting this pin
+            // (tombstones are keyed by tombstone_id UUID, filter by community_id + target_id match)
+            let target_pin = pin_id.to_string();
+            self.tombstones.write().await.retain(|_, t| !(t.community_id == community_id && t.target_id == target_pin));
         }
         self.mark_dirty();
     }
@@ -315,6 +370,11 @@ impl PersistentStore {
         self.annotations.read().await.get(community_id)
             .map(|anns| anns.iter().filter(|a| a.updated_at > since || a.created_at > since).cloned().collect())
             .unwrap_or_default()
+    }
+
+    pub async fn get_annotation(&self, annotation_id: &str) -> Option<StoredAnnotation> {
+        self.annotations.read().await.values()
+            .find_map(|anns| anns.iter().find(|a| a.annotation_id == annotation_id).cloned())
     }
 
     pub async fn store_drawing(&self, dwg: StoredDrawing) {
@@ -410,7 +470,8 @@ impl PersistentStore {
                         votes.push(vote);
                     }
                     ann.votes = serde_json::Value::Array(votes);
-                    let now = crate::messages::unix_millis();                    ann.updated_at = now;
+                    let now = crate::messages::unix_millis();
+                    ann.updated_at = now;
                 }
             }
         }
@@ -432,7 +493,7 @@ impl PersistentStore {
             for (_, pin_list) in pins.iter_mut() {
                 let before = pin_list.len();
                 pin_list.retain(|p| {
-                    let keep = p.ttl_expires_at.map_or(true, |e| e == 0 || e > now);
+                    let keep = p.ttl_expires_at.map_or(true, |e| e > 0 && e > now);
                     keep
                 });
                 deleted += before - pin_list.len();
@@ -467,7 +528,11 @@ impl PersistentStore {
             return Err("only founders can create tokens");
         }
         drop(communities);
+        // Verify community still exists under token write lock
         let mut tokens = self.tokens.write().await;
+        if !self.communities.read().await.contains_key(community_id) {
+            return Err("community not found");
+        }
         tokens.entry(community_id.to_string()).or_default().push(token);
         self.mark_dirty();
         Ok(())
@@ -476,7 +541,7 @@ impl PersistentStore {
     pub async fn claim_token(&self, community_id: &str, nonce: &str, pubkey: &str) -> Result<String, &'static str> {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or(std::time::Duration::ZERO)
             .as_millis() as u64;
         let mut tokens = self.tokens.write().await;
         let list = tokens.get_mut(community_id).ok_or("token not found")?;
@@ -511,9 +576,19 @@ impl PersistentStore {
         if c.members.iter().any(|m| m.pubkey == member.pubkey) {
             return Err("already a member");
         }
-        let member_pubkey = member.pubkey.clone();
+        let _member_pubkey = member.pubkey.clone();
         c.members.push(member);
-        c.used_token_nonces.push(member_pubkey);
+        self.mark_dirty();
+        Ok(())
+    }
+
+    pub async fn add_member_by_token(&self, community_id: &str, member: MemberRecord) -> Result<(), &'static str> {
+        let mut communities = self.communities.write().await;
+        let c = communities.get_mut(community_id).ok_or("community not found")?;
+        if c.members.iter().any(|m| m.pubkey == member.pubkey) {
+            return Err("already a member");
+        }
+        c.members.push(member);
         self.mark_dirty();
         Ok(())
     }
@@ -547,7 +622,7 @@ impl PersistentStore {
     pub async fn cleanup_expired_tokens(&self) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or(std::time::Duration::ZERO)
             .as_millis() as u64;
         let mut cleaned = 0usize;
         {
@@ -656,6 +731,7 @@ impl PersistentStore {
         self.mark_dirty();
     }
 
+    #[allow(dead_code)]
     pub async fn take_pending_dek_requests(&self, community_id: &str) -> Vec<String> {
         let mut pending = self.pending_dek_requests.write().await;
         pending.remove(community_id).unwrap_or_default()
@@ -669,6 +745,7 @@ impl PersistentStore {
         self.mark_dirty();
     }
 
+    #[allow(dead_code)]
     pub async fn get_member_deks_for_community(&self, community_id: &str) -> Vec<MemberDek> {
         self.member_deks.read().await
             .get(community_id)
@@ -676,6 +753,7 @@ impl PersistentStore {
             .unwrap_or_default()
     }
 
+    #[allow(dead_code)]
     pub async fn delete_member_dek(&self, community_id: &str, member_pubkey: &str) {
         let mut deks = self.member_deks.write().await;
         if let Some(map) = deks.get_mut(community_id) {

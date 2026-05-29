@@ -3,13 +3,13 @@ import { generate_uuid } from "./core/pkg/e2e_core.js";
 import * as DB from "./db.js";
 import { state } from "./state.js";
 import { escapeHtml, toast, confirmDialog, promptRoomPassword, hashCommunityPassword } from "./dialogs.js";
+import { t } from "./i18n.js";
 
 function safeBounds(b) {
   if (!b || !Array.isArray(b) || b.length !== 4) return "";
   if (!b.every(v => typeof v === "number" && isFinite(v))) return "";
   return escapeHtml(JSON.stringify(b));
 }
-import { t } from "./i18n.js";
 import { loadPins, loadDrawings, loadChains } from "./map.js";
 
 // --- Layer system (intra-set) ---
@@ -377,8 +377,25 @@ export async function showDiscoverModal() {
               public_key = encode_hex(kp.public);
               secret_key = encode_hex(kp.secret);
               if (!myWrappedDek) {
-                const { requestMemberDek } = await import("./relay.js");
-                requestMemberDek(sid, public_key);
+                // Try join_wrapped_dek first (server-side bootstrap DEK)
+                if (result.join_wrapped_dek) {
+                  try {
+                    const parts = result.join_wrapped_dek.split(":");
+                    if (parts.length === 3) {
+                      const { decrypt_with_password, decode_hex, wrap_dek } = await import("./core/pkg/e2e_core.js");
+                      const dekHex = decrypt_with_password(parts[0], parts[1], parts[2], sid);
+                      const dkBytes = decode_hex(dekHex);
+                      myWrappedDek = wrap_dek(dkBytes, public_key);
+                      import("./relay.js").then(r => {
+                        r.rewrapMemberDek(sid, public_key, myWrappedDek);
+                      }).catch(() => {});
+                    }
+                  } catch (_) {}
+                }
+                if (!myWrappedDek) {
+                  const { requestMemberDek } = await import("./relay.js");
+                  requestMemberDek(sid, public_key);
+                }
               }
             }
 
@@ -388,7 +405,7 @@ export async function showDiscoverModal() {
               await DB.saveCommunity({
                 community_id: sid, name: result.name, description: result.description || "",
                 genesis_public_key: result.genesis_public_key || "",
-                visibility: "public",
+                visibility: "private",
                 members: result.members || [],
                 governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" },
                 bounds: (result.bounds && Array.isArray(result.bounds) && result.bounds.length === 4) ? result.bounds : null,
@@ -401,14 +418,14 @@ export async function showDiscoverModal() {
             clean();
             const { switchSet, loadSetList } = await import("./map.js");
             await loadSetList();
-            await switchSet(sid);
-            if (window._relayIsConnected?.()) await window._relaySyncDelta?.(sid);
-            const { loadPins, loadDrawings } = await import("./map.js");
-            await loadPins();
-            await loadDrawings();
             if (result.needs_key_exchange && !isPasswordDerived && !myWrappedDek) {
               toast("Joined " + result.name + " — awaiting key exchange", "#f97316");
             } else {
+              await switchSet(sid);
+              if (window._relayIsConnected?.()) await window._relaySyncDelta?.(sid);
+              const { loadPins, loadDrawings } = await import("./map.js");
+              await loadPins();
+              await loadDrawings();
               toast("Joined " + result.name, "#16a34a");
             }
           } else {
@@ -583,7 +600,7 @@ export function showLayersModal() {
     listEl.querySelectorAll(".ly-opacity").forEach(slider => {
       slider.oninput = (e) => {
         const id = slider.dataset.id;
-        const val = parseInt(slider.value) / 10;
+        const val = parseInt(slider.value, 10) / 10;
         setLayerOpacity(id, val);
         const label = slider.nextElementSibling;
         if (label) label.textContent = Math.round(val * 100) + "%";

@@ -70,60 +70,6 @@ export function renderSchemaFieldsById(schemaId, containerId, existingCustomData
   </div>`;
 }
 
-function renderSchemaFieldsForLayer(layerSelectId, containerId, existingCustomDataEnc) {
-  const container = document.getElementById(containerId);
-  if (!container) return;
-  const sel = document.getElementById(layerSelectId);
-  const layerId = sel ? sel.value : null;
-  const schema = layerId ? findLayerSchema(layerId) : null;
-  if (!schema || !schema.fields || schema.fields.length === 0) {
-    container.innerHTML = "";
-    return;
-  }
-  let existingData = {};
-  if (existingCustomDataEnc && state.dek) {
-    try {
-      const raw = decrypt_raw_bytes(existingCustomDataEnc.ciphertext, existingCustomDataEnc.nonce, state.dek);
-      existingData = JSON.parse(new TextDecoder().decode(raw));
-    } catch (_) {}
-  }
-  container.innerHTML = `<div style="border:1px solid var(--border);border-radius:4px;padding:8px;margin-bottom:4px;">
-    <div style="font-size:11px;color:var(--text-dim);margin-bottom:6px;">📋 ${escapeHtml(schema.name)}</div>
-    ${schema.fields.map(f => {
-      const val = existingData[f.key] !== undefined ? existingData[f.key] : "";
-      const valAttr = escapeHtml(String(val));
-      if (f.type === "choice" && f.options) {
-        return `<div style="margin-bottom:4px;"><span style="font-size:11px;color:var(--text-dim);">${escapeHtml(f.label)}</span>
-          <select name="sf_${f.key}" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;">
-          ${f.options.map(o => `<option value="${escapeHtml(o)}" ${String(val) === o ? "selected" : ""}>${escapeHtml(o)}</option>`).join("")}
-          </select></div>`;
-      }
-      if (f.type === "boolean") {
-        return `<div style="margin-bottom:4px;"><span style="font-size:11px;color:var(--text-dim);">${escapeHtml(f.label)}</span>
-          <select name="sf_${f.key}" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;">
-          <option value="true" ${val === "true" || val === true ? "selected" : ""}>true</option>
-          <option value="false" ${val === "false" || val === false ? "selected" : ""}>false</option>
-          </select></div>`;
-      }
-      if (f.type === "date") {
-        return `<div style="margin-bottom:4px;"><span style="font-size:11px;color:var(--text-dim);">${escapeHtml(f.label)}</span>
-          <input type="date" name="sf_${f.key}" value="${valAttr}" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div>`;
-      }
-      if (f.type === "time") {
-        return `<div style="margin-bottom:4px;"><span style="font-size:11px;color:var(--text-dim);">${escapeHtml(f.label)}</span>
-          <input type="time" name="sf_${f.key}" value="${valAttr}" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div>`;
-      }
-      if (f.type === "number") {
-        return `<div style="margin-bottom:4px;"><span style="font-size:11px;color:var(--text-dim);">${escapeHtml(f.label)}</span>
-          <input type="number" name="sf_${f.key}" value="${valAttr}" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div>`;
-      }
-      // text (default)
-      return `<div style="margin-bottom:4px;"><span style="font-size:11px;color:var(--text-dim);">${escapeHtml(f.label)}</span>
-        <input type="text" name="sf_${f.key}" value="${valAttr}" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div>`;
-    }).join("")}
-  </div>`;
-}
-
 export function collectSchemaData(containerId) {
   const container = document.getElementById(containerId);
   if (!container || container.children.length === 0) return null;
@@ -263,40 +209,37 @@ export function showSchemaEditorModal(schemaId) {
 
     document.querySelectorAll(".sch-fdel").forEach(btn => {
       btn.onclick = () => {
-        fields.splice(parseInt(btn.dataset.i), 1);
+        fields.splice(parseInt(btn.dataset.i, 10), 1);
         renderFieldsList();
       };
     });
     document.querySelectorAll(".sch-fup").forEach(btn => {
       btn.onclick = () => {
-        const i = parseInt(btn.dataset.i);
+        const i = parseInt(btn.dataset.i, 10);
         if (i > 0) { [fields[i], fields[i - 1]] = [fields[i - 1], fields[i]]; renderFieldsList(); }
       };
     });
     document.querySelectorAll(".sch-fdown").forEach(btn => {
       btn.onclick = () => {
-        const i = parseInt(btn.dataset.i);
+        const i = parseInt(btn.dataset.i, 10);
         if (i < fields.length - 1) { [fields[i], fields[i + 1]] = [fields[i + 1], fields[i]]; renderFieldsList(); }
       };
     });
     document.querySelectorAll(".sch-fname").forEach(inp => {
-      inp.onchange = () => { fields[parseInt(inp.dataset.i)].label = inp.value; };
+      inp.onchange = () => { fields[parseInt(inp.dataset.i, 10)].label = inp.value; };
     });
     document.querySelectorAll(".sch-ftype").forEach(sel => {
       sel.onchange = () => {
-        const i = parseInt(sel.dataset.i);
+        const i = parseInt(sel.dataset.i, 10);
         fields[i].type = sel.value;
         if (sel.value !== "choice") fields[i].options = undefined;
         else fields[i].options = fields[i].options || [];
         renderFieldsList();
       };
     });
-    document.querySelectorAll(".sch-fname").forEach(inp => {
-      inp.onchange = () => { fields[parseInt(inp.dataset.i)].label = inp.value; };
-    });
     document.querySelectorAll(".sch-fopts").forEach(inp => {
       inp.onchange = () => {
-        const i = parseInt(inp.dataset.i);
+        const i = parseInt(inp.dataset.i, 10);
         fields[i].options = inp.value.split(",").map(s => s.trim()).filter(Boolean);
       };
     });
@@ -335,7 +278,7 @@ export function showSchemaEditorModal(schemaId) {
     if (!name) { toast("Schema name required", "#f97316"); return; }
     // Collect field data and auto-generate keys
     document.querySelectorAll(".sch-fname").forEach(inp => {
-      const i = parseInt(inp.dataset.i);
+      const i = parseInt(inp.dataset.i, 10);
       fields[i].label = inp.value || fields[i].label;
       if (!fields[i].key || /^f\d+$/.test(fields[i].key)) {
         let candidate = (inp.value || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 30) || ("f" + (i + 1));
@@ -350,7 +293,7 @@ export function showSchemaEditorModal(schemaId) {
       }
     });
     document.querySelectorAll(".sch-fopts").forEach(inp => {
-      const i = parseInt(inp.dataset.i);
+      const i = parseInt(inp.dataset.i, 10);
       fields[i].options = inp.value.split(",").map(s => s.trim()).filter(Boolean);
     });
     const sid = existing ? existing.schema_id : generate_uuid();

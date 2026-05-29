@@ -117,7 +117,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
         }
     };
 
-    let (mut ws_tx, mut ws_rx) = ws_stream.split();
+    let (mut ws_tx, ws_rx) = ws_stream.split();
     let (tx, mut rx) = mpsc::channel::<Message>(CHANNEL_CAP);
 
     let join_data: serde_json::Value = match serde_json::from_str(&join_msg) {
@@ -141,7 +141,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
         return;
     }
 
-    let cid = uuid::Uuid::new_v4().to_string()[..8].to_string();
+    let cid = uuid::Uuid::new_v4().to_string();
 
     let client_is_relay_room;
     {
@@ -178,7 +178,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                 }
                 room.pw_hash = Some(messages::hash_password(pw));
             }
-        } else if state.config.security.require_passwords {
+        } else if state.config.security.require_passwords && room_name != "community-relay" {
             let _ = ws_tx.send(Message::Text(messages::json_err("password required"))).await;
             return;
         }
@@ -280,17 +280,33 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             let mqtt_payload = serde_json::json!({"p": payload, "to": to}).to_string();
                                             let tx = state.mesh_uplink.read().await;
                                             if let Some(ref tx) = *tx {
-                                                let _ = tx.send(mqtt_payload).await;
+                                                if tx.send(mqtt_payload).await.is_err() {
+                                                    warn!("[relay] mesh_uplink TX failed, channel closed");
+                                                }
                                             }
                                         }
+                                        continue;
                                     } else if (ty == "mesh_uplink_position" || ty == "mesh_uplink_presence") && read_room == "mesh" {
                                         let tx = state.mesh_uplink.read().await;
                                         if let Some(ref tx) = *tx {
-                                            let _ = tx.send(v.to_string()).await;
+                                            if tx.send(v.to_string()).await.is_err() {
+                                                warn!("[relay] mesh_uplink_position TX failed, channel closed");
+                                            }
                                         }
+                                        continue;
                                     } else if ty == "register_community" {
                                         let cid_val = v.get("community_id").and_then(|c| c.as_str()).unwrap_or("");
+                                        if cid_val.is_empty() { continue; }
+                                        let is_re_registration = state.store.get_community(cid_val).await.is_some();
+                                        if !is_re_registration {
+                                            let mut rl = state.rl.lock().await;
+                                            if !rl.check_community_reg(&read_ip) {
+                                                warn!("[relay] community registration rate-limited for {}", read_ip);
+                                                continue;
+                                            }
+                                        }
                                         let name = v.get("name").and_then(|c| c.as_str()).unwrap_or("").to_string();
+                                        if name.len() > 128 { continue; }
                                         let genesis = v.get("genesis_public_key").and_then(|c| c.as_str()).unwrap_or("").to_string();
                                         let members = v.get("members").and_then(|m| m.as_array()).map(|arr| {
                                             arr.iter().filter_map(|m| {
@@ -299,22 +315,25 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                     display_name: m.get("display_name")?.as_str()?.to_string(),
                                                     role: m.get("role")?.as_str()?.to_string(),
                                                 })
-                                            }).collect()
+                                            }).collect::<Vec<_>>()
                                         }).unwrap_or_default();
-                                        let _cid_owned = cid_val.to_string();
+                                        if members.len() > 1000 { continue; }
+                                        let cid_owned = cid_val.to_string();
                                         let published = v.get("published").and_then(|p| p.as_bool()).unwrap_or(false);
                                         let public_key = v.get("public_key").and_then(|p| p.as_str()).unwrap_or("").to_string();
                                         let wrapped_dek = v.get("wrapped_dek").and_then(|w| w.as_str()).unwrap_or("").to_string();
                                         let key_derivation = v.get("key_derivation").and_then(|k| k.as_str()).unwrap_or("random").to_string();
                                         let description = v.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string();
+                                        if description.len() > 4096 { continue; }
                                         let owner_pubkey = v.get("owner_pubkey").and_then(|o| o.as_str()).unwrap_or("").to_string();
                                         let owner_name = v.get("owner_name").and_then(|o| o.as_str()).unwrap_or("").to_string();
                                         let bounds = v.get("bounds").and_then(|b| b.as_array()).map(|arr| {
                                             arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<f64>>()
                                         });
                                         let password_hash = v.get("password_hash").and_then(|p| p.as_str()).map(|s| s.to_string());
+                                        let join_wrapped_dek = v.get("join_wrapped_dek").and_then(|j| j.as_str()).map(|s| s.to_string());
                                         state.store.register_community(crate::storage::CommunityConfig {
-                                            community_id: _cid_owned.clone(), name: name.clone(),
+                                            community_id: cid_owned.clone(), name: name.clone(),
                                             genesis_public_key: genesis,
                                             public_key, secret_key: String::new(), wrapped_dek, key_derivation,
                                             published, description,
@@ -323,13 +342,14 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             governance: v.get("governance").cloned().unwrap_or(serde_json::Value::Null),
                                             bounds,
                                             password_hash,
+                                            join_wrapped_dek,
                                             used_token_nonces: vec![],
                                         }).await;
                                         info!("[relay] community registered: {} (published: {})", name, published);
-                                        room.send_to(&serde_json::json!({"type":"community_registered","community_id":_cid_owned}).to_string(), &read_cid);
+                                        room.send_to(&serde_json::json!({"type":"community_registered","community_id":cid_owned}).to_string(), &read_cid);
                                         room.broadcast(&serde_json::json!({
                                             "type": "community_peer_joined",
-                                            "community_id": _cid_owned,
+                                            "community_id": cid_owned,
                                             "pubkey": owner_pubkey,
                                             "name": owner_name,
                                             "governance": v.get("governance").cloned().unwrap_or(serde_json::Value::Null),
@@ -429,6 +449,17 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             Some(pk) => pk,
                                             None => { room.send_to(&auth_err("authentication required"), &read_cid); continue; }
                                         };
+                                        // Verify signature
+                                        let sig = v.get("signature").and_then(|s| s.as_str()).unwrap_or("");
+                                        let ts = v.get("timestamp").and_then(|t| t.as_u64()).unwrap_or(0);
+                                        if !sig.is_empty() {
+                                            let raw_payload = format!("{}|{}|{}", cid_val, target_pubkey, ts);
+                                            let payload_hex = hex::encode(raw_payload.as_bytes());
+                                            if !auth::verify_signature(&payload_hex, sig, &conn_pubkey).unwrap_or(false) {
+                                                warn!("[relay] remove_member: invalid signature from {}", conn_pubkey);
+                                                continue;
+                                            }
+                                        }
                                         match state.store.remove_member(cid_val, target_pubkey, &conn_pubkey).await {
                                             Ok(()) => {
                                                 info!("[relay] member removed from {}: {}", cid_val, target_pubkey);
@@ -443,7 +474,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                         let nonce = v.get("nonce").and_then(|n| n.as_str()).unwrap_or("");
                                         let role = v.get("role").and_then(|r| r.as_str()).unwrap_or("contributor");
                                         let expiry = v.get("expiry").and_then(|e| e.as_u64()).unwrap_or(0);
-                                        let max_uses = v.get("max_uses").and_then(|u| u.as_u64()).unwrap_or(1) as u32;
+                                        let max_uses = std::cmp::min(v.get("max_uses").and_then(|u| u.as_u64()).unwrap_or(1), u32::MAX as u64) as u32;
                                         let sig = v.get("signature").and_then(|s| s.as_str()).unwrap_or("");
                                         if cid_val.is_empty() || nonce.is_empty() || sig.is_empty() { continue; }
                                         let conn_pubkey = match get_conn_pubkey(room, &read_cid) {
@@ -483,7 +514,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                         if let Some(c) = state.store.get_community(cid_val).await {
                                             for founder in &c.members {
                                                 if founder.role != "founder" { continue; }
-                                                let raw_payload = format!("{}{}{}", cid_val, "member", nonce);
+                                                let raw_payload = format!("{}|{}|{}", cid_val, "member", nonce);
                                                 let payload_hex = hex::encode(raw_payload.as_bytes());
                                                 if let Ok(true) = auth::verify_signature(&payload_hex, cap_sig, &founder.pubkey) {
                                                     cap_verified = true;
@@ -501,12 +532,12 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             Err(e) => { room.send_to(&messages::json_claim_denied(e), &read_cid); continue; }
                                         }
                                         let effective_role = cap_role.clone();
-                                        // Now add to members
-                                        match state.store.add_member(cid_val, crate::storage::MemberRecord {
+                                        // Token-verified: add member without founder check
+                                        match state.store.add_member_by_token(cid_val, crate::storage::MemberRecord {
                                             pubkey: member_pubkey.to_string(),
                                             display_name: member_name.to_string(),
                                             role: effective_role.clone(),
-                                        }, member_pubkey).await {
+                                        }).await {
                                             Ok(()) | Err("already a member") => {
                                                 info!("[relay] membership claimed for {} in {} as {}", member_pubkey, cid_val, effective_role);
                                                 let member_msg = messages::json_member_added(cid_val, member_pubkey, member_name, &effective_role);
@@ -554,10 +585,10 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                     } else if ty == "pin_vote" {
                                         let pin_id = v.get("pin_id").and_then(|p| p.as_str()).unwrap_or("").to_string();
                                         let community_id = v.get("community_id").and_then(|c| c.as_str()).unwrap_or("").to_string();
-                                        let dir: i8 = v.get("dir").and_then(|d| d.as_i64()).unwrap_or(0) as i8;
+                                        let dir_val = v.get("dir").and_then(|d| d.as_i64()).unwrap_or(0);
+                                        let dir: i8 = if dir_val == 1 { 1 } else if dir_val == -1 { -1 } else { continue; };
                                         let pubkey = v.get("pubkey").and_then(|p| p.as_str()).unwrap_or("").to_string();
-                                        if !pin_id.is_empty() && !pubkey.is_empty() && !community_id.is_empty() && (dir == 1 || dir == -1) {
-                                            // Auth: verify signature (required for all votes)
+                                        if !pin_id.is_empty() && !pubkey.is_empty() && !community_id.is_empty() {
                                             let sig = v.get("signature").and_then(|s| s.as_str());
                                             let timestamp = v.get("timestamp").and_then(|t| t.as_u64()).unwrap_or(0);
                                             match sig {
@@ -574,20 +605,18 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                     }
                                                 }
                                             }
-                                            // Auth: verify pubkey against connection binding
+                                            // Auth: verify pubkey against connection binding (required)
                                             let conn_pubkey = get_conn_pubkey(room, &read_cid);
-                                            if let Some(ref cpk) = conn_pubkey {
-                                                if cpk != &pubkey {
-                                                    warn!("[relay] pin_vote denied: pubkey mismatch (conn={} vote={})", cpk, &pubkey);
-                                                    room.send_to(&auth_err("pubkey mismatch"), &read_cid);
-                                                    continue;
-                                                }
+                                            if conn_pubkey.as_ref().map_or(true, |cpk| cpk != &pubkey) {
+                                                warn!("[relay] pin_vote denied: pubkey mismatch or unauthenticated");
+                                                room.send_to(&auth_err("pubkey mismatch"), &read_cid);
+                                                continue;
                                             }
                                             // Auth: verify pubkey is a community member (if community exists with join_policy != "open")
                                             if let Some(c) = state.store.get_community(&community_id).await {
                                                 let jp = get_join_policy(&c.governance);
-                                                if jp != "open" && !c.members.is_empty() && !auth::verify_membership(&c, &pubkey) {
-                                                    warn!("[relay] pin_vote denied: pubkey {} not a member of {}", &pubkey, &community_id);
+                                                if jp != "open" && !auth::verify_membership(&c, &pubkey) {
+                                                    warn!("[relay] pin_vote denied: pubkey {} not a member", pubkey);
                                                     continue;
                                                 }
                                                 // Auth: readers cannot vote
@@ -626,7 +655,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                 let base_at = state.store.get_pin(&community_id, &pin_id).await
                                                     .and_then(|p| p.ttl_base_at)
                                                     .unwrap_or_else(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or(std::time::Duration::from_millis(0)).as_millis() as u64);
-                                                base_at + (mins * 60_000.0) as u64
+                                                base_at.saturating_add((mins.max(0.0).min(1_000_000_000.0) * 60_000.0) as u64)
                                             } else {
                                                 0
                                             };
@@ -673,18 +702,19 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                     warn!("[relay] annotation_vote: invalid signature from {}", pubkey);
                                                     continue;
                                                 }
+                                            } else {
+                                                warn!("[relay] annotation_vote: missing signature");
+                                                continue;
                                             }
-                                            // Verify pubkey matches connection binding
+                                            // Verify pubkey matches connection binding (required)
                                             let conn_pubkey = get_conn_pubkey(room, &read_cid);
-                                            if let Some(ref cpk) = conn_pubkey {
-                                                if !pubkey.is_empty() && cpk != pubkey {
-                                                    warn!("[relay] annotation_vote denied: pubkey mismatch");
-                                                    continue;
-                                                }
+                                            if conn_pubkey.as_ref().map_or(true, |cpk| !pubkey.is_empty() && cpk != pubkey) {
+                                                warn!("[relay] annotation_vote denied: pubkey mismatch or unauthenticated");
+                                                continue;
                                             }
                                             if let Some(c) = state.store.get_community(community_id).await {
                                                 let jp = get_join_policy(&c.governance);
-                                                if jp != "open" && !c.members.is_empty() && !pubkey.is_empty() && !auth::verify_membership(&c, pubkey) {
+                                                if jp != "open" && !pubkey.is_empty() && !auth::verify_membership(&c, pubkey) {
                                                     warn!("[relay] annotation_vote denied: pubkey {} not a member", pubkey);
                                                     continue;
                                                 }
@@ -808,6 +838,16 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                             if role == "reader" { continue; }
                                                         }
                                                     }
+                                                    // Auth: author_pubkey must match connection pubkey for annotations
+                                                    if let Some(ref cpk) = conn_pubkey {
+                                                        if cpk != author {
+                                                            let existing = state.store.get_annotation(ann.get("annotation_id").and_then(|a| a.as_str()).unwrap_or("")).await;
+                                                            if existing.as_ref().map_or(true, |e| e.author_pubkey != author) {
+                                                                warn!("[relay] push_delta: author mismatch for annotation (conn={} author={})", cpk, author);
+                                                                continue;
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                                 state.store.store_annotation(crate::storage::StoredAnnotation {
                                                     annotation_id: ann.get("annotation_id").and_then(|a| a.as_str()).unwrap_or("").to_string(),
@@ -845,11 +885,20 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                             if role == "reader" { continue; }
                                                         }
                                                     }
+                                                    // Auth: author_pubkey must match connection pubkey for drawings
+                                                    if let Some(ref cpk) = conn_pubkey {
+                                                        if cpk != author {
+                                                            if state.store.get_drawing_author(&community_id, dwg.get("drawing_id").and_then(|d| d.as_str()).unwrap_or("")).await.as_ref().map_or(true, |a| a != author) {
+                                                                warn!("[relay] push_delta: author mismatch for drawing (conn={} author={})", cpk, author);
+                                                                continue;
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                                 state.store.store_drawing(crate::storage::StoredDrawing {
                                                     drawing_id: dwg.get("drawing_id").and_then(|d| d.as_str()).unwrap_or("").to_string(),
                                                     community_id: community_id.clone(),
-                                                    ciphertext: dwg.get("ciphertext").and_then(|c| c.as_str()).unwrap_or("").to_string(),
+                                                    ciphertext: dwg.get("encrypted_geojson").or_else(|| dwg.get("ciphertext")).and_then(|c| c.as_str()).unwrap_or("").to_string(),
                                                     nonce: dwg.get("nonce").and_then(|n| n.as_str()).unwrap_or("").to_string(),
                                                     author_pubkey: author.to_string(),
                                                     created_at: ts,
@@ -858,6 +907,11 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             }
                                         }
                                         let mut tomb_count = 0;
+                                        let mut del_count = 0;
+                                        // Resolve the connection's role once for delete auth
+                                        let conn_role = conn_pubkey.as_ref().and_then(|cpk| {
+                                            c_opt.as_ref().and_then(|c| get_member_role(c, cpk))
+                                        });
                                         if let Some(tombs) = v.get("tombstones").and_then(|t| t.as_array()) {
                                             if tombs.len() > 200 { continue; }
                                             for t in tombs {
@@ -874,9 +928,11 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                             warn!("[relay] tombstone: invalid signature from {}", by_pubkey);
                                                             continue;
                                                         }
-                                                    } else if !sig.is_empty() || !target_id.is_empty() {
-                                                        // tombstone with partial sig data - reject
-                                                        continue;
+                                                    } else {
+                                                        // tombstone with no sig or target - reject all empty
+                                                        if sig.is_empty() || target_id.is_empty() || by_pubkey.is_empty() {
+                                                            continue;
+                                                        }
                                                     }
                                                     // Auth: check role
                                                     if let Some(ref c) = c_opt {
@@ -884,6 +940,9 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                             if role == "reader" { continue; }
                                                         }
                                                     }
+                                                } else {
+                                                    // reject tombstones with no by_pubkey
+                                                    continue;
                                                 }
                                                 state.store.store_tombstone(crate::storage::StoredTombstone {
                                                     tombstone_id: t.get("tombstone_id").and_then(|t| t.as_str()).unwrap_or("").to_string(),
@@ -896,11 +955,6 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                 tomb_count += 1;
                                             }
                                         }
-                                        let mut del_count = 0;
-                                        // Resolve the connection's role once for delete auth
-                                        let conn_role = conn_pubkey.as_ref().and_then(|cpk| {
-                                            c_opt.as_ref().and_then(|c| get_member_role(c, cpk))
-                                        });
                                         if let Some(del_pins) = v.get("deleted_pin_ids").and_then(|d| d.as_array()) {
                                             if del_pins.len() > 500 { continue; }
                                             for pid in del_pins {
@@ -966,9 +1020,11 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                 }).to_string();
                                                 for sub in &subs {
                                                     // Find subscriber's client connection and send
-                                                    for (client_id, client) in &room.clients {
+                                                    for (_client_id, client) in &room.clients {
                                                         if client.pubkey.as_deref() == Some(&sub.subscriber_pubkey) {
-                                                            let _ = client.tx.try_send(tokio_tungstenite::tungstenite::Message::Text(layer_delta.clone()));
+                                                        if client.tx.try_send(tokio_tungstenite::tungstenite::Message::Text(layer_delta.clone())).is_err() {
+                                                            warn!("[relay] layer delta drop for subscriber {}", sub.subscriber_pubkey);
+                                                        }
                                                         }
                                                     }
                                                 }
@@ -998,6 +1054,17 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                         }
                                     } else if ty == "sync_request" {
                                         let community_id = v.get("community_id").and_then(|c| c.as_str()).unwrap_or("").to_string();
+                                        // Auth: for non-open communities, verify requester is a member
+                                        if let Some(c) = state.store.get_community(&community_id).await {
+                                            let jp = get_join_policy(&c.governance);
+                                            if jp != "open" {
+                                                let conn_pubkey = get_conn_pubkey(room, &read_cid);
+                                                if conn_pubkey.as_ref().map_or(true, |pk| !is_member(&c, pk)) {
+                                                    room.send_to(&messages::json_err("auth required"), &read_cid);
+                                                    continue;
+                                                }
+                                            }
+                                        }
                                         let request_id = v.get("request_id").and_then(|r| r.as_str()).unwrap_or("");
                                         let since = v.get("since").and_then(|s| s.as_u64()).unwrap_or(0);
                                         let pins = state.store.get_pins(&community_id, since).await;
@@ -1038,7 +1105,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                         });
                                         info!("[relay] sync sent for {}: {} pins, {} anns, {} dwgs, {} tombstones (since {})", community_id, pins.len(), annotations.len(), drawings.len(), tombstones.len(), since);
                                         room.send_to(&resp.to_string(), &read_cid);
-                                    } else if ty == "list_communities" {
+                                    } else if ty == "list_communities" && read_room == "community-relay" {
                                         let communities = state.store.list_communities().await;
                                         info!("[relay] list_communities: {} published communities", communities.len());
                                         let resp = serde_json::json!({
@@ -1055,6 +1122,11 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                         });
                                         room.send_to(&resp.to_string(), &read_cid);
                                     } else if ty == "query_communities" && read_room == "community-relay" {
+                                        // Require auth for community queries
+                                        if get_conn_pubkey(room, &read_cid).is_none() {
+                                            warn!("[relay] query_communities: unauthenticated client rejected");
+                                            continue;
+                                        }
                                         let request_id = v.get("request_id").and_then(|r| r.as_str()).unwrap_or("");
                                         let bbox = v.get("bbox").and_then(|b| b.as_array());
                                         let communities = state.store.list_communities().await;
@@ -1169,6 +1241,14 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                         let layer_id = v.get("layer_id").and_then(|l| l.as_str()).unwrap_or("");
                                         let subscriber_pubkey = v.get("subscriber_pubkey").and_then(|p| p.as_str()).unwrap_or("");
                                         if cid_val.is_empty() || layer_id.is_empty() || subscriber_pubkey.is_empty() { continue; }
+                                        // Verify subscriber_pubkey matches authenticated connection
+                                        let conn_pubkey = get_conn_pubkey(room, &read_cid);
+                                        if let Some(ref cpk) = conn_pubkey {
+                                            if cpk != subscriber_pubkey {
+                                                warn!("[relay] subscribe_layer: pubkey mismatch (conn={} sub={})", cpk, subscriber_pubkey);
+                                                continue;
+                                            }
+                                        }
                                         // Get the layer DEK
                                         let public_layers = state.store.get_public_layers(cid_val).await;
                                         let layer = match public_layers.iter().find(|l| l.layer_id == layer_id) {
@@ -1192,8 +1272,9 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                             Ok(()) => {},
                                             Err(e) => { room.send_to(&messages::json_err(e), &read_cid); continue; }
                                         }
-                                        // Get initial layer data
-                                        let pins = state.store.get_pins(cid_val, 0).await;
+                                        // Get initial layer data (filtered to this layer)
+                                        let all_pins = state.store.get_pins(cid_val, 0).await;
+                                        let pins: Vec<_> = all_pins.into_iter().filter(|p| p.layer_id.as_deref() == Some(&layer_id)).collect();
                                         let drawings = state.store.get_drawings(cid_val, 0).await;
                                         info!("[relay] subscribed {} to layer {}:{}", subscriber_pubkey, cid_val, layer_id);
                                         let resp = serde_json::json!({
@@ -1230,7 +1311,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                         let subscribed = state.store.get_subscribed_layers_for_pubkey(subscriber_pubkey).await;
                                         let mut all_pins: Vec<serde_json::Value> = Vec::new();
                                         let mut all_drawings: Vec<serde_json::Value> = Vec::new();
-                                        for (cid, lid) in &subscribed {
+                                        for (cid, _lid) in &subscribed {
                                             for p in state.store.get_pins(cid, since).await {
                                                 all_pins.push(serde_json::json!({"pin_id":p.pin_id,"community_id":cid,"ciphertext":p.ciphertext,"nonce":p.nonce,"author_pubkey":p.author_pubkey,"created_at":p.created_at}));
                                             }
@@ -1265,9 +1346,18 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                         let target_pubkey = v.get("target_pubkey").and_then(|p| p.as_str()).unwrap_or("");
                                         let rewrap_dek = v.get("rewrap_dek").and_then(|d| d.as_str()).unwrap_or("");
                                         if !cid_val.is_empty() && !target_pubkey.is_empty() && !rewrap_dek.is_empty() {
-                                            // Rewrap is self-validating: only clients with the community
-                                            // secret_key can produce a valid individually-wrapped DEK.
-                                            // Room-level access is sufficient authorization here.
+                                            // Verify sender is a member of the community
+                                            if let Some(c) = state.store.get_community(&cid_val).await {
+                                                let conn_pubkey = get_conn_pubkey(room, &read_cid);
+                                                if let Some(ref cpk) = conn_pubkey {
+                                                    if !is_member(&c, cpk) {
+                                                        warn!("[relay] rewrap_member_dek: non-member {} attempted for {}", cpk, cid_val);
+                                                        continue;
+                                                    }
+                                                } else {
+                                                    continue;
+                                                }
+                                            }
                                             state.store.store_member_dek(&cid_val, &target_pubkey, &rewrap_dek).await;
                                             state.store.remove_pending_dek_request(&cid_val, &target_pubkey).await;
                                             info!("[relay] member_dek stored for {} in {}", target_pubkey, cid_val);
@@ -1297,16 +1387,12 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                 info!("[relay] join_community: {} -> {}", &read_ip, c.name);
                                                 let conn_pubkey = get_conn_pubkey(room, &read_cid);
                                                 let is_member = conn_pubkey.as_ref().map_or(false, |pk| c.members.iter().any(|m| m.pubkey == *pk));
-                                                // Member list privacy: only show members to community members
-                                                let members_for_response: serde_json::Value = if is_member {
+                                                let members_for_response: serde_json::Value =
                                                     serde_json::json!(c.members.iter().map(|m| serde_json::json!({
                                                         "pubkey": m.pubkey,
                                                         "display_name": m.display_name,
                                                         "role": m.role,
-                                                    })).collect::<Vec<_>>())
-                                                } else {
-                                                    serde_json::Value::Null
-                                                };
+                                                    })).collect::<Vec<_>>());
                                                 let public_layers = state.store.get_public_layers(&cid_val).await;
                                                 // Check if requester already has an individually-wrapped DEK
                                                 let member_dek = if let Some(ref pk) = conn_pubkey {
@@ -1323,6 +1409,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                     "key_derivation": c.key_derivation,
                                                     "needs_key_exchange": c.key_derivation != "pbkdf2",
                                                     "individually_wrapped_dek": member_dek.as_ref().map(|d| d.individually_wrapped_dek.as_str()).unwrap_or(""),
+                                                    "join_wrapped_dek": c.join_wrapped_dek.as_deref().unwrap_or(""),
                                                     "genesis_public_key": c.genesis_public_key,
                                                     "governance": c.governance,
                                                     "bounds": c.bounds,
@@ -1334,17 +1421,18 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                         "layer_dek_wrapped": l.layer_dek_wrapped,
                                                         "topic_tags": l.topic_tags,
                                                     })).collect::<Vec<_>>(),
-                                                    "your_membership": if is_member && conn_pubkey.is_some() {
-                                                        c.members.iter().find(|m| m.pubkey == *conn_pubkey.as_ref().unwrap())
+                                                    "your_membership": if is_member { if let Some(ref pk) = conn_pubkey {
+                                                        c.members.iter().find(|m| m.pubkey == *pk)
                                                             .map(|m| serde_json::json!({"pubkey": m.pubkey, "display_name": m.display_name, "role": m.role}))
-                                                    } else { None },
+                                                    } else { None } } else { None },
                                                 });
                                                 room.send_to(&resp.to_string(), &read_cid);
                                             }
                                         }
                                     }
-                                    let is_relay_ty = matches!(ty, "register_community" | "publish_community" | "unpublish_community" | "delete_community" | "push_delta" | "sync_request" | "sync_response" | "list_communities" | "query_communities" | "join_community" | "pin_vote" | "annotation_vote" | "add_member" | "remove_member" | "create_token" | "claim_membership" | "update_governance" | "auth_response" | "publish_layer" | "unpublish_layer" | "list_public_layers" | "subscribe_layer" | "unsubscribe_layer" | "sync_subscribed_layers" | "relay_hello" | "relay_announce" | "request_member_dek" | "rewrap_member_dek");
-                                    if !is_relay_ty {
+                                    let is_relay_ty = matches!(ty, "register_community" | "publish_community" | "unpublish_community" | "delete_community" | "push_delta" | "sync_request" | "list_communities" | "query_communities" | "join_community" | "pin_vote" | "annotation_vote" | "add_member" | "remove_member" | "create_token" | "claim_membership" | "update_governance" | "auth_response" | "publish_layer" | "unpublish_layer" | "list_public_layers" | "subscribe_layer" | "unsubscribe_layer" | "sync_subscribed_layers" | "request_member_dek" | "rewrap_member_dek");
+                                     let is_passthrough = matches!(ty, "push_delta" | "sync_request" | "sync_response" | "relay_hello" | "relay_announce" | "mesh_uplink" | "mesh_downlink" | "gossip_capabilities" | "gossip_query" | "gossip_announce" | "pin_vote" | "annotation_vote" | "request_member_dek" | "rewrap_member_dek" | "offer" | "answer");
+                                    if !is_relay_ty && is_passthrough {
                                         if let Some(target) = v.get("to").and_then(|t| t.as_str()) {
                                             room.send_to(&txt, target);
                                         } else {

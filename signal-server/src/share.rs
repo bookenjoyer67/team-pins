@@ -57,7 +57,7 @@ impl ShareStore {
             ttl_secs: share.ttl_secs,
             uses_remaining: remaining,
         });
-        Some(Arc::clone(&self.shares.get(id).unwrap().data))
+        Some(if let Some(share) = self.shares.get(id) { Arc::clone(&share.data) } else { return None; })
     }
 
     pub fn cleanup(&mut self) {

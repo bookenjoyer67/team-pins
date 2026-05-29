@@ -4,9 +4,11 @@ use std::time::Duration;
 
 use prost::Message;
 use rumqttc::{AsyncClient, Event, MqttOptions, Packet, QoS};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
 use tokio::time::sleep;
 use tracing::{info, warn};
+
+static MQTT_SEM: std::sync::LazyLock<Semaphore> = std::sync::LazyLock::new(|| Semaphore::new(50));
 
 use crate::room::Room;
 use crate::state::AppState;
@@ -24,7 +26,6 @@ pub async fn start_bridge(state: Arc<AppState>) {
     let mut mqtt_opts = MqttOptions::new("!piggpin-bridge", &cfg.broker, cfg.port);
     mqtt_opts.set_keep_alive(Duration::from_secs(10));
     mqtt_opts.set_clean_session(false);
-    mqtt_opts.set_max_packet_size(256 * 1024, 256 * 1024);
     mqtt_opts.set_max_packet_size(256 * 1024, 256 * 1024);
     if !cfg.username.is_empty() {
         mqtt_opts.set_credentials(&cfg.username, &cfg.password);
@@ -320,13 +321,19 @@ pub async fn start_bridge(state: Arc<AppState>) {
                 info!("MQTT message on topic: {}", publish.topic);
                 let topic = publish.topic.clone();
                 let payload = publish.payload.to_vec();
+                let spawn_state = state.clone();
+                let spawn_room = room_name.clone();
 
-                tokio::spawn(handle_mqtt_message(
-                    state.clone(),
-                    room_name.clone(),
+                let permit = MQTT_SEM.acquire().await;
+                tokio::spawn(async move {
+                    let _permit = permit;
+                    handle_mqtt_message(
+                    spawn_state,
+                    spawn_room,
                     topic,
                     payload,
-                ));
+                ).await;
+                });
             }
             Ok(_) => {}
             Err(e) => {

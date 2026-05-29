@@ -4,7 +4,7 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let window = app.get_webview_window("main").unwrap();
+            let window = app.get_webview_window("main").expect("tauri.conf.json must define a window labeled 'main'");
             window.set_title("PiggPin").ok();
             Ok(())
         })

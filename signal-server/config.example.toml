@@ -3,7 +3,7 @@
 
 [server]
 port = 9000
-bind_address = "0.0.0.0"
+bind_address = "127.0.0.1"
 
 [rooms]
 max_clients = 0
@@ -13,10 +13,10 @@ max_rooms = 1000
 [rate_limit]
 messages_per_sec = 20
 connections_per_min = 30
-ban_duration_secs = 60
+ban_duration_secs = 3600
 
 [security]
-require_passwords = false
+require_passwords = true
 max_password_len = 128
 max_room_len = 64
 max_message_size = 10485760
@@ -28,16 +28,25 @@ max_share_ttl_secs = 86400
 max_share_bytes = 209715200
 allowed_origin = "https://app.piggpin.space"
 
-[logging]
-level = "info"
-
 [mqtt]
 enabled = false
 broker = "mqtt.meshtastic.org"
-port = 1883
+port = 8883
 # Set via MQTT_USERNAME / MQTT_PASSWORD env vars, or fill in here
 username = ""
 password = ""
 root_topic = "msh"
 bridge_room = "mesh"
 uplink_enabled = true
+
+# [rnode]
+# enabled = false
+# serial_port = "/dev/ttyUSB0"
+# baud_rate = 115200
+# bridge_room = "rnode"
+
+# [peer_relays]
+# enabled = false
+# peer_urls = ["wss://other-relay.example.com"]
+# announce_interval_secs = 300
+# reconnect_delay_secs = 30

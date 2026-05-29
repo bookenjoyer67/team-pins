@@ -11,6 +11,7 @@ import * as DB from "./db.js";
 import { state } from "./state.js";
 import { escapeHtml, toast, showProgressDialog } from "./dialogs.js";
 import { t } from "./i18n.js";
+
 import { loadSchemasForSet } from "./map-schemas.js";
 import { loadPins, loadDrawings } from "./map.js";
 
@@ -94,7 +95,9 @@ export async function importLayerFromMap(sourceTeamId, sourceLayerId, targetLaye
       if (row.media) {
         const decMedia = decrypt_raw_bytes(row.media.ciphertext, row.media.nonce, srcDek);
         const encMedia = encrypt_raw_bytes(decMedia, state.dek);
-        newDrawing.media = { type: row.media.type, name: row.media.name, ciphertext: encMedia.ciphertext, nonce: encMedia.nonce };
+        const safeType = /^(image|video|audio)\/[\w+.-]+$/.test(row.media.type || "") ? row.media.type : "application/octet-stream";
+        const safeName = (row.media.name || "file").replace(/[/\\]/g, "_").slice(0, 255);
+        newDrawing.media = { type: safeType, name: safeName, ciphertext: encMedia.ciphertext, nonce: encMedia.nonce };
       }
       await DB.saveDrawing(newDrawing);
       importedDrawings++;
@@ -189,7 +192,7 @@ export function showImportFromMapModal() {
   document.body.appendChild(ov);
 
   const listEl = document.getElementById("im-list");
-  const clean = () => { ov.remove(); delete window._importSrcDek; };
+  const clean = () => { ov.remove(); };
 
   document.getElementById("im-close").onclick = clean;
   ov.onclick = (e) => { if (e.target === ov) clean(); };
@@ -208,7 +211,6 @@ export function showImportFromMapModal() {
     try {
       const t = await DB.getTeam(tid);
       if (!t) { listEl.innerHTML = '<div style="color:#dc2626;text-align:center;padding:16px;font-size:12px;">Cannot read source map</div>'; return; }
-      window._importSrcDek = window._unwrap_dek(t.wrapped_dek, t.secret_key);
       sourcePins = await DB.getPins(tid);
       sourceDrawings = await DB.getDrawings(tid);
       sourceSchemas = await DB.getSchemas();

@@ -46,7 +46,7 @@ export default defineConfig({
       closeBundle: injectPrecache,
     },
   ],
-  server: { open: false, host: true },
+  server: { open: false, host: "127.0.0.1" },
   optimizeDeps: {
     exclude: ["./core/pkg/e2e_core.js"],
   },

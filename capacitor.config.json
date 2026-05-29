@@ -1,9 +1,10 @@
 {
-  "appId": "Pigg.Pin",
+  "appId": "online.catperson.pins",
   "appName": "PiggPin",
   "webDir": "dist",
   "server": {
     "androidScheme": "https",
-    "cleartext": false
+    "cleartext": false,
+    "allowNavigation": ["https://localhost"]
   }
 }

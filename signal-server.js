@@ -5,7 +5,7 @@
 import http from "http";
 import { WebSocketServer } from "ws";
 
-const PORT = parseInt(process.argv[2]) || 9000;
+const PORT = parseInt(process.argv[2], 10) || 9000;
 const MAX_MSG_SIZE = 51200; // 50KB
 const MAX_MSGS_PER_SEC = 20;
 const MAX_CLIENTS_PER_IP = 10;
@@ -16,7 +16,10 @@ const server = http.createServer((req, res) => {
   res.end("piggPin signal relay");
 });
 
-const wss = new WebSocketServer({ server, maxPayload: MAX_MSG_SIZE });
+const wss = new WebSocketServer({ server, maxPayload: MAX_MSG_SIZE, verifyClient: ({ origin, req }) => {
+  if (!origin) return true;
+  return true;
+} });
 const rooms = new Map();
 const ipCounts = new Map();
 
@@ -43,7 +46,17 @@ wss.on("connection", (ws, req) => {
   }
   if (entry.clients.size >= MAX_CLIENTS_PER_ROOM) { ws.close(4003, "room full"); return; }
 
-  const clientId = crypto.randomUUID().slice(0, 8);
+function randomUUID() {
+  if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  return Array.from(bytes, (b, i) => {
+    return b.toString(16).padStart(2, "0") + (i === 3 || i === 5 || i === 7 || i === 9 ? "-" : "");
+  }).join("").slice(0, 36);
+}
+
+const clientId = randomUUID();
   entry.clients.set(clientId, ws);
   entry.ts = Date.now();
 
@@ -103,7 +116,10 @@ setInterval(() => {
   for (const [room, entry] of rooms) {
     if (entry.ts < cutoff && entry.clients.size === 0) rooms.delete(room);
   }
-  ipCounts.clear(); // Reset IP counts periodically
+  for (const [ip, count] of ipCounts) {
+    ipCounts.set(ip, Math.max(0, count - Math.floor(count * 0.5)));
+    if (ipCounts.get(ip) <= 0) ipCounts.delete(ip);
+  }
 }, 60_000);
 
 server.listen(PORT, () => console.log(`signal relay on :${PORT}`));

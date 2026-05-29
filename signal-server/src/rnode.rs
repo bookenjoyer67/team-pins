@@ -109,10 +109,15 @@ pub async fn start_bridge(state: Arc<AppState>) {
                 }
                 Ok(n) => {
                     accum.extend_from_slice(&buf[..n]);
+                    if accum.len() > 65536 {
+                        accum.clear();
+                    }
                     let decoded = kiss_decode_into(&accum, &mut frames);
                     accum.drain(..decoded);
                     for frame in frames.drain(..) {
-                        let _ = frame_tx.blocking_send(frame);
+                        if frame_tx.blocking_send(frame).is_err() {
+                            tracing::warn!("[rnode] frame channel full, dropping LoRa frame");
+                        }
                     }
                 }
                 Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
@@ -163,10 +168,8 @@ pub async fn start_bridge(state: Arc<AppState>) {
     }
 
     // Store write channel for WS uplinks
-    {
-        let mut w = state.mesh_uplink.write().await;
-        *w = None; // Clear MQTT uplink; we use a separate channel
-    }
+    // RNode bridge coexists with MQTT bridge
+    info!("RNode bridge active alongside other transports");
     // Actually, we need a way for WS clients to send to RNode.
     // For now, RNode is receive-only on the server side.
     // PWA sends via its own RNode (serial), server receives via its RNode.

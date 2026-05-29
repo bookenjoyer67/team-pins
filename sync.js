@@ -21,43 +21,49 @@ const CHUNK_CLEANUP_MS = 60_000;
 const BATCH_CLEANUP_MS = 30_000;
 const MAX_CHUNKS = 200;
 const MAX_BATCH_CHUNKS = 200;
-setInterval(() => {
+let _chunkCleanupTimer = null;
+_chunkCleanupTimer = setInterval(() => {
   const now = Date.now();
-  for (const [id, entry] of chunkStore) {
-    if (now - entry.ts > CHUNK_CLEANUP_MS) chunkStore.delete(id);
+  for (const [key, entry] of chunkStore) {
+    if (now - entry.ts > CHUNK_CLEANUP_MS) chunkStore.delete(key);
   }
   for (const [key, entry] of syncBatchStore) {
     if (now - entry.ts > BATCH_CLEANUP_MS) syncBatchStore.delete(key);
   }
-}, 30_000);
+}, CHUNK_CLEANUP_MS + 10_000);
+if (typeof window !== "undefined") window.addEventListener("pagehide", () => { if (_chunkCleanupTimer) { clearInterval(_chunkCleanupTimer); _chunkCleanupTimer = null; } });
 
 function splitMessage(msg) {
   if (msg.length < 16000) return null;
   const id = crypto.randomUUID();
+  const nonce = crypto.randomUUID();
   const total = Math.ceil(msg.length / 15000);
   const chunks = [];
+  chunkStore.set(`sent:${id}`, { nonce, total, ts: Date.now() });
   for (let i = 0; i < total; i++) {
     chunks.push(msg.slice(i * 15000, (i + 1) * 15000));
   }
-  return { id, total, chunks };
+  return { id, nonce, total, chunks };
 }
 
-function reassembleChunk(senderId, id, index, total, chunk) {
+function reassembleChunk(senderId, id, index, total, chunk, nonce) {
   if (total > MAX_CHUNKS || index >= total) return null;
   const key = `${senderId}:${id}`;
   let entry = chunkStore.get(key);
   if (!entry) {
-    entry = { chunks: new Array(total), ts: Date.now(), count: 0 };
+    entry = { chunks: new Array(total), ts: Date.now(), count: 0, nonce, total };
     chunkStore.set(key, entry);
   }
+  if (entry.nonce !== nonce || entry.total !== total) return null;
   entry.ts = Date.now();
-  if (entry.chunks[index] === undefined) {
+  if (!(index in entry.chunks)) {
     entry.chunks[index] = chunk;
     entry.count++;
   }
   if (entry.count === total) {
     const full = entry.chunks.join("");
     chunkStore.delete(key);
+    try { JSON.parse(full); } catch (_) { return null; }
     return full;
   }
   return null;
@@ -87,11 +93,12 @@ function accumulateBatch(key, batchIndex, totalBatches, data) {
 
 // --- Data compaction ---
 
-function stripEmpties(obj) {
+function stripEmpties(obj, depth = 0) {
+  if (depth > 100) return undefined;
   if (Array.isArray(obj)) {
     const out = [];
     for (const v of obj) {
-      const c = stripEmpties(v);
+      const c = stripEmpties(v, depth + 1);
       if (c !== undefined) out.push(c);
     }
     return out;
@@ -99,8 +106,9 @@ function stripEmpties(obj) {
   if (obj && typeof obj === "object") {
     const out = {};
     for (const [k, v] of Object.entries(obj)) {
-      const c = stripEmpties(v);
-      if (c !== undefined && c !== null && c !== "" && !(Array.isArray(c) && c.length === 0)) {
+      const c = stripEmpties(v, depth + 1);
+      if (c !== undefined && c !== null && c !== "" && !(Array.isArray(c) && c.length === 0) &&
+          !(c && typeof c === "object" && !Array.isArray(c) && Object.keys(c).length === 0)) {
         out[k] = c;
       }
     }
@@ -114,15 +122,18 @@ function stripEmpties(obj) {
 const HEX_KEYS = new Set(["public_key", "secret_key", "wrapped_dek", "ciphertext", "nonce", "encrypted_geojson"]);
 
 function hexToBytes(hex) {
+  if (hex.length % 2 !== 0 || !/^[0-9a-fA-F]+$/.test(hex)) return new Uint8Array(0);
   const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substr(i * 2, 2), 16);
+  for (let i = 0; i < bytes.length; i++) bytes[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);
   return bytes;
 }
 
 function bytesToBase64(bytes) {
   let bin = "";
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  return btoa(bin);
+  for (let i = 0; i < bytes.length; i += 4096) {
+    bin += String.fromCharCode(...bytes.slice(i, i + 4096));
+  }
+    return btoa(bin);
 }
 
 function base64ToBytes(b64) {
@@ -132,12 +143,13 @@ function base64ToBytes(b64) {
   return bytes;
 }
 
-function walkHexFields(obj, fn) {
-  if (Array.isArray(obj)) return obj.map(v => walkHexFields(v, fn));
+function walkHexFields(obj, fn, depth = 0) {
+  if (depth > 100) return obj;
+  if (Array.isArray(obj)) return obj.map(v => walkHexFields(v, fn, depth + 1));
   if (obj && typeof obj === "object") {
     const out = {};
     for (const [k, v] of Object.entries(obj)) {
-      out[k] = HEX_KEYS.has(k) && typeof v === "string" ? fn(v) : walkHexFields(v, fn);
+      out[k] = HEX_KEYS.has(k) && typeof v === "string" ? fn(v) : walkHexFields(v, fn, depth + 1);
     }
     return out;
   }
@@ -267,7 +279,7 @@ export async function handleMessage(msg, connId) {
   const d = msg.data;
   if (d && typeof d.ts === "number") {
     const age = Date.now() - d.ts;
-    if (age < -5000 || age > 60_000) return;
+    if (age < -120000 || age > 120000) return;
   }
   switch (msg.type) {
     case "peer_info": {
@@ -367,7 +379,7 @@ export async function handleMessage(msg, connId) {
         await window._loadPins();
         await window._loadDrawings();
       }
-      if (window._pendingJoinSet === sid) { delete window._pendingJoinSet; await window._switchSet(sid); }
+      if (window._pendingJoinSet) { window._pendingJoinSet = false; await window._switchSet(sid); }
       break;
     }
     case "new_pin": {
@@ -487,7 +499,7 @@ export async function handleMessage(msg, connId) {
         if (!pass) return;
         const hash = await mod.hashCommunityPassword(pass, d.set_id);
         broadcast("password_verify", { set_id: d.set_id, password_hash: hash }, connId);
-      });
+      }).catch(() => {});
       break;
     }
     case "password_verify": {
@@ -584,9 +596,11 @@ export async function handleMessage(msg, connId) {
     case "map_view": {
       if (!d || !Array.isArray(d.center) || d.center.length !== 2 || typeof d.center[0] !== "number" || typeof d.center[1] !== "number" || typeof d.team_id !== "string") return;
       if (d.center && state.map && (d.team_id === state.currentSet || d.team_id === window._pendingSet || d.team_id === window._pendingJoinSet)) {
-        state.suppressMapSync = true;
-        state.map.setView(d.center, d.zoom || 5);
-        setTimeout(() => { state.suppressMapSync = false; }, 600);
+        if (state.followMap) {
+          state.suppressMapSync = true;
+          state.map.setView(d.center, d.zoom || 5);
+          setTimeout(() => { state.suppressMapSync = false; }, 600);
+        }
       } else if (d.center && state.map) {
         window._pendingMapView = { center: d.center, zoom: d.zoom || 5 };
       }
@@ -601,8 +615,8 @@ export async function handleMessage(msg, connId) {
     }
     case "chunk": {
       if (!d || typeof d.id !== "string" || typeof d.index !== "number" || typeof d.total !== "number" || typeof d.chunk !== "string") return;
-      const { id, index, total, chunk } = d;
-      const full = reassembleChunk(connId, id, index, total, chunk);
+      const { id, index, total, chunk, nonce } = d;
+      const full = reassembleChunk(connId, id, index, total, chunk, nonce || "");
       if (full) handleMessage(JSON.parse(full), connId);
       break;
     }
@@ -680,7 +694,7 @@ export async function sendAll(sid, connId) {
       set_id: set,
       name: window._names[set] || set.slice(0, 8),
       public_key: t.public_key,
-      secret_key: isPasswordDerived ? "" : (t.secret_key || ""),
+      secret_key: t.secret_key || "",
       wrapped_dek: t.wrapped_dek,
       key_derivation: isPasswordDerived ? "pbkdf2" : "random",
       genesis_public_key: c?.genesis_public_key || state.signingPublicKey,
@@ -747,10 +761,11 @@ export function broadcast(type, data, connId) {
       meshData = { ...data, by_pubkey: state.signingPublicKey };
       if (state.signingSecretKey) {
         try {
-          const rawPayload = (data.pin_id || data.drawing_id) + "|" + Date.now();
+          const ts = Date.now();
+          const rawPayload = (data.pin_id || data.drawing_id) + "|" + ts;
           const payloadHex = window._encode_hex?.(new TextEncoder().encode(rawPayload));
           const sig = window._sign?.(payloadHex, state.signingSecretKey);
-          if (sig) meshData = { ...meshData, signature: sig, timestamp: Date.now() };
+          if (sig) meshData = { ...meshData, signature: sig, timestamp: ts };
         } catch (_) {}
       }
     }
@@ -778,7 +793,7 @@ export function broadcast(type, data, connId) {
     Peer.send({ type, data: payload }, connId);
   } else {
     for (let i = 0; i < chunks.total; i++) {
-      Peer.send({ type: "chunk", data: { id: chunks.id, index: i, total: chunks.total, chunk: chunks.chunks[i], ts: Date.now() } }, connId);
+      Peer.send({ type: "chunk", data: { id: chunks.id, index: i, total: chunks.total, chunk: chunks.chunks[i], nonce: chunks.nonce, ts: Date.now() } }, connId);
     }
   }
 }
@@ -829,7 +844,7 @@ export async function hostGroupViaRelay(relayUrl) {
     ov.remove();
   };
 
-  const sendJoin = () => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "join", room: roomId, pw: password || undefined })); };
+  const sendJoin = () => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "join", room: roomId, pw: password || undefined })); };
 
   const createOfferFor = async (targetId) => {
     try {
@@ -854,6 +869,14 @@ export async function hostGroupViaRelay(relayUrl) {
   ws.onmessage = async (e) => {
     try {
       const msg = JSON.parse(e.data);
+
+      if (msg.type === "error") {
+        done = true;
+        ws.close();
+        ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">Relay Error</h3><p style="color:var(--text-dim);font-size:13px;margin:0 0 12px;">${escapeHtml(msg.reason || "Unknown error")}</p><button id="relay-err-close" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">Close</button></div>`;
+        document.getElementById("relay-err-close").onclick = cleanup;
+        return;
+      }
 
       if (msg.type === "hello") {
         sendJoin();
@@ -910,7 +933,7 @@ export async function joinPeerViaRelay(relayUrl, roomId) {
     ws = new WebSocket(relayUrl.replace(/\/$/, ""));
   } catch (e) { ov.remove(); await alertDialog("Invalid relay URL"); return; }
 
-  const sendJoin = () => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "join", room: roomId, pw: password || undefined })); };
+  const sendJoin = () => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "join", room: roomId, pw: password || undefined })); };
   if (ws.readyState === WebSocket.OPEN) sendJoin();
   else ws.onopen = sendJoin;
 
@@ -931,6 +954,14 @@ export async function joinPeerViaRelay(relayUrl, roomId) {
   ws.onmessage = async (e) => {
     try {
       const msg = JSON.parse(e.data);
+
+      if (msg.type === "error") {
+        done = true;
+        ws.close();
+        ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">Relay Error</h3><p style="color:var(--text-dim);font-size:13px;margin:0 0 12px;">${escapeHtml(msg.reason || "Unknown error")}</p><button id="relay-err-close" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">Close</button></div>`;
+        document.getElementById("relay-err-close").onclick = cleanup;
+        return;
+      }
 
       if (msg.type === "hello") {
         sendJoin();
@@ -1130,6 +1161,7 @@ export async function shareMap() {
 function generateCommunityLinkUrl(community, communitySk) {
   if (!community || community.visibility === "local" || !community.visibility) return null;
   const nameBytes = new TextEncoder().encode(community.name || "");
+  if (nameBytes.length > 255) return null;
   const cidBytes = hexToBytes((community.community_id || "").replace(/-/g, ""));
   if (cidBytes.length !== 16) return null;
   const relayUrl = community.relay_url
@@ -1159,7 +1191,11 @@ function generateCommunityLinkUrl(community, communitySk) {
   if (skLen > 0) buf.set(skBytes, pos);
   pos += skLen;
   if (viewBytes.length > 0) buf.set(viewBytes, pos);
-  const b64 = btoa(String.fromCharCode(...buf)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  let bin = "";
+  for (let i = 0; i < buf.length; i += 4096) {
+    bin += String.fromCharCode(...buf.slice(i, i + 4096));
+  }
+  const b64 = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
   return window.location.origin + window.location.pathname + "#community=" + b64;
 }
 
@@ -1303,8 +1339,8 @@ function showShareMethodDialog(compressed, tooLarge, bgm, preview = {}, jsonPayl
           clean();
           copy(window.location.origin + window.location.pathname + "#share=" + hostB64 + "@" + id);
         } else {
-          const msg = await resp.text().catch(() => "Relay failed — try another");
-          btn.textContent = msg; btn.disabled = false;
+          btn.textContent = "Relay unreachable — try another";
+          btn.disabled = false;
         }
       } catch (_) { btn.textContent = "Relay unreachable — try another"; btn.disabled = false; }
     };
@@ -1383,10 +1419,10 @@ export async function importSet() {
           try {
             const dec = decrypt_with_password(encode_hex(ct), encode_hex(nonce), encode_hex(salt), password);
             await doImport(unpackHexFields(JSON.parse(dec)));
-          } catch (_) { await alertDialog("Wrong password or invalid data"); }
+          } catch (e) { console.error("[import] password-protected .piggpin:", e); await alertDialog("Wrong password or invalid data"); }
         });
       } else {
-        try { await doImport(unpackHexFields(JSON.parse(new TextDecoder().decode(data)))); } catch (_) { await alertDialog("Invalid data"); }
+        try { await doImport(unpackHexFields(JSON.parse(new TextDecoder().decode(data)))); } catch (e) { console.error("[import] plain .piggpin:", e); await alertDialog("Invalid data"); }
       }
     } else {
       const text = new TextDecoder().decode(bytes);
@@ -1396,7 +1432,7 @@ export async function importSet() {
             const parts = text.split(":");
             const dec = decrypt_with_password(parts[1], parts[2], parts[3], password);
             await doImport(unpackHexFields(JSON.parse(dec)));
-          } catch (_) { await alertDialog("Wrong password or invalid data"); }
+          } catch (e) { console.error("[import] ENCRYPTED text format:", e); await alertDialog("Wrong password or invalid data"); }
         });
       } else {
         try { await doImport(unpackHexFields(JSON.parse(text))); } catch (_) { await alertDialog("Invalid data"); }
@@ -1456,7 +1492,10 @@ export async function importFromCompressed(compressed) {
 
 async function doImport(data) {
   const sid = generate_uuid();
-  if (data.keys) await DB.saveTeam({ team_id: sid, name: data.name || "Imported", ...data.keys });
+  if (data.keys) {
+    const { public_key, secret_key, wrapped_dek, key_derivation } = data.keys || {};
+    await DB.saveTeam({ team_id: sid, name: data.name || "Imported", public_key, secret_key, wrapped_dek, key_derivation });
+  }
   await DB.saveCommunity({
     community_id: sid,
     name: data.name || "Imported",

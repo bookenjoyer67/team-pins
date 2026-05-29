@@ -52,9 +52,14 @@ async fn read_headers(stream: &mut TcpStream, buf: &mut Vec<u8>) -> Result<usize
     }
 }
 
-fn http_response(status: &str, content_type: &str, body: &[u8], allowed_origin: &str) -> Vec<u8> {
-    let mut resp = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: {}\r\nVary: Origin\r\nConnection: close\r\n\r\n",
-        status, content_type, body.len(), allowed_origin).into_bytes();
+fn http_response(status: &str, content_type: &str, body: &[u8], allowed_origin: &str, request_origin: Option<&str>) -> Vec<u8> {
+    let origin = if let Some(req_origin) = request_origin {
+        if req_origin == allowed_origin { req_origin } else { allowed_origin }
+    } else {
+        allowed_origin
+    };
+    let mut resp = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: {}\r\nVary: Origin\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n",
+        status, content_type, body.len(), origin).into_bytes();
     resp.extend_from_slice(body);
     resp
 }
@@ -69,6 +74,13 @@ pub async fn handle_http(state: Arc<AppState>, mut stream: TcpStream) {
 
     let header_str = String::from_utf8_lossy(&header_buf);
     let first_line = header_str.lines().next().unwrap_or("");
+    let request_origin = header_str.lines()
+        .find_map(|l| {
+            if l.to_lowercase().starts_with("origin:") {
+                l.split(':').nth(1)?.trim().to_string().into()
+            } else { None }
+        });
+
     let (method, raw_path) = match parse_request_line(first_line) {
         Some(mp) => mp,
         None => { info!("{} share HTTP bad request line", peer); return; }
@@ -78,6 +90,7 @@ pub async fn handle_http(state: Arc<AppState>, mut stream: TcpStream) {
     let (clean_path, query) = parse_query(path);
 
     let allowed_origin = &state.config.share.allowed_origin;
+    let req_origin = request_origin.as_deref();
 
     if method == "OPTIONS" {
         let resp = format!("HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: {}\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type\r\nVary: Origin\r\nConnection: close\r\n\r\n", allowed_origin);
@@ -90,13 +103,28 @@ pub async fn handle_http(state: Arc<AppState>, mut stream: TcpStream) {
             let max_body = state.config.share.max_share_bytes;
             if content_length > max_body {
                 info!("{} share upload rejected: {} bytes > {} limit", peer, content_length, max_body);
-                let resp = http_response("413 Payload Too Large", "text/plain", b"Share too large", allowed_origin);
+                let resp = http_response("413 Payload Too Large", "text/plain", b"Share too large", allowed_origin, req_origin);
                 let _ = stream.write_all(&resp).await;
                 return;
             }
-            let mut body = vec![0u8; content_length];
-            if let Err(_) = stream.read_exact(&mut body).await {
-                info!("{} share upload read error", peer);
+            let mut body = Vec::with_capacity(content_length);
+            let mut remaining = content_length;
+            let mut chunk_buf = vec![0u8; 65536];
+            let timeout = tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                async {
+                    while remaining > 0 {
+                        let to_read = std::cmp::min(remaining, chunk_buf.len());
+                        let n = stream.read(&mut chunk_buf[..to_read]).await.map_err(|_| ())?;
+                        if n == 0 { return Err(()); }
+                        body.extend_from_slice(&chunk_buf[..n]);
+                        remaining -= n;
+                    }
+                    Ok::<_, ()>(())
+                }
+            ).await;
+            if timeout.is_err() || timeout.unwrap().is_err() {
+                info!("{} share upload read error or timeout", peer);
                 return;
             }
             let ttl = query.get("ttl").and_then(|v| v.parse::<u64>().ok());
@@ -106,7 +134,7 @@ pub async fn handle_http(state: Arc<AppState>, mut stream: TcpStream) {
                 if t > max_ttl {
                     info!("{} share upload rejected: ttl {}s > max {}s", peer, t, max_ttl);
                     let resp = http_response("400 Bad Request", "text/plain",
-                        format!("TTL exceeds server maximum of {}s", max_ttl).as_bytes(), allowed_origin);
+                        format!("TTL exceeds server maximum of {}s", max_ttl).as_bytes(), allowed_origin, req_origin);
                     let _ = stream.write_all(&resp).await;
                     return;
                 }
@@ -115,7 +143,7 @@ pub async fn handle_http(state: Arc<AppState>, mut stream: TcpStream) {
             let id = store.insert(body, ttl, uses);
             info!("{} share uploaded {} bytes -> id {} (ttl={:?}, uses={:?})", peer, content_length, id, ttl, uses);
             let json = serde_json::json!({"id": id}).to_string();
-            let resp = http_response("200 OK", "application/json", json.as_bytes(), allowed_origin);
+            let resp = http_response("200 OK", "application/json", json.as_bytes(), allowed_origin, req_origin);
             let _ = stream.write_all(&resp).await;
         }
         ("GET", p) if p.starts_with("share/") => {
@@ -123,17 +151,17 @@ pub async fn handle_http(state: Arc<AppState>, mut stream: TcpStream) {
             let mut store = state.shares.lock().await;
             if let Some(data) = store.get(id) {
                 info!("{} share download {} -> {} bytes", peer, id, data.len());
-                let resp = http_response("200 OK", "application/octet-stream", &data, allowed_origin);
+                let resp = http_response("200 OK", "application/octet-stream", &data, allowed_origin, req_origin);
                 let _ = stream.write_all(&resp).await;
             } else {
                 info!("{} share download {} -> not found or expired", peer, id);
-                let resp = http_response("404 Not Found", "text/plain", b"Share not found", allowed_origin);
+                let resp = http_response("404 Not Found", "text/plain", b"Share not found", allowed_origin, req_origin);
                 let _ = stream.write_all(&resp).await;
             }
         }
         _ => {
             let body = include_str!("share_page.html");
-            let resp = http_response("200 OK", "text/html", body.as_bytes(), allowed_origin);
+            let resp = http_response("200 OK", "text/html", body.as_bytes(), allowed_origin, req_origin);
             let _ = stream.write_all(&resp).await;
         }
     }

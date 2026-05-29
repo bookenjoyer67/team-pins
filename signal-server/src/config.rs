@@ -42,17 +42,21 @@ pub struct RateLimitConfig {
     #[serde(default = "d_mps")] pub messages_per_sec: u32,
     #[serde(default = "d_cpm")] pub connections_per_min: u32,
     #[serde(default = "d_ban")] pub ban_duration_secs: u64,
+    #[serde(default = "d_cr5")] pub community_regs_per_window: u32,
+    #[serde(default = "d_cr600")] pub community_reg_window_secs: u64,
 }
 fn d_mps() -> u32 { 20 }
 fn d_cpm() -> u32 { 30 }
-fn d_ban() -> u64 { 60 }
+fn d_ban() -> u64 { 3600 }
+fn d_cr5() -> u32 { 5 }
+fn d_cr600() -> u64 { 600 }
 impl Default for RateLimitConfig {
-    fn default() -> Self { Self { messages_per_sec: 20, connections_per_min: 30, ban_duration_secs: 60 } }
+    fn default() -> Self { Self { messages_per_sec: 20, connections_per_min: 30, ban_duration_secs: 3600, community_regs_per_window: 5, community_reg_window_secs: 600 } }
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct SecurityConfig {
-    #[serde(default)] pub require_passwords: bool,
+    #[serde(default = "d_true")] pub require_passwords: bool,
     #[serde(default = "d_pl")] pub max_password_len: usize,
     #[serde(default = "d_rl")] pub max_room_len: usize,
     #[serde(default = "d_ms")] pub max_message_size: usize,
@@ -82,7 +86,7 @@ fn d_smb() -> usize { 200 * 1024 * 1024 }
 fn d_cors() -> String { "https://app.piggpin.space".into() }
 impl Default for ShareConfig {
     fn default() -> Self {
-        Self { share_http_port: 9001, max_shares: 1000, share_ttl_secs: 86400, max_share_ttl_secs: 86400, max_share_bytes: 256 * 1024, allowed_origin: "https://app.piggpin.space".into() }
+        Self { share_http_port: 9001, max_shares: 1000, share_ttl_secs: 86400, max_share_ttl_secs: 86400, max_share_bytes: d_smb(), allowed_origin: "https://app.piggpin.space".into() }
     }
 }
 
@@ -121,6 +125,7 @@ pub struct RnodeConfig {
     #[serde(default = "d_rnode_room")] pub bridge_room: String,
 }
 fn d_false() -> bool { false }
+fn d_true() -> bool { true }
 fn d_115200() -> u32 { 115200 }
 fn d_rnode_room() -> String { "rnode".into() }
 impl Default for RnodeConfig {

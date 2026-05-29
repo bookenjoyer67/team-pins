@@ -1,6 +1,7 @@
 use meshtastic::prelude::*;
 use meshtastic::StreamApi;
 use meshtastic::utils;
+use std::error::Error;
 // For BLE connections, enable the `bluetooth-le` feature
 // and use the BleId struct.
 

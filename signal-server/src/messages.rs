@@ -1,5 +1,5 @@
 use pbkdf2::pbkdf2_hmac;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 
 pub fn unix_millis() -> u64 {
     std::time::SystemTime::now()
@@ -63,6 +63,7 @@ pub fn json_claim_denied(reason: &str) -> String {
 pub fn hash_password(pw: &str) -> String {
     let mut salt = [0u8; 16];
     if getrandom::getrandom(&mut salt).is_err() {
+        tracing::error!("hash_password: getrandom failed, cannot generate salt");
         return String::new();
     }
     let mut hash = [0u8; 32];
@@ -77,7 +78,6 @@ pub fn check_password(stored: &str, pw: &str) -> bool {
         pbkdf2_hmac::<Sha256>(pw.as_bytes(), &salt, 210_000, &mut hash);
         hex::encode(&hash) == hash_hex
     } else {
-        // legacy fallback: raw SHA256 stored password
-        hex::encode(Sha256::digest(pw.as_bytes())) == stored
+        false
     }
 }

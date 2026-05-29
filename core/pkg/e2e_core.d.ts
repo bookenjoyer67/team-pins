@@ -107,11 +107,11 @@ export interface InitOutput {
     readonly detect_freehand_shape: (a: number, b: number) => [number, number];
     readonly encode_hex: (a: number, b: number) => [number, number];
     readonly encrypt_annotation: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: bigint, i: number, j: number) => [number, number, number];
-    readonly encrypt_bytes_with_password: (a: number, b: number, c: number, d: number) => any;
+    readonly encrypt_bytes_with_password: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly encrypt_geojson: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly encrypt_pin_data: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number, number];
     readonly encrypt_raw_bytes: (a: number, b: number, c: number, d: number) => [number, number, number];
-    readonly encrypt_with_password: (a: number, b: number, c: number, d: number) => any;
+    readonly encrypt_with_password: (a: number, b: number, c: number, d: number) => [number, number, number];
     readonly generate_dek: () => [number, number];
     readonly generate_qr_svg: (a: number, b: number) => [number, number];
     readonly generate_signing_keypair: () => any;

@@ -1,5 +1,6 @@
 import * as DB from "./db.js";
 import { state } from "./state.js";
+import { toast } from "./dialogs.js";
 
 const connections = new Map();  // url → { ws, connected, url, pendingLists: [], communityPeers: Map, reconnectTimer, authPubkey }
 
@@ -17,7 +18,7 @@ function getCommunityConn(communityId) {
       if (conn && isAlive(conn)) return conn;
     }
   }
-  return getConn();
+  return null;
 }
 
 function queuePush(data) {
@@ -78,14 +79,16 @@ export function getCommunityPeers(communityId) {
 export function connect(relayUrl) {
   const url = (relayUrl || localStorage.getItem("pins-relay-url") || "").trim().replace(/\/$/, "");
   if (!url) return;
+  let registeredCommunities = new Set();
   if (connections.has(url)) {
     const existing = connections.get(url);
     if (existing.ws && (existing.ws.readyState === WebSocket.OPEN || existing.ws.readyState === WebSocket.CONNECTING)) return;
     if (existing.reconnectTimer) clearTimeout(existing.reconnectTimer);
+    registeredCommunities = existing.registeredCommunities || new Set();
     try { existing.ws.close(); } catch (_) {}
   }
 
-  const conn = { connected: false, ws: null, url, pendingLists: [], communityPeers: new Map(), reconnectTimer: null, authPubkey: null };
+  const conn = { connected: false, ws: null, url, pendingLists: [], communityPeers: new Map(), reconnectTimer: null, authPubkey: null, registeredCommunities };
   connections.set(url, conn);
 
   try {
@@ -93,6 +96,7 @@ export function connect(relayUrl) {
   } catch (_) { connections.delete(url); return; }
 
   conn.ws.onopen = async () => {
+    reconnectAttempts.delete(url);
     conn.connected = true;
     reconnectAttempts.set(url, 0);
     conn.ws.send(JSON.stringify({ type: "join", room: "community-relay" }));
@@ -129,7 +133,15 @@ export function connect(relayUrl) {
     const pushes = [...pendingPushes];
     pendingPushes.length = 0;
     for (const p of pushes) {
-      pushDeltaOn(c, p.communityId, p.pins, p.annotations, p.drawings, p.tombstones, p.deletedPinIds, p.deletedDrawingIds);
+      // Only push to the relay this community is registered on
+      DB.getCommunity(p.communityId).then(community => {
+        const communityRelayUrl = community?.relay_url;
+        if (!communityRelayUrl || communityRelayUrl === c.url || !c.url) {
+          pushDeltaOn(c, p.communityId, p.pins, p.annotations, p.drawings, p.tombstones, p.deletedPinIds, p.deletedDrawingIds);
+        } else {
+          queuePush(p);
+        }
+      }).catch(() => { queuePush(p); });
     }
   }
 
@@ -216,6 +228,8 @@ export function connect(relayUrl) {
         handleMemberDekRequested(msg);
       } else if (msg.type === "member_dek_ready") {
         handleMemberDekReady(msg);
+      } else if (msg.type === "error") {
+        toast("Relay error: " + (msg.reason || "unknown"), "#dc2626");
       }
     } catch (err) {
       console.error("[relay] message handler failed:", err, "msg type:", msg?.type);
@@ -229,8 +243,9 @@ export function connect(relayUrl) {
     if (conn.reconnectTimer) clearTimeout(conn.reconnectTimer);
     const attempts = (reconnectAttempts.get(url) || 0) + 1;
     reconnectAttempts.set(url, attempts);
-    const delay = Math.min(1000 * Math.pow(2, attempts - 1), 60000);
-    const jitter = Math.random() * delay * 0.3;
+    if (attempts > 10) { console.error("[relay] max reconnect attempts reached for", url); return; }
+    const delay = Math.min(1000 * Math.pow(2, attempts), 60000);
+    const jitter = (crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF) * delay * 0.3;
     conn.reconnectTimer = setTimeout(() => connect(url), delay + jitter);
   };
 
@@ -260,11 +275,14 @@ export function disconnect(url) {
 
 async function registerCommunitiesOn(conn) {
   if (!isAlive(conn)) return;
+  conn.registeredCommunities = conn.registeredCommunities || new Set();
   const communities = await DB.getAllCommunities();
   for (const c of communities) {
     if (c.visibility === "local") continue;
     if (c.relay_url && c.relay_url !== conn.url) continue;
+    if (conn.registeredCommunities.has(c.community_id)) continue;
     await registerCommunityOn(conn, c.community_id, c.visibility === "public");
+    conn.registeredCommunities.add(c.community_id);
   }
 }
 
@@ -386,7 +404,6 @@ async function handleSyncDelta(msg) {
     await DB.importPin(merged);
   }
   for (const ann of (msg.annotations || [])) {
-    console.log("[sync] ann id:", ann.annotation_id?.slice(0,8), "has votes:", ann.votes?.length || 0);
     const existing = await DB.getAnnotation(ann.annotation_id).catch(() => null);
     if (existing) {
       const mergedVotes = [...(existing.votes || [])];
@@ -475,6 +492,8 @@ export function publishCommunity(communityId, published = true) {
   const conn = getCommunityConn(communityId);
   if (conn && isAlive(conn)) {
     registerCommunityOn(conn, communityId, published).then(() => {
+      conn.registeredCommunities = conn.registeredCommunities || new Set();
+      conn.registeredCommunities.add(communityId);
       if (published) requestCommunityListOn(conn);
       window._pushAllLocalData?.();
     });
@@ -500,6 +519,20 @@ async function registerCommunityOn(conn, communityId, published) {
   const team = await DB.getTeam(communityId);
   if (!c || !team) return;
   const isPasswordDerived = team.key_derivation === "pbkdf2";
+  // Compute join_wrapped_dek for open communities so new members can self-service the DEK
+  let joinWrappedDek = "";
+  if (!isPasswordDerived && (c.governance?.join_policy || "open") === "open") {
+    try {
+      const { unwrap_dek, encode_hex, encrypt_with_password } = await import("./core/pkg/e2e_core.js");
+      const communitySecret = team.community_secret_key || team.secret_key;
+      if (communitySecret) {
+        const dk = unwrap_dek(team.community_wrapped_dek || team.wrapped_dek, communitySecret);
+        const dekHex = encode_hex(dk);
+        const encrypted = encrypt_with_password(dekHex, communityId);
+        joinWrappedDek = `${encrypted.ciphertext_hex}:${encrypted.nonce_hex}:${encrypted.salt_hex}`;
+      }
+    } catch (_) {}
+  }
   conn.ws.send(JSON.stringify({
     type: "register_community",
     community_id: communityId,
@@ -516,6 +549,7 @@ async function registerCommunityOn(conn, communityId, published) {
     owner_name: state.displayName || "",
     bounds: c.bounds || null,
     password_hash: c.password_hash || null,
+    join_wrapped_dek: joinWrappedDek || null,
   }));
 }
 
@@ -674,11 +708,11 @@ export async function sendPinVote(communityId, pinId, dir) {
   const conn = relayUrl ? connections.get(relayUrl) : getConn();
   if (!conn || !isAlive(conn)) return;
   const ts = Date.now();
-  const payload = encode_hex(new TextEncoder().encode(pinId + "|" + communityId + "|" + dir + "|" + ts));
   let sig = "";
   if (state.signingSecretKey) {
-    const { sign, encode_hex } = await import("./core/pkg/e2e_core.js");
-    sig = sign(payload, state.signingSecretKey);
+    const mod = await import("./core/pkg/e2e_core.js");
+    const payload = mod.encode_hex(new TextEncoder().encode(pinId + "|" + communityId + "|" + dir + "|" + ts));
+    sig = mod.sign(payload, state.signingSecretKey);
   }
   conn.ws.send(JSON.stringify({
     type: "pin_vote",
@@ -829,6 +863,14 @@ async function handleMemberDekRequested(msg) {
   const team = await DB.getTeam(community_id);
   const c = await DB.getCommunity(community_id);
   if (!team || !c || team.key_derivation === "pbkdf2") return;
+  // Verify the requesting pubkey is a member of the community
+  const members = c.members || [];
+  const gov = c.governance || {};
+  const joinPolicy = gov.join_policy || "open";
+  if (joinPolicy !== "open" && !members.some(m => m.pubkey === member_pubkey)) {
+    console.warn("[relay] rejecting member_dek request from non-member:", member_pubkey);
+    return;
+  }
   const communitySecret = team.community_secret_key || team.secret_key;
   if (!communitySecret) return;
   try {

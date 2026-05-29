@@ -34,3 +34,6 @@
     X-Frame-Options = "SAMEORIGIN"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    Cross-Origin-Opener-Policy = "same-origin"
+    Cross-Origin-Embedder-Policy = "require-corp"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-uhc6LteEic5Iqes7oh3Lj+BLG/Sx+fvUrEFwL5xa+vo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://server.arcgisonline.com blob:; connect-src 'self' https://*.tile.openstreetmap.org https://server.arcgisonline.com https://*.meshtastic.org https://metered.ca wss: ws://localhost:* ws://127.0.0.1:*; media-src 'self' blob:; child-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; font-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
