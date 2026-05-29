@@ -2484,7 +2484,14 @@ export async function deleteSelected() {
     return;
   for (const m of _selectedMarkers) {
     const pid = m._pinId;
-    if (pid) await DB.deletePin(pid);
+    if (!pid) continue;
+    const pins = await DB.getPins(state.currentSet);
+    const row = pins.find((p) => p.pin_id === pid);
+    if (row) pushUndo({ kind: "pin", type: "delete", pin: row, pid });
+    await DB.deletePin(pid);
+    if (state._decryptedPinCache) state._decryptedPinCache.delete(pid);
+    window._broadcast?.("delete_pin", { pin_id: pid });
+    window._addHistory?.(t("pinDeleted"), pid.slice(0, 8));
   }
   clearSelection();
   await loadPins();
