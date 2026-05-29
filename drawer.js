@@ -389,6 +389,39 @@ function showLangChooser() {
   });
 }
 
+function showSocialModal() {
+  const shareSection = SECTIONS.find(s => s.id === "share");
+  const items = shareSection.items.map(it =>
+    `<button class="social-item" style="display:block;width:100%;padding:8px 12px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px;text-align:left;border-radius:4px;">
+      ${it.icon}  ${it.label}
+    </button>`
+  ).join("");
+  const relayItem = SECTIONS.find(s => s.id === "settings").items.find(it => it.id === "relay");
+  const relayBtn = `<button class="social-item" style="display:block;width:100%;padding:8px 12px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px;text-align:left;border-radius:4px;">
+      ${relayItem.icon}  ${relayItem.label}
+    </button>`;
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;";
+  ov.innerHTML = `<div style="background:var(--bg-card);padding:12px;border-radius:8px;min-width:180px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+    <div style="font-size:14px;font-weight:600;margin-bottom:6px;padding:0 12px;color:var(--text);">Social</div>
+    ${items}
+    <div style="height:1px;background:var(--border);margin:4px 0;"></div>
+    ${relayBtn}
+    <button id="social-close" style="display:block;width:100%;padding:6px 12px;margin-top:6px;border:1px solid var(--border);background:var(--border-light);color:var(--text);border-radius:4px;cursor:pointer;font-size:13px;">Close</button>
+  </div>`;
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  ov.addEventListener("keydown", (e) => { if (e.key === "Escape") ov.remove(); });
+  document.body.appendChild(ov);
+
+  const itemsAll = [...shareSection.items, relayItem];
+  ov.querySelectorAll(".social-item").forEach((btn, i) => {
+    btn.onmouseenter = () => { btn.style.background = "var(--bg-input)"; };
+    btn.onmouseleave = () => { btn.style.background = "transparent"; };
+    btn.onclick = () => { itemsAll[i].action(); ov.remove(); };
+  });
+  document.getElementById("social-close").onclick = () => ov.remove();
+}
+
 function showDonateModal() {
   const ov = document.createElement("div");
   ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;";
@@ -499,14 +532,14 @@ function renderCollapsed() {
   sep.classList.add("strip-collapsible");
   strip.appendChild(sep);
 
-  // Discover (quick access next-most-frequent)
-  const discBtn = document.createElement("button");
-  discBtn.title = "Discover";
-  discBtn.textContent = "🔍";
-  discBtn.style.cssText = "width:26px;height:32px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;font-size:14px;padding:0;border-radius:4px;flex-shrink:0;";
-  discBtn.onclick = () => Map.showDiscoverModal();
-  discBtn.classList.add("strip-collapsible");
-  strip.appendChild(discBtn);
+  // Social (quick access to sharing + discovery)
+  const socialBtn = document.createElement("button");
+  socialBtn.title = "Social";
+  socialBtn.textContent = "🌐";
+  socialBtn.style.cssText = "width:26px;height:32px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;font-size:14px;padding:0;border-radius:4px;flex-shrink:0;";
+  socialBtn.onclick = showSocialModal;
+  socialBtn.classList.add("strip-collapsible");
+  strip.appendChild(socialBtn);
 
   // Collapse triangle — toggles between full tools and minimal (≡ + triangle only)
   const collapseBtn = document.createElement("button");
