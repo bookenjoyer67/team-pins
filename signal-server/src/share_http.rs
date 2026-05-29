@@ -146,6 +146,10 @@ pub async fn handle_http(state: Arc<AppState>, mut stream: TcpStream) {
             let resp = http_response("200 OK", "application/json", json.as_bytes(), allowed_origin, req_origin);
             let _ = stream.write_all(&resp).await;
         }
+        ("GET", p) if p == "health" => {
+            let resp = http_response("200 OK", "text/plain", b"ok", allowed_origin, req_origin);
+            let _ = stream.write_all(&resp).await;
+        }
         ("GET", p) if p.starts_with("share/") => {
             let id = &p[6..];
             let mut store = state.shares.lock().await;

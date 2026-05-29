@@ -9,15 +9,21 @@ use crate::share_http;
 use crate::state::AppState;
 
 pub async fn handle_combined(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
-    let mut buf = [0u8; 256];
+    let mut buf = [0u8; 512];
     let peek_result = timeout(Duration::from_millis(500), async {
         for _ in 0..3 {
             match stream.peek(&mut buf).await {
                 Ok(n) if n >= 4 => {
                     let head = String::from_utf8_lossy(&buf[..n]);
                     let first = head.lines().next().unwrap_or("");
-                    if first.contains("/share") {
+                    if first.contains("/share") || first.contains("/health") {
                         return Ok::<_, ()>(true);
+                    }
+                    // Plain HTTP requests (not WebSocket upgrades) go to HTTP handler
+                    if first.contains("HTTP/") {
+                        let is_websocket = head.contains("Upgrade: websocket")
+                            || head.contains("Sec-WebSocket-Key");
+                        return Ok::<_, ()>(!is_websocket);
                     }
                     return Ok::<_, ()>(false);
                 }

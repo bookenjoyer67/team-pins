@@ -22,12 +22,29 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::time::{sleep, Duration};
 use tracing::info;
 
+use socket2::{Socket, Domain, Type, TcpKeepalive};
+use std::net::SocketAddr;
+
 use crate::config::load_config;
 use crate::detect::handle_combined;
 use crate::rate::RateLimiter;
 use crate::share::ShareStore;
 use crate::state::AppState;
 use crate::storage::PersistentStore;
+
+fn bind_with_keepalive(addr: SocketAddr) -> std::io::Result<TcpListener> {
+    let socket = Socket::new(Domain::for_address(addr), Type::STREAM, None)?;
+    socket.set_reuse_address(true)?;
+    let ka = TcpKeepalive::new()
+        .with_time(Duration::from_secs(60))
+        .with_interval(Duration::from_secs(10));
+    socket.set_tcp_keepalive(&ka).ok();
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?;
+    socket.set_nonblocking(true)?;
+    let std_listener: std::net::TcpListener = socket.into();
+    TcpListener::from_std(std_listener)
+}
 
 #[tokio::main]
 async fn main() {
@@ -157,15 +174,15 @@ async fn main() {
     }
 
     // Main listener (port 9000) — detects WS vs HTTP share
-    let addr = format!("{}:{}", config.server.bind_address, config.server.port);
-    let listener = match TcpListener::bind(&addr).await {
+    let addr: SocketAddr = format!("{}:{}", config.server.bind_address, config.server.port).parse().expect("Invalid bind address");
+    let listener = match bind_with_keepalive(addr) {
         Ok(l) => l,
         Err(e) => { tracing::error!("Failed to bind {}: {}", addr, e); return; }
     };
     tracing::info!("piggPin relay on {} (WS + share HTTP)", addr);
 
-    let http_addr = format!("{}:{}", config.server.bind_address, config.share.share_http_port);
-    let http_listener = match TcpListener::bind(&http_addr).await {
+    let http_addr: SocketAddr = format!("{}:{}", config.server.bind_address, config.share.share_http_port).parse().expect("Invalid bind address");
+    let http_listener = match bind_with_keepalive(http_addr) {
         Ok(l) => l,
         Err(e) => { tracing::error!("Failed to bind HTTP {}: {}", http_addr, e); return; }
     };

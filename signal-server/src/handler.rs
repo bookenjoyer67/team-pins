@@ -87,17 +87,21 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
         if !rl.check_conn(&ip) { return; }
     }
 
-    let mut ws_stream = match accept_async(stream).await {
-        Ok(ws) => ws,
-        Err(e) => {
+    let mut ws_stream = match timeout(Duration::from_secs(10), accept_async(stream)).await {
+        Ok(Ok(ws)) => ws,
+        Ok(Err(e)) => {
             warn!("WebSocket handshake failed from {}: {}", ip, e);
+            return;
+        }
+        Err(_) => {
+            warn!("WebSocket handshake timeout from {}", ip);
             return;
         }
     };
 
     let _ = ws_stream.send(Message::Text(messages::json_hello())).await;
 
-    let join_msg = match timeout(Duration::from_secs(30), ws_stream.next()).await {
+    let join_msg = match timeout(Duration::from_secs(5), ws_stream.next()).await {
         Ok(Some(Ok(Message::Text(txt)))) => txt,
         Ok(Some(Ok(Message::Close(_)))) | Ok(None) => {
             info!("Client {} closed before join", ip);

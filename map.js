@@ -151,6 +151,14 @@ async function compressMedia(file) {
     file.type.includes("svg")
   ) {
     if (file.type.startsWith("video/")) {
+      // Already webm (e.g. recorded video) — skip re-encode, encrypt as-is
+      if (file.type.startsWith("video/webm")) {
+        return {
+          buffer: await file.arrayBuffer(),
+          type: file.type,
+          name: file.name,
+        };
+      }
       try {
         const buf = new Uint8Array(await file.arrayBuffer());
         const result = await compressVideoBytes(buf, file.type, file.name);
@@ -2967,7 +2975,7 @@ export function showPinForm(lat, lng) {
         ? (MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm")
         : "audio/webm";
       recordedChunks = [];
-      mediaRecorder = new MediaRecorder(mediaStream, { mimeType: mime });
+      mediaRecorder = new MediaRecorder(mediaStream, { mimeType: mime, videoBitsPerSecond: 1500000 });
 
       // Show video preview for camera recording
       if (type === "video") {
@@ -3010,7 +3018,7 @@ export function showPinForm(lat, lng) {
           const s = status.querySelector("span");
           if (s) s.textContent = `⏺ Recording... ${formatTime(elapsed)}`;
           // Auto-stop at 3min for video, 5min for audio
-          const max = type === "video" ? 180000 : 300000;
+          const max = type === "video" ? 120000 : 300000;
           if (elapsed >= max && mediaRecorder?.state === "recording") { mediaRecorder.stop(); toast("Recording limit reached", "#f97316"); }
         }, 500);
       }
