@@ -11,6 +11,7 @@ pub struct Config {
     #[serde(default)] pub mqtt: MqttConfig,
     #[serde(default)] pub rnode: RnodeConfig,
     #[serde(default)] pub peer_relays: PeerRelayConfig,
+    #[serde(default)] pub storage: StorageConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -149,6 +150,15 @@ impl Default for PeerRelayConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct StorageConfig {
+    /// Maximum pins per community (0 = unlimited). Oldest pins evicted when exceeded.
+    #[serde(default)] pub max_pins_per_community: usize,
+}
+impl Default for StorageConfig {
+    fn default() -> Self { Self { max_pins_per_community: 0 } }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -160,6 +170,7 @@ impl Default for Config {
             mqtt: MqttConfig::default(),
             rnode: RnodeConfig::default(),
             peer_relays: PeerRelayConfig::default(),
+            storage: StorageConfig::default(),
         }
     }
 }
@@ -178,4 +189,57 @@ pub fn load_config() -> Config {
     if let Ok(v) = std::env::var("MQTT_PASSWORD") { cfg.mqtt.password = v; }
     if let Ok(v) = std::env::var("MQTT_BROKER") { cfg.mqtt.broker = v; }
     cfg
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let cfg = Config::default();
+        assert_eq!(cfg.server.port, 9000);
+        assert_eq!(cfg.share.share_http_port, 9001);
+        assert_eq!(cfg.rate_limit.messages_per_sec, 20);
+        assert_eq!(cfg.rate_limit.connections_per_min, 30);
+        assert_eq!(cfg.rooms.max_clients, 0);
+        assert_eq!(cfg.rooms.max_rooms, 1000);
+        assert_eq!(cfg.rooms.room_timeout_secs, 600);
+        assert_eq!(cfg.security.max_room_len, 64);
+        assert_eq!(cfg.security.max_message_size, 10_485_760);
+        assert!(!cfg.mqtt.enabled);
+        assert!(!cfg.rnode.enabled);
+        assert!(!cfg.peer_relays.enabled);
+        assert_eq!(cfg.storage.max_pins_per_community, 0);
+    }
+
+    #[test]
+    fn test_default_servers() {
+        assert_eq!(ServerConfig::default().port, 9000);
+        assert_eq!(RoomsConfig::default().room_timeout_secs, 600);
+        assert_eq!(SecurityConfig::default().max_password_len, 128);
+        assert_eq!(ShareConfig::default().share_ttl_secs, 86400);
+        assert_eq!(StorageConfig::default().max_pins_per_community, 0);
+    }
+
+    #[test]
+    fn test_storage_config_default() {
+        let s = StorageConfig::default();
+        assert_eq!(s.max_pins_per_community, 0);
+    }
+
+    #[test]
+    fn test_rate_limit_config_default() {
+        let r = RateLimitConfig::default();
+        assert_eq!(r.messages_per_sec, 20);
+        assert_eq!(r.connections_per_min, 30);
+        assert_eq!(r.ban_duration_secs, 3600);
+    }
+
+    #[test]
+    fn test_peer_relay_config_default() {
+        let p = PeerRelayConfig::default();
+        assert!(!p.enabled);
+        assert_eq!(p.announce_interval_secs, 300);
+    }
 }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 
 use futures_util::{SinkExt, StreamExt};
 use hex;
@@ -21,7 +22,7 @@ fn auth_err(msg: &str) -> String {
 }
 
 fn get_conn_pubkey(room: &Room, cid: &str) -> Option<String> {
-    room.clients.get(cid).and_then(|c| c.pubkey.clone())
+    room.clients.get(cid).and_then(|c| c.pubkey.lock().unwrap().clone())
 }
 
 fn is_founder(community: &crate::storage::CommunityConfig, pubkey: &str) -> bool {
@@ -159,8 +160,8 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
         let room = rooms.entry(room_name.clone()).or_insert_with(|| Room {
             clients: HashMap::new(),
             pw_hash: None,
-            last_act: Instant::now(),
-            challenges: HashMap::new(),
+            last_act: StdMutex::new(Instant::now()),
+            challenges: StdMutex::new(HashMap::new()),
         });
 
         let max = state.config.rooms.max_clients;
@@ -188,8 +189,8 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
         }
 
         room.broadcast(&messages::json_joined(&cid), "");
-        room.clients.insert(cid.clone(), Client { tx, id: cid.clone(), ip: ip.clone(), pubkey: None });
-        room.last_act = Instant::now();
+        room.clients.insert(cid.clone(), Client { tx, id: cid.clone(), ip: ip.clone(), pubkey: StdMutex::new(None) });
+        *room.last_act.lock().unwrap() = Instant::now();
         client_is_relay_room = room_name == "community-relay";
     }
 
@@ -199,9 +200,9 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
         let (challenge_msg, challenge_hex, challenge_ts) = messages::json_auth_challenge();
         let _ = ws_tx.send(Message::Text(challenge_msg)).await;
         {
-            let mut rooms = state.rooms.write().await;
-            if let Some(room) = rooms.get_mut(&room_name) {
-                room.challenges.insert(cid.clone(), (challenge_hex, challenge_ts));
+            let rooms = state.rooms.read().await;
+            if let Some(room) = rooms.get(&room_name) {
+                room.challenges.lock().unwrap().insert(cid.clone(), (challenge_hex, challenge_ts));
             }
         }
     }
@@ -237,9 +238,9 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                             let mut rl = state.rl.lock().await;
                             if !rl.check_msg(&read_ip) { continue; }
                         }
-                        let mut rooms = state.rooms.write().await;
-                        if let Some(room) = rooms.get_mut(&read_room) {
-                            room.last_act = Instant::now();
+                        let rooms = state.rooms.read().await;
+                        if let Some(room) = rooms.get(&read_room) {
+                            *room.last_act.lock().unwrap() = Instant::now();
                             match serde_json::from_str::<serde_json::Value>(&txt) {
                                 Ok(v) if v.get("type").is_some() => {
                                     let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -252,7 +253,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                         let sig = v.get("signature").and_then(|s| s.as_str()).unwrap_or("");
                                         let challenge_ts = v.get("ts").and_then(|t| t.as_u64()).unwrap_or(0);
                                         if !pubkey.is_empty() && !challenge_hex.is_empty() && !sig.is_empty() {
-                                            let stored = room.challenges.remove(&read_cid);
+                                            let stored = room.challenges.lock().unwrap().remove(&read_cid);
                                             let valid_challenge = stored.as_ref().map_or(false, |(ch, ts)| {
                                                 let now = messages::unix_millis();
                                                 (now - ts) < 300_000 && ch == challenge_hex
@@ -265,8 +266,8 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                 let payload_hex = hex::encode(raw_payload.as_bytes());
                                                 match auth::verify_signature(&payload_hex, sig, pubkey) {
                                                     Ok(true) => {
-                                                        if let Some(client) = room.clients.get_mut(&read_cid) {
-                                                            client.pubkey = Some(pubkey.to_string());
+                                                        if let Some(client) = room.clients.get(&read_cid) {
+                                                            *client.pubkey.lock().unwrap() = Some(pubkey.to_string());
                                                         }
                                                         room.send_to(&serde_json::json!({"type":"auth_ok","pubkey":pubkey}).to_string(), &read_cid);
                                                         info!("[relay] client {} authenticated as {}", &read_cid, &pubkey);
@@ -737,7 +738,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                         }
                                     } else if ty == "push_delta" {
                                         let community_id = v.get("community_id").and_then(|c| c.as_str()).unwrap_or("").to_string();
-                                        let ts = v.get("ts").and_then(|t| t.as_u64()).unwrap_or(0);
+                                        let ts = v.get("ts").and_then(|t| t.as_u64()).unwrap_or_else(messages::unix_millis);
                                         let conn_pubkey = get_conn_pubkey(room, &read_cid);
 
                                         // Auth: get community config for policy checks
@@ -1025,7 +1026,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                                                 for sub in &subs {
                                                     // Find subscriber's client connection and send
                                                     for (_client_id, client) in &room.clients {
-                                                        if client.pubkey.as_deref() == Some(&sub.subscriber_pubkey) {
+                                                        if client.pubkey.lock().unwrap().as_deref() == Some(&sub.subscriber_pubkey) {
                                                         if client.tx.try_send(tokio_tungstenite::tungstenite::Message::Text(layer_delta.clone())).is_err() {
                                                             warn!("[relay] layer delta drop for subscriber {}", sub.subscriber_pubkey);
                                                         }

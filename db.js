@@ -496,3 +496,53 @@ export async function deleteChain(chainId) {
   await openDB();
   return promisify(tx("chains", "readwrite").delete(chainId));
 }
+
+// --- batch operations (single transaction per batch) ---
+
+export async function importPins(pins) {
+  if (!pins.length) return;
+  await openDB();
+  const store = tx("pins", "readwrite");
+  const ops = pins.map(p => promisify(store.put(p)));
+  return Promise.all(ops);
+}
+
+export async function importDrawings(drawings) {
+  if (!drawings.length) return;
+  await openDB();
+  const store = tx("drawings", "readwrite");
+  const ops = drawings.map(d => promisify(store.put(d)));
+  return Promise.all(ops);
+}
+
+export async function saveAnnotations(annotations) {
+  if (!annotations.length) return;
+  await openDB();
+  const store = tx("annotations", "readwrite");
+  const ops = annotations.map(a => promisify(store.put(a)));
+  return Promise.all(ops);
+}
+
+export async function saveTombstones(tombstones) {
+  if (!tombstones.length) return;
+  await openDB();
+  const store = tx("tombstones", "readwrite");
+  const ops = tombstone.map(t => promisify(store.put(t)));
+  return Promise.all(ops);
+}
+
+export async function deletePins(pinIds) {
+  if (!pinIds.length) return;
+  await openDB();
+  const store = tx("pins", "readwrite");
+  const ops = pinIds.map(id => promisify(store.delete(id)));
+  return Promise.all(ops);
+}
+
+export async function deleteDrawings(drawingIds) {
+  if (!drawingIds.length) return;
+  await openDB();
+  const store = tx("drawings", "readwrite");
+  const ops = drawingIds.map(id => promisify(store.delete(id)));
+  return Promise.all(ops);
+}

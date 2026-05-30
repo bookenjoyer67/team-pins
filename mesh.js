@@ -2,6 +2,7 @@ import { MeshDevice } from "@meshtastic/core";
 import { TransportWebSerial } from "@meshtastic/transport-web-serial";
 import { TransportWebBluetooth } from "@meshtastic/transport-web-bluetooth";
 import { mesh_chunk_encode, hw_model_name, reticulum_generate_identity, reticulum_address, reticulum_hash_data } from "./core/pkg/e2e_core.js";
+import { DeferredChunkStore } from "./store-helpers.js";
 import { rnodeConnect, rnodeSend, rnodeDisconnect, isRnodeConnected } from "./mesh_rnode.js";
 import * as DB from "./db.js";
 import * as Sync from "./sync.js";
@@ -21,6 +22,9 @@ let meshWsConnected = false;
 // Direct-send target
 let meshTargetNode = null;
 
+// Pending broadcast timers (cleared on disconnect)
+const meshBroadcastTimers = [];
+
 // Transport mode: "meshtastic", "bluetooth", or "rnode"
 const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 const meshTransport = localStorage.getItem("mesh-transport") || (isMobile ? "bluetooth" : "meshtastic");
@@ -34,15 +38,25 @@ let meshNodeAddr = null; // hex address derived from user identity
 let _announceTimer = null;
 const ANNOUNCE_INTERVAL = 300000; // 5 minutes
 
-const meshChunkStore = new Map();
-let _meshChunkCleanup = null;
+const meshChunkStore = new DeferredChunkStore(200, 60_000);  // 200 max, 60s TTL
 
-_meshChunkCleanup = setInterval(() => {
-  const now = Date.now();
-  for (const [id, entry] of meshChunkStore) {
-    if (now - entry.ts > 60000) meshChunkStore.delete(id);
+// Stale mesh peer eviction — every 60s evict nodes unseen > 1h
+setInterval(() => {
+  const cutoff = Date.now() - 3_600_000;
+  for (const [num, peer] of meshPeers) {
+    if (!peer.lastSeen || peer.lastSeen < cutoff) {
+      meshPeers.delete(num);
+    }
   }
-}, 30000);
+}, 60_000);
+
+// Stale inbox eviction — every hour evict items older than 7 days
+setInterval(() => {
+  const cutoff = Date.now() - 604_800_000;
+  for (let i = meshInbox.length - 1; i >= 0; i--) {
+    if (meshInbox[i].ts < cutoff) meshInbox.splice(i, 1);
+  }
+}, 3_600_000);
 
 function meshPeerConnId(nodeNum) {
   return `mesh_${nodeNum}`;
@@ -111,18 +125,19 @@ export async function connectMesh() {
     }
     meshDevice = new MeshDevice(transport);
     meshDevice.setHeartbeatInterval(300000); // 5 minutes — reduces serial load
+    const subs = meshDevice._subs = meshDevice._subs || {};
 
-    meshDevice.events.onMyNodeInfo.subscribe(info => {
+    subs.onMyNodeInfo = meshDevice.events.onMyNodeInfo.subscribe(info => {
       meshNodeNum = info.myNodeNum;
       console.log("[mesh] onMyNodeInfo — my node num:", meshNodeNum);
     });
 
-    meshDevice.events.onMessagePacket.subscribe(packet => {
+    subs.onMessagePacket = meshDevice.events.onMessagePacket.subscribe(packet => {
       if (!packet.data) return;
       handleMeshPacket(packet);
     });
 
-    meshDevice.events.onNodeInfoPacket.subscribe(info => {
+    subs.onNodeInfoPacket = meshDevice.events.onNodeInfoPacket.subscribe(info => {
       // Path 1: from handleFromRadio "nodeInfo" — raw NodeInfo protobuf with .num, .user, .position, .snr
       // Path 2: from handleDecodedPacket NODEINFO_APP — { from, to, data: User_protobuf }
       let nodeNum, user, position, snr, lastHeard, deviceMetrics;
@@ -165,7 +180,7 @@ export async function connectMesh() {
       upsertMeshMarker(nodeNum, entry);
     });
 
-    meshDevice.events.onPositionPacket.subscribe(packet => {
+    subs.onPositionPacket = meshDevice.events.onPositionPacket.subscribe(packet => {
       const nodeNum = packet.from;
       const pos = packet.data;
       if (!pos || !pos.latitudeI && !pos.latitude_i || !pos.longitudeI && !pos.longitude_i) return;
@@ -201,7 +216,7 @@ export async function connectMesh() {
       }
     });
 
-    meshDevice.events.onDeviceStatus.subscribe(status => {
+    subs.onDeviceStatus = meshDevice.events.onDeviceStatus.subscribe(status => {
       if (status === 5) {
         toast("Meshtastic radio connected", "#16a34a");
       } else if (status === 2) {
@@ -213,7 +228,7 @@ export async function connectMesh() {
     // Forward encrypted mesh activity so meshview sees our node as participating
     // Throttled: max once per 5 minutes
     let _lastPresence = 0;
-    meshDevice.events.onMeshPacket?.subscribe(packet => {
+    subs.onMeshPacket = meshDevice.events.onMeshPacket?.subscribe(packet => {
       if (meshWsConnected && meshWs && meshWs.readyState === WebSocket.OPEN && Date.now() - _lastPresence > 300000) {
         _lastPresence = Date.now();
         meshWs.send(JSON.stringify({ type: "mesh_uplink_presence", node: meshNodeNum }));
@@ -247,12 +262,20 @@ export async function connectMesh() {
   }
 }
 
+function clearBroadcastTimers() {
+  while (meshBroadcastTimers.length) clearTimeout(meshBroadcastTimers.pop());
+}
+
 export async function disconnectMesh() {
+  clearBroadcastTimers();
   stopAnnounceTimer();
   disconnectMeshWS();
-  if (_meshChunkCleanup) { clearInterval(_meshChunkCleanup); _meshChunkCleanup = null; }
   await rnodeDisconnect().catch(() => {});
   if (!meshDevice) return;
+  if (meshDevice._subs) {
+    for (const unsub of Object.values(meshDevice._subs)) unsub?.();
+    meshDevice._subs = null;
+  }
   Sync.setMeshBroadcast(null);
   import("./gossip.js").then(g => g.setGossipMeshBroadcast(null)).catch(() => {});
   clearMeshMarkers();
@@ -426,7 +449,7 @@ export function connectMeshWS(relayUrl) {
   };
   meshWs.onmessage = (e) => {
     let msg;
-    try { msg = JSON.parse(e.data); } catch (_) { return; }
+    try { msg = JSON.parse(e.data); } catch (_) { console.warn("[mesh-ws] bad JSON:", String(e.data).slice(0, 100)); return; }
     console.log("[mesh-ws] received:", msg.type || "(no type)", msg.from || "");
     // Re-announce when a new peer joins so they discover us
     if (msg.type === "peer_joined") {
@@ -444,6 +467,7 @@ export function connectMeshWS(relayUrl) {
 }
 
 export function disconnectMeshWS() {
+  clearBroadcastTimers();
   if (meshWs) {
     meshWs.onclose = null;
     meshWs.close();
@@ -690,7 +714,7 @@ function handleMeshPacket(packet) {
     const reassembled = reassembleMeshChunk(parsed._m);
     if (reassembled) {
       let fullMsg;
-      try { fullMsg = JSON.parse(reassembled); } catch (_) { return; }
+      try { fullMsg = JSON.parse(reassembled); } catch (_) { console.warn("[mesh] reassembled parse failed"); return; }
       addToInbox(fullMsg, nodeNum);
     }
     return;
@@ -715,19 +739,9 @@ function handleMeshPacket(packet) {
 
 function reassembleMeshChunk(meta) {
   const { id, i: index, n: total, d: chunk } = meta;
-  let entry = meshChunkStore.get(id);
-  if (!entry) {
-    entry = { chunks: new Array(total), ts: Date.now(), count: 0 };
-    meshChunkStore.set(id, entry);
-  }
-  entry.ts = Date.now();
-  if (entry.chunks[index] === undefined) {
-    entry.chunks[index] = chunk;
-    entry.count++;
-  }
-  if (entry.count === total) {
-    const full = entry.chunks.join("");
-    meshChunkStore.delete(id);
+  if (meshChunkStore.add_chunk(id, index, total, chunk)) {
+    const full = meshChunkStore.assemble(id);
+    meshChunkStore.remove(id);
     return full;
   }
   return null;
@@ -747,11 +761,11 @@ function meshBroadcast(type, data) {
       meshWs.send(JSON.stringify({ type: "mesh_uplink", payload: msg, to: meshTargetNode }));
     } else {
       for (let i = 0; i < chunks.length; i++) {
-        setTimeout(() => {
+        meshBroadcastTimers.push(setTimeout(() => {
           if (meshWs && meshWs.readyState === WebSocket.OPEN) {
             meshWs.send(JSON.stringify({ type: "mesh_uplink", payload: chunks[i], to: meshTargetNode }));
           }
-        }, i * 200);
+        }, i * 200));
       }
     }
   }
@@ -764,12 +778,12 @@ function meshBroadcast(type, data) {
     const chunks = JSON.parse(chunksJson);
 
     if (chunks.length === 0) {
-      meshDevice.sendText(msg, destination, false).catch(() => {});
+      meshDevice.sendText(msg, destination, false).catch(e => console.warn("[mesh] sendText failed:", e.message, "to", destination));
     } else {
       for (let i = 0; i < chunks.length; i++) {
-        setTimeout(() => {
-          meshDevice.sendText(chunks[i], destination, false).catch(() => {});
-        }, i * 200);
+        meshBroadcastTimers.push(setTimeout(() => {
+          meshDevice.sendText(chunks[i], destination, false).catch(e => console.warn("[mesh] chunk send failed:", e.message, "idx", i, "to", destination));
+        }, i * 200));
       }
     }
   }
@@ -783,9 +797,9 @@ function meshBroadcast(type, data) {
       rnodeSend(msg);
     } else {
       for (let i = 0; i < chunks.length; i++) {
-        setTimeout(() => {
+        meshBroadcastTimers.push(setTimeout(() => {
           if (isRnodeConnected()) rnodeSend(chunks[i]);
-        }, i * 200);
+        }, i * 200));
       }
     }
   }
@@ -849,6 +863,7 @@ export function acceptInboxItem(itemId) {
   if (item.accepted) return;
   console.log("[mesh] accepting inbox item:", item.type, "data keys:", Object.keys(item.data || {}).join(","));
   item.accepted = true;
+  meshInbox.splice(idx, 1);  // remove accepted item from inbox
   if (meshInboxUnread > 0) meshInboxUnread--;
   const msg = { type: item.type, data: item.data };
   Sync.handleMessage(msg, item.from ? meshPeerConnId(item.from) : "mesh_unknown");
@@ -869,9 +884,10 @@ export async function acceptAllInbox() {
     if (!item.accepted) {
       item.accepted = true;
       const msg = { type: item.type, data: item.data };
-      try { await Sync.handleMessage(msg, item.from ? meshPeerConnId(item.from) : "mesh_unknown"); } catch (_) {}
+      try { await Sync.handleMessage(msg, item.from ? meshPeerConnId(item.from) : "mesh_unknown"); } catch (e) { console.warn("[mesh] acceptAllInbox item failed:", e.message); }
     }
   }
+  meshInbox.length = 0;
   meshInboxUnread = 0;
   toast(`✅ Imported all`, "#16a34a");
   window._renderUI?.();

@@ -1,9 +1,9 @@
 import init, {
-  generate_user_keypair, generate_dek,
+  generate_user_keypair,
   wrap_dek, unwrap_dek, encode_hex,
   generate_qr_svg, generate_uuid,
   generate_signing_keypair, sign, verify,
-  encrypt_annotation, decrypt_annotation,
+  encrypt_annotation,
 } from "./core/pkg/e2e_core.js";
 import * as DB from "./db.js";
 import * as Peer from "./peer.js";
@@ -15,6 +15,7 @@ import * as Map from "./map.js";
 import { init as initDrawer, initSliders as initDrawerSliders } from "./drawer.js";
 import * as Sync from "./sync.js";
 import * as Relay from "./relay.js";
+import { clearDiscoveryCache } from "./gossip.js";
 let Mesh = null;
 const votedPins = {};
 
@@ -277,6 +278,17 @@ renderUI();
 wireGlobals();
 Relay.setOnCommunityPeerUpdate(() => { renderPeerList(); });
 
+// Stale peer eviction — every 5min evict offline peers unseen > 24h
+setInterval(() => {
+  const cutoff = Date.now() - 86_400_000;
+  for (const [cid, peer] of state.peers) {
+    if (cid.startsWith("known_")) continue;
+    if (peer.offline && peer.lastSeen && peer.lastSeen < cutoff) {
+      state.peers.delete(cid);
+    }
+  }
+}, 300_000);
+
 wasmReady.then(async () => {
   document.getElementById("app-loader")?.remove();
 
@@ -443,116 +455,33 @@ wasmReady.then(async () => {
             cidUuid = payload.cid; name = payload.n; pw = !!payload.pw;
           }
           if (cidUuid && name) {
-            let passHash = null;
-            let plaintextPass = null;
-            if (pw) {
-              const { hashCommunityPassword } = await import("./dialogs.js");
-              const pass = await promptRoomPassword("This community requires a password to join");
-              if (!pass) return;
-              plaintextPass = pass;
-              passHash = await hashCommunityPassword(pass, cidUuid);
-            }
-            let result;
-            if (inviteTokenRestore) {
-              const claimResult = await Relay.claimMembership(cidUuid, state.signingPublicKey, state.displayName, inviteTokenRestore.nonce, inviteTokenRestore.capabilitySig);
-              if (claimResult && claimResult.error) { toast("Invite claim failed: " + claimResult.error, "#dc2626"); return; }
-              result = await Relay.joinCommunity(cidUuid, passHash, restoredRelayUrl);
-            } else {
-              result = await Relay.joinCommunity(cidUuid, passHash, restoredRelayUrl);
-            }
-            if (!plaintextPass && result && (result.error === "wrong_password" || result.key_derivation === "pbkdf2")) {
-              const pass = await promptRoomPassword("This community requires a password to join");
-              if (!pass) return;
-              plaintextPass = pass;
-              const { hashCommunityPassword } = await import("./dialogs.js");
-              passHash = await hashCommunityPassword(pass, cidUuid);
-              result = await Relay.joinCommunity(cidUuid, passHash, restoredRelayUrl);
-            }
-            if (result && result.error === "wrong_password") { toast("Wrong password", "#dc2626"); return; }
-            const isPasswordDerived = result && result.key_derivation === "pbkdf2";
-            if (!result) {
-              toast(restoredRelayUrl ? "Cannot reach community on relay — check relay URL" : "No relay connection — configure in ⚙ ICE settings", "#dc2626"); return;
-            }
-            if (result && result.public_key && result.wrapped_dek) {
-              const sid = result.community_id;
-              let public_key = result.public_key;
-              let secret_key = "";
-              let myWrappedDek = result.individually_wrapped_dek || "";
-
-              if (isPasswordDerived && plaintextPass) {
-                const { generate_user_keypair_from_password, encode_hex } = await import("./core/pkg/e2e_core.js");
-                const kp = generate_user_keypair_from_password(plaintextPass, sid);
-                public_key = encode_hex(kp.public);
-                secret_key = encode_hex(kp.secret);
-                myWrappedDek = result.wrapped_dek;
-              } else {
-                // Per-member keypair: generate own keypair
-                const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex, decrypt_with_password, decode_hex } = await import("./core/pkg/e2e_core.js");
-                const kp = generate_user_keypair();
-                public_key = encode_hex(kp.public);
-                secret_key = encode_hex(kp.secret);
-
-                // If community_secret_key is embedded in the link, decrypt and re-wrap immediately
-                if (embeddedCommunitySk && !myWrappedDek) {
-                  try {
-                    const dk = unwrap_dek(result.wrapped_dek, embeddedCommunitySk);
-                    if (dk) {
-                      myWrappedDek = wrap_dek(dk, public_key);
-                      // Upload our re-wrapped DEK to relay so we can sponsor future members
-                      import("./relay.js").then(r => {
-                        r.rewrapMemberDek(sid, public_key, myWrappedDek);
-                      }).catch(e => { console.warn("DEK rewrap failed:", e); });
-                    }
-                  } catch (_) {}
-                }
-
-                // Try join_wrapped_dek as fallback (server-side bootstrap DEK)
-                if (!myWrappedDek && result.join_wrapped_dek) {
-                  try {
-                    const parts = result.join_wrapped_dek.split(":");
-                    if (parts.length === 3) {
-                      const dekHex = decrypt_with_password(parts[0], parts[1], parts[2], sid);
-                      const dkBytes = decode_hex(dekHex);
-                      myWrappedDek = wrap_dek(dkBytes, public_key);
-                      import("./relay.js").then(r => {
-                        r.rewrapMemberDek(sid, public_key, myWrappedDek);
-                      }).catch(() => {});
-                    }
-                  } catch (_) {}
-                }
-
-                // Use individually-wrapped DEK if available, else request via relay
-                if (!myWrappedDek) {
-                  Relay.requestMemberDek(sid, public_key);
-                }
-              }
-
-              const existing = await DB.getTeam(sid);
-              if (!existing) {
-                await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "", community_wrapped_dek: result.wrapped_dek || "" });
-                await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "", visibility: "private", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [], relay_url: restoredRelayUrl || null });
-                await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: "Default", color: "#2563eb", visible: true, opacity: 1.0 }]);
-                window._names[sid] = (result.name || name) + " (← joined)";
-              }
-              delete window._pendingCommunity;
-              localStorage.removeItem("pending-community");
+            const result = await joinCommunityFromInvite({
+              cidUuid, name, passwordProtected: pw, relayUrl: restoredRelayUrl,
+              inviteToken: inviteTokenRestore, embeddedCommunitySk,
+              focusLat, focusLng, focusZoom,
+              postJoinDelay: 300,
+              logTag: "[join]",
+            });
+            if (result) {
               saveRelayToList(restoredRelayUrl);
-              await Map.switchSet(sid);
-              await Relay.syncDelta(sid);
-              await new Promise(r => setTimeout(r, 300));
               await Map.loadPins();
               await Map.loadDrawings();
-              if (focusLat !== null && focusLng !== null && !isNaN(focusLat) && !isNaN(focusLng)) {
-                state.map?.flyTo([focusLat, focusLng], focusZoom, { duration: 1 });
+              if (result.focusLat !== null && result.focusLng !== null && !isNaN(result.focusLat) && !isNaN(result.focusLng)) {
+                state.map?.flyTo([result.focusLat, result.focusLng], result.focusZoom, { duration: 1 });
               }
-              if (result.needs_key_exchange && !isPasswordDerived && !myWrappedDek) {
-                toast("Joined " + (result.name || name) + " — awaiting key exchange from an online member", "#f97316");
+              if (result.result.needs_key_exchange && !result.isPasswordDerived && !result.myWrappedDek) {
+                toast("Joined " + (result.result.name || result.name) + " — awaiting key exchange from an online member", "#f97316");
               } else {
-                toast("Joined " + (result.name || name) + " via link", "#16a34a");
+                toast("Joined " + (result.result.name || result.name) + " via link", "#16a34a");
               }
             }
           }
-        } catch (_) {}
+        } catch (e) {
+          console.error("[join] auto-join failed:", e.message);
+          delete window._pendingCommunity;
+          localStorage.removeItem("pending-community");
+          toast("Join failed — " + (e.message || "unknown error"), "#dc2626");
+        }
       }
     }, 500);
 
@@ -580,7 +509,7 @@ wasmReady.then(async () => {
       const aqr = generate_qr_svg(compact || answer);
       showQRAnswerDialog("Connection Ready", compact || answer, aqr);
       history.replaceState(null, "", window.location.pathname);
-    } catch (e) { console.error("join error:", e); }
+    } catch (e) { console.error("join error:", e); toast("Failed to join: " + (e.message || "unknown"), "#dc2626"); }
   } else if (window.location.hash.startsWith("#map=")) {
     const urlCode = window.location.hash.slice(5);
     history.replaceState(null, "", window.location.pathname);
@@ -615,7 +544,9 @@ wasmReady.then(async () => {
             const compressed = new Uint8Array(await resp.arrayBuffer());
             if (await Sync.importFromCompressed(compressed)) { imported = true; break; }
           }
-        } catch (_) {}
+        } catch (e) {
+          console.warn("[share] fetch failed:", scheme + relayHost + "/share/" + shareId, e.message);
+        }
       }
       if (imported) toast("Map imported from share", "#16a34a");
       else toast("Cannot reach share relay", "#dc2626");
@@ -711,121 +642,26 @@ wasmReady.then(async () => {
         toast("Cannot connect to relay", "#dc2626"); return;
       }
 
-      let passHash = null;
-      let plaintextPass = null;
-
-      // Prompt for password if the link indicates it
-      if (passwordProtected) {
-        const pass = await promptRoomPassword("This community requires a password to join");
-        if (!pass) { localStorage.removeItem("pending-community"); return; }
-        plaintextPass = pass;
-        const { hashCommunityPassword } = await import("./dialogs.js");
-        passHash = await hashCommunityPassword(pass, cidUuid);
-      }
-
-      // Attempt join
-      let result;
-      if (inviteToken) {
-        const claimResult = await Relay.claimMembership(cidUuid, state.signingPublicKey, state.displayName, inviteToken.nonce, inviteToken.capabilitySig);
-        if (claimResult && claimResult.error) { toast("Invite claim failed: " + claimResult.error, "#dc2626"); localStorage.removeItem("pending-community"); return; }
-        result = await Relay.joinCommunity(cidUuid, passHash, linkRelayUrl);
-      } else {
-        result = await Relay.joinCommunity(cidUuid, passHash, linkRelayUrl);
-      }
-
-      // If relay requires a password but we didn't prompt yet, prompt and retry
-      if (!plaintextPass && result && (result.error === "wrong_password" || result.key_derivation === "pbkdf2")) {
-        const pass = await promptRoomPassword("This community requires a password to join");
-        if (!pass) return;
-        plaintextPass = pass;
-        const { hashCommunityPassword } = await import("./dialogs.js");
-        passHash = await hashCommunityPassword(pass, cidUuid);
-        result = await Relay.joinCommunity(cidUuid, passHash, linkRelayUrl);
-      }
-
-      if (result && result.error === "wrong_password") { toast("Wrong password", "#dc2626"); return; }
-
-      const isPasswordDerived = result && result.key_derivation === "pbkdf2";
-      if (!result) {
-        toast(linkRelayUrl ? "Cannot reach community on relay — check relay URL" : "No relay connection — configure in ⚙ ICE settings", "#dc2626"); return;
-      }
-      if (!result.public_key || !result.wrapped_dek) {
-        toast("Community not found on relay", "#dc2626"); return;
-      }
-
-      const sid = result.community_id;
-      let public_key = result.public_key;
-      let secret_key = "";
-      let myWrappedDek = result.individually_wrapped_dek || "";
-
-      if (isPasswordDerived && plaintextPass) {
-        const { generate_user_keypair_from_password, encode_hex } = await import("./core/pkg/e2e_core.js");
-        const kp = generate_user_keypair_from_password(plaintextPass, sid);
-        public_key = encode_hex(kp.public);
-        secret_key = encode_hex(kp.secret);
-        myWrappedDek = result.wrapped_dek;
-      } else {
-        const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex, decrypt_with_password, decode_hex } = await import("./core/pkg/e2e_core.js");
-        const kp = generate_user_keypair();
-        public_key = encode_hex(kp.public);
-        secret_key = encode_hex(kp.secret);
-
-        if (embeddedCommunitySk && !myWrappedDek) {
-          try {
-            const dk = unwrap_dek(result.wrapped_dek, embeddedCommunitySk);
-            if (dk) {
-              myWrappedDek = wrap_dek(dk, public_key);
-              import("./relay.js").then(r => {
-                r.rewrapMemberDek(sid, public_key, myWrappedDek);
-              }).catch(e => { console.warn("DEK rewrap failed:", e); });
-            }
-          } catch (_) {}
+      const joinResult = await joinCommunityFromInvite({
+        cidUuid, name, passwordProtected, relayUrl: linkRelayUrl,
+        inviteToken, embeddedCommunitySk,
+        focusLat, focusLng, focusZoom,
+        postJoinDelay: 500,
+        logTag: "[join-hash]",
+      });
+      if (joinResult) {
+        history.replaceState(null, "", window.location.pathname);
+        await Map.loadSetList();
+        await Map.loadPins();
+        await Map.loadDrawings();
+        if (joinResult.focusLat !== null && joinResult.focusLng !== null && !isNaN(joinResult.focusLat) && !isNaN(joinResult.focusLng)) {
+          state.map?.flyTo([joinResult.focusLat, joinResult.focusLng], joinResult.focusZoom, { duration: 1 });
         }
-
-        // Try join_wrapped_dek as fallback (server-side bootstrap DEK)
-        if (!myWrappedDek && result.join_wrapped_dek) {
-          try {
-            const parts = result.join_wrapped_dek.split(":");
-            if (parts.length === 3) {
-              const dekHex = decrypt_with_password(parts[0], parts[1], parts[2], sid);
-              const dkBytes = decode_hex(dekHex);
-              myWrappedDek = wrap_dek(dkBytes, public_key);
-              import("./relay.js").then(r => {
-                r.rewrapMemberDek(sid, public_key, myWrappedDek);
-              }).catch(() => {});
-            }
-          } catch (_) {}
+        if (joinResult.result.needs_key_exchange && !joinResult.isPasswordDerived && !joinResult.myWrappedDek) {
+          toast("Joined " + (joinResult.result.name || joinResult.name) + " — awaiting key exchange from an online member", "#f97316");
+        } else {
+          toast("Joined " + (joinResult.result.name || joinResult.name) + " via link", "#16a34a");
         }
-
-        if (!myWrappedDek) {
-          Relay.requestMemberDek(sid, public_key);
-        }
-      }
-
-      const existing = await DB.getTeam(sid);
-      if (!existing) {
-        await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "", community_wrapped_dek: result.wrapped_dek || "" });
-        await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "", visibility: "private", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [], relay_url: linkRelayUrl || null });
-        await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: "Default", color: "#2563eb", visible: true, opacity: 1.0 }]);
-        window._names[sid] = (result.name || name) + " (← joined)";
-      }
-      delete window._pendingCommunity;
-      localStorage.removeItem("pending-community");
-      history.replaceState(null, "", window.location.pathname);
-      await Map.loadSetList();
-      await Map.switchSet(sid);
-      await Relay.syncDelta(sid);
-      await new Promise(r => setTimeout(r, 500));
-      await Map.loadPins();
-      await Map.loadDrawings();
-      // Focus on coordinates from location QR marker — after map fully loaded
-      if (focusLat !== null && focusLng !== null && !isNaN(focusLat) && !isNaN(focusLng)) {
-        state.map?.flyTo([focusLat, focusLng], focusZoom, { duration: 1 });
-      }
-      if (result.needs_key_exchange && !isPasswordDerived && !myWrappedDek) {
-        toast("Joined " + (result.name || name) + " — awaiting key exchange from an online member", "#f97316");
-      } else {
-        toast("Joined " + (result.name || name) + " via link", "#16a34a");
       }
     } catch (e) { console.error("community link error:", e); toast("Invalid community link: " + (e.message || e), "#dc2626"); }
   } else if (window.location.hash.startsWith("#relay=")) {
@@ -837,13 +673,133 @@ wasmReady.then(async () => {
         history.replaceState(null, "", window.location.pathname);
         Sync.joinPeerViaRelay(decodeURIComponent(url), room);
       }
-    } catch (e) { console.error("relay join error:", e); }
+    } catch (e) { console.error("relay join error:", e); toast("Relay join failed: " + (e.message || "unknown"), "#dc2626"); }
   }
 }).catch(err => {
   document.getElementById("app-loader")?.remove();
   document.getElementById("map-container").innerHTML =
     `<p style="color:red;padding:20px">Failed: ${escapeHtml(err.message)}</p>`;
 });
+
+// Shared community join logic — used by both pending-community auto-join
+// and the #community= hash fragment handler.
+async function joinCommunityFromInvite({
+  cidUuid, name, passwordProtected, relayUrl,
+  inviteToken, embeddedCommunitySk,
+  focusLat, focusLng, focusZoom,
+  postJoinDelay = 500,
+  logTag = "[join-hash]",
+}) {
+  let passHash = null;
+  let plaintextPass = null;
+
+  if (passwordProtected) {
+    const { hashCommunityPassword } = await import("./dialogs.js");
+    const pass = await promptRoomPassword("This community requires a password to join");
+    if (!pass) { localStorage.removeItem("pending-community"); return; }
+    plaintextPass = pass;
+    passHash = await hashCommunityPassword(pass, cidUuid);
+  }
+
+  let result;
+  if (inviteToken) {
+    const claimResult = await Relay.claimMembership(cidUuid, state.signingPublicKey, state.displayName, inviteToken.nonce, inviteToken.capabilitySig);
+    if (claimResult && claimResult.error) { toast("Invite claim failed: " + claimResult.error, "#dc2626"); return; }
+    result = await Relay.joinCommunity(cidUuid, passHash, relayUrl);
+  } else {
+    result = await Relay.joinCommunity(cidUuid, passHash, relayUrl);
+  }
+
+  if (!plaintextPass && result && (result.error === "wrong_password" || result.key_derivation === "pbkdf2")) {
+    const pass = await promptRoomPassword("This community requires a password to join");
+    if (!pass) { localStorage.removeItem("pending-community"); return; }
+    plaintextPass = pass;
+    const { hashCommunityPassword } = await import("./dialogs.js");
+    passHash = await hashCommunityPassword(pass, cidUuid);
+    result = await Relay.joinCommunity(cidUuid, passHash, relayUrl);
+  }
+
+  if (result && result.error === "wrong_password") { toast("Wrong password", "#dc2626"); return; }
+
+  const isPasswordDerived = result && result.key_derivation === "pbkdf2";
+  if (!result) {
+    toast(relayUrl ? "Cannot reach community on relay — check relay URL" : "No relay connection — configure in ⚙ ICE settings", "#dc2626"); return;
+  }
+  if (!result.public_key || !result.wrapped_dek) {
+    toast("Community not found on relay", "#dc2626"); return;
+  }
+
+  const sid = result.community_id;
+  let public_key = result.public_key;
+  let secret_key = "";
+  let myWrappedDek = result.individually_wrapped_dek || "";
+
+  if (isPasswordDerived && plaintextPass) {
+    const { generate_user_keypair_from_password, encode_hex } = await import("./core/pkg/e2e_core.js");
+    const kp = generate_user_keypair_from_password(plaintextPass, sid);
+    public_key = encode_hex(kp.public);
+    secret_key = encode_hex(kp.secret);
+    myWrappedDek = result.wrapped_dek;
+  } else {
+    const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex, decrypt_with_password, decode_hex } = await import("./core/pkg/e2e_core.js");
+    const kp = generate_user_keypair();
+    public_key = encode_hex(kp.public);
+    secret_key = encode_hex(kp.secret);
+
+    if (embeddedCommunitySk && !myWrappedDek) {
+      try {
+        const dk = unwrap_dek(result.wrapped_dek, embeddedCommunitySk);
+        if (dk) {
+          myWrappedDek = wrap_dek(dk, public_key);
+          import("./relay.js").then(r => {
+            r.rewrapMemberDek(sid, public_key, myWrappedDek);
+          }).catch(e => { console.warn("DEK rewrap failed:", e); });
+        }
+      } catch (e) {
+        console.warn(logTag, "SK unwrap fallback failed:", e.message);
+      }
+    }
+
+    if (!myWrappedDek && result.join_wrapped_dek) {
+      try {
+        const parts = result.join_wrapped_dek.split(":");
+        if (parts.length === 3) {
+          const dekHex = decrypt_with_password(parts[0], parts[1], parts[2], sid);
+          const dkBytes = decode_hex(dekHex);
+          myWrappedDek = wrap_dek(dkBytes, public_key);
+          import("./relay.js").then(r => {
+            r.rewrapMemberDek(sid, public_key, myWrappedDek);
+          }).catch(() => {});
+        }
+      } catch (e) {
+        console.warn(logTag, "bootstrap DEK unwrap failed:", e.message);
+      }
+    }
+
+    if (!myWrappedDek) {
+      Relay.requestMemberDek(sid, public_key);
+    }
+  }
+
+  const existing = await DB.getTeam(sid);
+  if (!existing) {
+    await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "", community_wrapped_dek: result.wrapped_dek || "" });
+    await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "", visibility: "private", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [], relay_url: relayUrl || null });
+    await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: "Default", color: "#2563eb", visible: true, opacity: 1.0 }]);
+    window._names[sid] = (result.name || name) + " (← joined)";
+  }
+
+  delete window._pendingCommunity;
+  localStorage.removeItem("pending-community");
+
+  // Caller-provided post-join hook (Block A: saveRelayToList; Block B: history.replaceState + loadSetList)
+  await Map.switchSet(sid);
+  await Relay.syncDelta(sid);
+  await new Promise(r => setTimeout(r, postJoinDelay));
+
+  // let caller do additional setup before loading pins
+  return { sid, result, isPasswordDerived, myWrappedDek, name, focusLat, focusLng, focusZoom };
+}
 
 // Keyboard shortcuts
 document.addEventListener("keydown", e => {
@@ -873,6 +829,7 @@ function wireGlobals() {
   window._broadcast = Sync.broadcast;
   window._addHistory = addHistory;
   window._clearHistory = clearHistory;
+  window._clearDiscoveryCache = clearDiscoveryCache;
   window._renderUI = renderUI;
   window._renderPeerList = renderPeerList;
   window._showHostModal = showHostModal;
@@ -895,16 +852,6 @@ function wireGlobals() {
   window._refreshPinPopup = Map.refreshPinPopup;
   window._refreshPinMarkerPopup = Map.refreshPinMarkerPopup;
   window._renderAnnotationThread = Map.renderAnnotationThread;
-  window._generate_user_keypair = generate_user_keypair;
-  window._generate_dek = generate_dek;
-  window._encode_hex = encode_hex;
-  window._wrap_dek = wrap_dek;
-  window._unwrap_dek = unwrap_dek;
-  window._generate_signing_keypair = generate_signing_keypair;
-  window._sign = sign;
-  window._verify = verify;
-  window._encrypt_annotation = encrypt_annotation;
-  window._decrypt_annotation = decrypt_annotation;
   window._broadcastAnnotation = Sync.broadcastAnnotation;
   window._broadcastAnnotationVote = Sync.broadcastAnnotationVote;
   window._broadcastTombstone = Sync.broadcastTombstone;
@@ -924,6 +871,8 @@ function wireGlobals() {
   window._relaySyncSubscribedLayers = Relay.syncSubscribedLayers;
   window._relayListPublicLayers = Relay.listPublicLayers;
   window._loadSubscribedPins = Map.loadSubscribedPins;
+  window._loadLayersForSet = Map.loadLayersForSet;
+  window._loadSchemasForSet = Map.loadSchemasForSet;
   window._relayDeleteCommunity = Relay.deleteCommunity;
   window._disconnectCommunity = (setId) => {
     for (const [connId, peer] of state.peers) {
@@ -941,6 +890,126 @@ function wireGlobals() {
   window._pushAllLocalData = pushAllLocalData;
   window._generateLocationMarker = Map.generateLocationMarker;
   window._toast = toast;
+}
+
+// --- Click handler sub-routines (extracted for readability) ---
+
+async function handleAttest(b) {
+  const pid = b.dataset.pid;
+  if (!pid || !state.signingSecretKey) return;
+  const row = await DB.getPin(pid).catch(() => null);
+  if (!row) { toast("Pin no longer exists", "#f97316"); return; }
+  if (row.author_pubkey && row.author_pubkey === state.signingPublicKey && !row.posted_anonymously) {
+    toast("Cannot attest your own pin", "#f97316"); return;
+  }
+  try {
+    const attType = b.matches(".attest-confirm-btn") ? "confirmed" : b.matches(".attest-dispute-btn") ? "disputed" : "flagged";
+    row.attestations = row.attestations || [];
+    const existingIdx = row.attestations.findIndex(a => a.pubkey === state.signingPublicKey);
+    const ts = Date.now();
+    const sig = sign(pid + "|" + attType + "|" + ts, state.signingSecretKey);
+    const att = { pubkey: state.signingPublicKey, type: attType, timestamp: ts, signature: sig };
+    if (existingIdx >= 0) {
+      if (row.attestations[existingIdx].type === attType) { toast("Already attested", "#f97316"); return; }
+      row.attestations[existingIdx] = att;
+    } else {
+      row.attestations.push(att);
+    }
+    const gov = state.currentCommunity?.governance || {};
+    if (gov.ttl_enabled) {
+      if (!row.ttl_base_at) row.ttl_base_at = row.created_at || ts;
+      const atts = row.attestations;
+      const up = atts.filter(a => a.type === "confirmed").length;
+      const down = atts.filter(a => a.type === "disputed").length + atts.filter(a => a.type === "flagged").length;
+      let mins = (gov.ttl_base_mins || 10080) + ((up - down) * (gov.ttl_vote_mins || 360));
+      mins = Math.max(gov.ttl_min_mins || 60, Math.min(gov.ttl_max_mins || 43200, mins));
+      row.ttl_expires_at = row.ttl_base_at + (mins * 60000);
+      const dir = attType === "confirmed" ? 1 : -1;
+      window._broadcastPinVote?.(pid, dir);
+      if (down >= 7 && down > up) {
+        await DB.deletePin(pid);
+        window._broadcast?.("delete_pin", { pin_id: pid });
+        Map.refreshPinMarkerPopup(state.markers?.find(m => m._pinId === pid));
+        toast("Pin auto-removed by community attestation consensus", "#f97316");
+        return;
+      }
+    }
+    await DB.savePin(row);
+    window._broadcast?.("new_pin", { ...row, team_id: state.currentSet });
+    Map.refreshPinMarkerPopup(state.markers?.find(m => m._pinId === pid));
+    const labels = { confirmed: "Confirmed", disputed: "Disputed", flagged: "Flagged" };
+    toast(labels[attType] || "Attested", "#16a34a");
+  } catch (e) { console.warn("Attest failed:", e); toast("Failed to attest", "#dc2626"); }
+}
+
+async function handleAnnotationSubmit(b) {
+  if (b.disabled) return;
+  const thread = b.closest(".annotation-thread");
+  if (!thread) return;
+  const pinId = thread.dataset.pinId;
+  const input = thread.querySelector(".ann-input");
+  const text = input?.value?.trim();
+  if (!text || !state.currentSet || !state.dek) return;
+  b.disabled = true;
+  b.textContent = "...";
+  const annId = generate_uuid();
+  try {
+    const enc = encrypt_annotation(text, state.displayName, "comment", null, state.dek);
+    const annotation = {
+      annotation_id: annId, pin_id: pinId, community_id: state.currentSet,
+      ciphertext: enc.ciphertext, nonce: enc.nonce,
+      author_pubkey: state.signingPublicKey, created_at: Date.now(), votes: [],
+    };
+    await DB.saveAnnotation(annotation);
+    Sync.broadcastAnnotation(annotation);
+    if (input) input.value = "";
+    Map.renderAnnotationThread(pinId);
+    addHistory("Comment added", text.slice(0, 30));
+  } catch (e) { console.warn("Comment post failed:", e); toast("Failed to post comment", "#dc2626"); }
+  b.disabled = false;
+  b.textContent = "Post";
+}
+
+async function handleAnnotationVote(b) {
+  const annId = b.dataset.annId;
+  const direction = b.classList.contains("ann-up") ? "up" : "down";
+  if (!state.signingPublicKey || !state.signingSecretKey) { toast("Signing key not ready", "#f97316"); return; }
+  try {
+    const ann = await DB.getAnnotation(annId);
+    if (!ann) return;
+    ann.votes = ann.votes || [];
+    const existingIdx = ann.votes.findIndex(v => v.pubkey === state.signingPublicKey);
+    const ts = Date.now();
+    const payload = encode_hex(new TextEncoder().encode(annId + "|" + direction + "|" + ts));
+    const sig = sign(payload, state.signingSecretKey);
+    const vote = { pubkey: state.signingPublicKey, direction, timestamp: ts, signature: sig };
+    if (existingIdx >= 0) ann.votes[existingIdx] = vote;
+    else ann.votes.push(vote);
+    await DB.saveAnnotation(ann);
+    Sync.broadcastAnnotationVote(annId, vote);
+    Map.renderAnnotationThread(ann.pin_id);
+  } catch (_) { toast("Failed to vote", "#dc2626"); }
+}
+
+async function handleAnnotationDelete(b) {
+  const annId = b.dataset.annId;
+  const ann = await DB.getAnnotation(annId);
+  if (!ann) return;
+  if (ann.author_pubkey && ann.author_pubkey !== state.signingPublicKey) {
+    toast("Not authorized to delete this comment", "#dc2626"); return;
+  }
+  if (!(await confirmDialog("Remove this comment?"))) return;
+  const tombId = generate_uuid();
+  const ts = Date.now();
+  const payload = encode_hex(new TextEncoder().encode(annId + "|" + tombId + "|" + ts));
+  try {
+    const sig = sign(payload, state.signingSecretKey);
+    const tombstone = { tombstone_id: tombId, target_id: annId, by_pubkey: state.signingPublicKey, reason: "author_removed", timestamp: ts, signature: sig };
+    await DB.saveTombstone(tombstone);
+    Sync.broadcastTombstone(tombstone);
+    Map.renderAnnotationThread(ann.pin_id);
+    addHistory("Comment removed", annId.slice(0, 8));
+  } catch (_) { toast("Failed to remove comment", "#dc2626"); }
 }
 
 document.addEventListener("click", async e => { try {
@@ -971,126 +1040,23 @@ document.addEventListener("click", async e => { try {
 
   if (b.matches(".attest-confirm-btn") || b.matches(".attest-dispute-btn") || b.matches(".attest-flag-btn")) {
     e.stopPropagation();
-    const pid = b.dataset.pid;
-    if (!pid || !state.signingSecretKey) return;
-    const row = await DB.getPin(pid).catch(() => null);
-    if (!row) { toast("Pin no longer exists", "#f97316"); return; }
-    if (row.author_pubkey && row.author_pubkey === state.signingPublicKey && !row.posted_anonymously) {
-      toast("Cannot attest your own pin", "#f97316"); return;
-    }
-    try {
-      const attType = b.matches(".attest-confirm-btn") ? "confirmed" : b.matches(".attest-dispute-btn") ? "disputed" : "flagged";
-      // Allow changing attestation type — replace old attestation, don't block
-      row.attestations = row.attestations || [];
-      const existingIdx = row.attestations.findIndex(a => a.pubkey === state.signingPublicKey);
-      const ts = Date.now();
-      const sig = sign(pid + "|" + attType + "|" + ts, state.signingSecretKey);
-      const att = { pubkey: state.signingPublicKey, type: attType, timestamp: ts, signature: sig };
-      if (existingIdx >= 0) {
-        if (row.attestations[existingIdx].type === attType) { toast("Already attested", "#f97316"); return; }
-        row.attestations[existingIdx] = att;
-      } else {
-        row.attestations.push(att);
-      }
-      // TTL synthesis: attestations drive pin lifetime
-      const gov = state.currentCommunity?.governance || {};
-      if (gov.ttl_enabled) {
-        if (!row.ttl_base_at) row.ttl_base_at = row.created_at || ts;
-        const atts = row.attestations;
-        const up = atts.filter(a => a.type === "confirmed").length;
-        const down = atts.filter(a => a.type === "disputed").length + atts.filter(a => a.type === "flagged").length;
-        let mins = (gov.ttl_base_mins || 10080) + ((up - down) * (gov.ttl_vote_mins || 360));
-        mins = Math.max(gov.ttl_min_mins || 60, Math.min(gov.ttl_max_mins || 43200, mins));
-        row.ttl_expires_at = row.ttl_base_at + (mins * 60000);
-        const dir = attType === "confirmed" ? 1 : -1;
-        window._broadcastPinVote?.(pid, dir);
-        if (down >= 7 && down > up) {
-          await DB.deletePin(pid);
-          window._broadcast?.("delete_pin", { pin_id: pid });
-          Map.refreshPinMarkerPopup(state.markers?.find(m => m._pinId === pid));
-          toast("Pin auto-removed by community attestation consensus", "#f97316");
-          return;
-        }
-      }
-      await DB.savePin(row);
-      window._broadcast?.("new_pin", { ...row, team_id: state.currentSet });
-      Map.refreshPinMarkerPopup(state.markers?.find(m => m._pinId === pid));
-      const labels = { confirmed: "Confirmed", disputed: "Disputed", flagged: "Flagged" };
-      toast(labels[attType] || "Attested", "#16a34a");
-    } catch (e) { console.warn("Attest failed:", e); toast("Failed to attest", "#dc2626"); }
+    await handleAttest(b);
+    return;
   }
-
   if (b.matches(".ann-submit-btn")) {
     e.stopPropagation();
-    if (b.disabled) return;
-    const thread = b.closest(".annotation-thread");
-    if (!thread) return;
-    const pinId = thread.dataset.pinId;
-    const input = thread.querySelector(".ann-input");
-    const text = input?.value?.trim();
-    if (!text || !state.currentSet || !state.dek) return;
-    b.disabled = true;
-    b.textContent = "...";
-    const annId = generate_uuid();
-    try {
-      const enc = encrypt_annotation(text, state.displayName, "comment", null, state.dek);
-      const annotation = {
-        annotation_id: annId, pin_id: pinId, community_id: state.currentSet,
-        ciphertext: enc.ciphertext, nonce: enc.nonce,
-        author_pubkey: state.signingPublicKey, created_at: Date.now(), votes: [],
-      };
-      await DB.saveAnnotation(annotation);
-      Sync.broadcastAnnotation(annotation);
-      if (input) input.value = "";
-      Map.renderAnnotationThread(pinId);
-      addHistory("Comment added", text.slice(0, 30));
-    } catch (e) { console.warn("Comment post failed:", e); toast("Failed to post comment", "#dc2626"); }
-    b.disabled = false;
-    b.textContent = "Post";
+    await handleAnnotationSubmit(b);
+    return;
   }
-
   if (b.matches(".ann-vote-btn")) {
     e.stopPropagation();
-    const annId = b.dataset.annId;
-    const direction = b.classList.contains("ann-up") ? "up" : "down";
-    if (!state.signingPublicKey || !state.signingSecretKey) { toast("Signing key not ready", "#f97316"); return; }
-    try {
-      const ann = await DB.getAnnotation(annId);
-      if (!ann) return;
-      ann.votes = ann.votes || [];
-      const existingIdx = ann.votes.findIndex(v => v.pubkey === state.signingPublicKey);
-      const ts = Date.now();
-      const payload = encode_hex(new TextEncoder().encode(annId + "|" + direction + "|" + ts));
-      const sig = sign(payload, state.signingSecretKey);
-      const vote = { pubkey: state.signingPublicKey, direction, timestamp: ts, signature: sig };
-      if (existingIdx >= 0) ann.votes[existingIdx] = vote;
-      else ann.votes.push(vote);
-      await DB.saveAnnotation(ann);
-      Sync.broadcastAnnotationVote(annId, vote);
-      Map.renderAnnotationThread(ann.pin_id);
-    } catch (_) { toast("Failed to vote", "#dc2626"); }
+    handleAnnotationVote(b);
+    return;
   }
-
   if (b.matches(".ann-delete-btn")) {
     e.stopPropagation();
-    const annId = b.dataset.annId;
-    const ann = await DB.getAnnotation(annId);
-    if (!ann) return;
-    if (ann.author_pubkey && ann.author_pubkey !== state.signingPublicKey) {
-      toast("Not authorized to delete this comment", "#dc2626"); return;
-    }
-    if (!(await confirmDialog("Remove this comment?"))) return;
-    const tombId = generate_uuid();
-    const ts = Date.now();
-    const payload = encode_hex(new TextEncoder().encode(annId + "|" + tombId + "|" + ts));
-    try {
-      const sig = sign(payload, state.signingSecretKey);
-      const tombstone = { tombstone_id: tombId, target_id: annId, by_pubkey: state.signingPublicKey, reason: "author_removed", timestamp: ts, signature: sig };
-      await DB.saveTombstone(tombstone);
-      Sync.broadcastTombstone(tombstone);
-      Map.renderAnnotationThread(ann.pin_id);
-      addHistory("Comment removed", annId.slice(0, 8));
-    } catch (_) { toast("Failed to remove comment", "#dc2626"); }
+    await handleAnnotationDelete(b);
+    return;
   }
 } catch(err) { console.error("[click handler]", err); } });
 
@@ -1128,13 +1094,17 @@ export function renderUI() {
   // Wire combined search: pin filter on type, OSM geocode on Enter / button click
   const topbarSearch = document.getElementById("topbar-search");
   if (topbarSearch) {
+    let _searchTimer = null;
     topbarSearch.oninput = () => {
-      const q = topbarSearch.value.toLowerCase().trim();
-      const markers = state.markers;
-      for (let i = 0; i < markers.length; i++) {
-        const match = !q || (state.pinSearchText[i] && state.pinSearchText[i].includes(q));
-        markers[i].setOpacity(match ? markers[i]._layerOpacity ?? 1 : 0.15);
-      }
+      clearTimeout(_searchTimer);
+      _searchTimer = setTimeout(() => {
+        const q = topbarSearch.value.toLowerCase().trim();
+        const markers = state.markers;
+        for (let i = 0; i < markers.length; i++) {
+          const match = !q || (state.pinSearchText[i] && state.pinSearchText[i].includes(q));
+          markers[i].setOpacity(match ? markers[i]._layerOpacity ?? 1 : 0.15);
+        }
+      }, 200);
     };
     const doGeocode = () => {
       const q = topbarSearch.value.trim();

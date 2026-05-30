@@ -7,9 +7,16 @@ import {
   decrypt_geojson,
   encrypt_raw_bytes,
   decrypt_raw_bytes,
+  decrypt_annotation,
+  encode_hex,
+  generate_dek,
+  generate_user_keypair,
   generate_uuid,
   sign,
   verify,
+  unwrap_dek,
+  wrap_dek,
+  base64url_encode,
 } from "./core/pkg/e2e_core.js";
 import * as DB from "./db.js";
 import { state } from "./state.js";
@@ -20,6 +27,8 @@ import { playPinDrop, playSave, playUndo, playRedo } from "./sounds.js";
 import { COLORS, colorPresetsHTML, hueDotHTML, hexInputHTML, wireColorPicker, validateHex } from "./helpers.js";
 import { compute_geometry } from "./core/pkg/e2e_core.js";
 import { getTrustWeight, computeAnnotationScore, trustScoreColor, computePinTrust, pinTrustIndicator } from "./trust.js";
+import { indexMarker, clearMarkerGrid } from "./gossip.js";
+import { compressImageBuffer } from "./workers/media-compress.js";
 import { showDiscoverModal, showLayersModal, loadLayersForSet } from "./map-layers.js";
 import { showImportFromMapModal } from "./map-import.js";
 import {
@@ -176,35 +185,9 @@ async function compressMedia(file) {
     };
   }
   try {
-    const bitmap = await createImageBitmap(file);
-    let w = bitmap.width,
-      h = bitmap.height;
-    if (w > 1920 || h > 1920) {
-      const ratio = Math.min(1920 / w, 1920 / h);
-      w = Math.round(w * ratio);
-      h = Math.round(h * ratio);
-    }
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(bitmap, 0, 0, w, h);
-    bitmap.close();
-    let blob = await new Promise((resolve) =>
-      canvas.toBlob(resolve, "image/webp", 0.8),
-    );
-    if (!blob) {
-      blob = await new Promise((resolve) =>
-        canvas.toBlob(resolve, "image/jpeg", 0.85),
-      );
-    }
-    if (!blob) throw new Error("toBlob returned null");
-    const ext = blob.type === "image/webp" ? ".webp" : ".jpg";
-    return {
-      buffer: await blob.arrayBuffer(),
-      type: blob.type,
-      name: file.name.replace(/\.[^.]+$/, ext),
-    };
+    const buf = await file.arrayBuffer();
+    const result = await compressImageBuffer(buf, file.type, file.name);
+    return { buffer: result.buffer, type: result.type, name: result.name };
   } catch (_) {
     return {
       buffer: await file.arrayBuffer(),
@@ -388,10 +371,8 @@ export function initMap() {
     peerMarkerGroup.clearLayers();
     const locs = window._peerLocations;
     if (!locs || !state.currentSet || !state.map) return;
-    const now = Date.now();
     for (const [, loc] of locs) {
       if (loc.team_id !== state.currentSet) continue;
-      if (now - loc.ts > 120000) continue;
       const marker = L.circleMarker([loc.lat, loc.lng], {
         radius: 6,
         color: "#2563eb",
@@ -543,6 +524,7 @@ export async function loadSetList() {
 export async function switchSet(sid) {
   if (state.currentSet === sid) return;
   window._clearVotedPins?.(state.currentSet);
+  window._clearDiscoveryCache?.();
   if (state._ttlInterval) { clearInterval(state._ttlInterval); state._ttlInterval = null; }
   state.currentSet = sid;
   state.activeLayerId = null;
@@ -552,6 +534,7 @@ export async function switchSet(sid) {
   window._clearHistory?.();
   state.markers.forEach((m) => m.remove());
   state.markers.length = 0;
+  clearMarkerGrid();
   state.clusterGroup?.clearLayers();
   state._markerMap = null;
   state.drawingLayers.forEach((l) => state.map.removeLayer(l));
@@ -563,18 +546,18 @@ export async function switchSet(sid) {
   if (t) {
     // Auto-migration: only for legacy records where community_secret_key was never stored
     if (t.secret_key && !("community_secret_key" in t)) {
-      const memberKp = window._generate_user_keypair();
-      const dk = window._unwrap_dek(t.wrapped_dek, t.secret_key);
+      const memberKp = generate_user_keypair();
+      const dk = unwrap_dek(t.wrapped_dek, t.secret_key);
       if (dk) {
         t.community_secret_key = t.secret_key;
         t.community_public_key = t.public_key;
-        t.secret_key = window._encode_hex(memberKp.secret);
-        t.public_key = window._encode_hex(memberKp.public);
-        t.wrapped_dek = window._wrap_dek(dk, t.public_key);
+        t.secret_key = encode_hex(memberKp.secret);
+        t.public_key = encode_hex(memberKp.public);
+        t.wrapped_dek = wrap_dek(dk, t.public_key);
         await DB.saveTeam(t);
       }
     }
-    state.dek = window._unwrap_dek(t.wrapped_dek, t.secret_key);
+    state.dek = unwrap_dek(t.wrapped_dek, t.secret_key);
   }
   state.currentCommunity = await DB.getCommunity(sid);
   await loadLayersForSet(sid);
@@ -616,18 +599,18 @@ export async function switchSet(sid) {
 
 export async function createSet(name) {
   const sid = generate_uuid();
-  const communityKp = window._generate_user_keypair();
-  const memberKp = window._generate_user_keypair();
-  const dk = window._generate_dek();
+  const communityKp = generate_user_keypair();
+  const memberKp = generate_user_keypair();
+  const dk = generate_dek();
   await DB.saveTeam({
     team_id: sid,
     name,
-    public_key: window._encode_hex(communityKp.public),
-    secret_key: window._encode_hex(memberKp.secret),
-    wrapped_dek: window._wrap_dek(dk, window._encode_hex(memberKp.public)),
-    community_public_key: window._encode_hex(communityKp.public),
-    community_secret_key: window._encode_hex(communityKp.secret),
-    community_wrapped_dek: window._wrap_dek(dk, window._encode_hex(communityKp.public)),
+    public_key: encode_hex(communityKp.public),
+    secret_key: encode_hex(memberKp.secret),
+    wrapped_dek: wrap_dek(dk, encode_hex(memberKp.public)),
+    community_public_key: encode_hex(communityKp.public),
+    community_secret_key: encode_hex(communityKp.secret),
+    community_wrapped_dek: wrap_dek(dk, encode_hex(communityKp.public)),
   });
   await DB.saveCommunity({
     community_id: sid,
@@ -914,14 +897,14 @@ export async function showCommunityDetails(communityId) {
     const hash = await hashCommunityPassword(pass, c.community_id);
     c.password_hash = hash;
     // Derive keypair from password — relay never sees secret_key
-    const { generate_user_keypair_from_password, wrap_dek, unwrap_dek, encode_hex } = await import("./core/pkg/e2e_core.js");
+    const { generate_user_keypair_from_password, generate_dek, wrap_dek, unwrap_dek, encode_hex } = await import("./core/pkg/e2e_core.js");
     const kp = generate_user_keypair_from_password(pass, c.community_id);
     const team = await DB.getTeam(c.community_id);
     let dk;
     if (team && team.wrapped_dek && team.secret_key) {
       try { dk = unwrap_dek(team.wrapped_dek, team.secret_key); } catch (_) {}
     }
-    if (!dk) dk = window._generate_dek();
+    if (!dk) dk = generate_dek();
     const newWrapped = wrap_dek(dk, encode_hex(kp.public));
     await DB.saveTeam({
       team_id: c.community_id, name: team?.name || c.name,
@@ -944,14 +927,14 @@ export async function showCommunityDetails(communityId) {
     const hash = await hashCommunityPassword(pass, c.community_id);
     c.password_hash = hash;
     // Re-derive keypair from new password
-    const { generate_user_keypair_from_password, wrap_dek, unwrap_dek, encode_hex } = await import("./core/pkg/e2e_core.js");
+    const { generate_user_keypair_from_password, generate_dek, wrap_dek, unwrap_dek, encode_hex } = await import("./core/pkg/e2e_core.js");
     const kp = generate_user_keypair_from_password(pass, c.community_id);
     const team = await DB.getTeam(c.community_id);
     let dk;
     if (team && team.wrapped_dek && team.secret_key) {
       try { dk = unwrap_dek(team.wrapped_dek, team.secret_key); } catch (_) {}
     }
-    if (!dk) dk = window._generate_dek();
+    if (!dk) dk = generate_dek();
     const newWrapped = wrap_dek(dk, encode_hex(kp.public));
     await DB.saveTeam({
       team_id: c.community_id, name: team?.name || c.name,
@@ -975,12 +958,12 @@ export async function showCommunityDetails(communityId) {
     // Revert to random keypair (no longer password-derived)
     const team = await DB.getTeam(c.community_id);
     if (team && team.key_derivation === "pbkdf2") {
-      const kp = window._generate_user_keypair();
-      const dk = window._generate_dek();
-      const newWrapped = window._wrap_dek(dk, window._encode_hex(kp.public));
+      const kp = generate_user_keypair();
+      const dk = generate_dek();
+      const newWrapped = wrap_dek(dk, encode_hex(kp.public));
       await DB.saveTeam({
         team_id: c.community_id, name: team?.name || c.name,
-        public_key: window._encode_hex(kp.public), secret_key: window._encode_hex(kp.secret),
+        public_key: encode_hex(kp.public), secret_key: encode_hex(kp.secret),
         wrapped_dek: newWrapped,
       });
       if (state.currentSet === c.community_id) state.dek = dk;
@@ -1077,7 +1060,7 @@ export async function showCommunityDetails(communityId) {
     if (skLen > 0) buf.set(skBytes, pos);
     pos += skLen;
     if (viewBytes.length > 0) buf.set(viewBytes, pos);
-    const b64 = btoa(String.fromCharCode(...buf)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+    const b64 = base64url_encode(buf);
     const url = window.location.origin + window.location.pathname + "#community=" + b64;
 
     // Show QR + link modal
@@ -1155,7 +1138,7 @@ export async function showCommunityDetails(communityId) {
       buf.set(expiryBuf, pos); pos += 8;
       buf.set(nonceBytes, pos); pos += 8;
       buf.set(sigBytes, pos);
-      const b64 = btoa(String.fromCharCode(...buf)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+      const b64 = base64url_encode(buf);
       const link = window.location.origin + window.location.pathname + "#community=" + b64;
       const output = document.getElementById("cd-token-output");
       if (output) output.innerHTML = `<a href="${escapeHtml(link)}" style="color:var(--accent);">Invite link</a><br><span style="font-size:9px;">Click to copy · ${role} · ${expiry > 0 ? Math.round(expiry / 3600000) + "h" : "never"} · ${maxUses > 0 ? maxUses + " uses" : "unlimited"}</span>`;
@@ -1325,6 +1308,7 @@ export async function createTutorial() {
   await DB.saveLayers(state.currentSet, state.layers);
 
   const pids = [];
+  const pins = [];
   for (const tp of TUTORIAL_PINS) {
     const pid = generate_uuid();
     const enc = encrypt_pin_data(
@@ -1352,9 +1336,10 @@ export async function createTutorial() {
       pin.custom_data = { ciphertext: cdEnc.ciphertext, nonce: cdEnc.nonce };
     }
     if (!tp.posted_anonymously && state.signingPublicKey) pin.author_pubkey = state.signingPublicKey;
-    await DB.savePin(pin);
+    pins.push(pin);
     pids.push(pid);
   }
+  await DB.importPins(pins);
   await loadPins();
   window._tutorialPids = pids;
   await saveSlideOrder(pids);
@@ -2024,6 +2009,7 @@ export async function loadPins() {
 
   state.markers.length = 0;
   state.pinSearchText.length = 0;
+  clearMarkerGrid();
   const markerMap = state._markerMap || (state._markerMap = new Map());
   const keepIds = new Set();
   const layerMap = new Map(state.layers.map(l => [l.layer_id, l]));
@@ -2226,6 +2212,7 @@ export async function loadPins() {
         });
       })(m, pin, row);
       state.markers.push(m);
+      indexMarker(m);
     } catch (err) { console.warn("[loadPins] failed to load pin:", row.pin_id, err); window._toast?.("Some pins failed to load", "#f97316"); }
   }
   for (const [id, marker] of markerMap) {
@@ -4153,7 +4140,7 @@ export function generateLocationMarker(lat, lng, communityId) {
   pos += relayBytes.length;
   buf[pos++] = flags;
   if (focusBytes.length > 0) buf.set(focusBytes, pos);
-  const b64 = btoa(String.fromCharCode(...buf)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  const b64 = base64url_encode(buf);
   const link = window.location.origin + window.location.pathname + "#community=" + b64;
 
   const ov = document.createElement("div");
@@ -4444,7 +4431,7 @@ export async function renderAnnotationThread(pinId, threadEl) {
 
   for (const ann of visible) {
     try {
-      const dec = window._decrypt_annotation(ann.ciphertext, ann.nonce, state.dek);
+      const dec = decrypt_annotation(ann.ciphertext, ann.nonce, state.dek);
       const text = dec.text || "";
       const authorName = dec.author_name || "anon";
       const annType = dec.annotation_type || "comment";

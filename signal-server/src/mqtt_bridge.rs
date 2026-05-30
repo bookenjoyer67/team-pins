@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 
 use prost::Message;
@@ -238,8 +239,8 @@ pub async fn start_bridge(state: Arc<AppState>) {
         rooms.entry(room_name.clone()).or_insert_with(|| Room {
             clients: HashMap::new(),
             pw_hash: None,
-            last_act: tokio::time::Instant::now(),
-            challenges: HashMap::new(),
+            last_act: StdMutex::new(tokio::time::Instant::now()),
+            challenges: StdMutex::new(HashMap::new()),
         });
     }
 
@@ -250,7 +251,7 @@ pub async fn start_bridge(state: Arc<AppState>) {
             sleep(Duration::from_secs(120)).await;
             let mut rooms = state_room.rooms.write().await;
             if let Some(room) = rooms.get_mut(&room_keepalive) {
-                room.last_act = tokio::time::Instant::now();
+                *room.last_act.lock().unwrap() = tokio::time::Instant::now();
             }
         }
     });
@@ -512,8 +513,8 @@ async fn relay_to_room(state: &AppState, room_name: &str, data: &serde_json::Val
     let room = rooms.entry(room_name.to_string()).or_insert_with(|| Room {
         clients: HashMap::new(),
         pw_hash: None,
-        last_act: tokio::time::Instant::now(),
-        challenges: HashMap::new(),
+        last_act: StdMutex::new(tokio::time::Instant::now()),
+        challenges: StdMutex::new(HashMap::new()),
     });
     let txt = data.to_string();
     if txt.len() > state.config.security.max_message_size {

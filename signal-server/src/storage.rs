@@ -156,10 +156,11 @@ pub struct PersistentStore {
     pub pending_dek_requests: RwLock<HashMap<String, Vec<String>>>,
     snapshot_path: Option<PathBuf>,
     dirty: std::sync::atomic::AtomicBool,
+    max_pins_per_community: usize,
 }
 
 impl PersistentStore {
-    pub fn new(snapshot_path: Option<PathBuf>) -> Self {
+    pub fn new(snapshot_path: Option<PathBuf>, max_pins_per_community: usize) -> Self {
         if let Some(ref path) = snapshot_path {
             if let Ok(meta) = std::fs::metadata(path) {
                 if meta.len() > 100_000_000 {
@@ -188,8 +189,9 @@ impl PersistentStore {
                             pending_dek_requests: RwLock::new(snap.pending_dek_requests),
                             snapshot_path,
                             dirty: std::sync::atomic::AtomicBool::new(false),
+                            max_pins_per_community,
                         };
-                        }
+                    }
                         Err(e) => {
                             tracing::error!("[relay] snapshot parse failed: {} (backup saved to {})", e, bak.display());
                         }
@@ -197,7 +199,7 @@ impl PersistentStore {
                 }
             }
         }
-        Self { communities: RwLock::new(HashMap::new()), pins: RwLock::new(HashMap::new()), annotations: RwLock::new(HashMap::new()), drawings: RwLock::new(HashMap::new()), tombstones: RwLock::new(HashMap::new()), votes: RwLock::new(HashMap::new()), tokens: RwLock::new(HashMap::new()), public_layers: RwLock::new(HashMap::new()), layer_subscriptions: RwLock::new(HashMap::new()), member_deks: RwLock::new(HashMap::new()), pending_dek_requests: RwLock::new(HashMap::new()), snapshot_path, dirty: std::sync::atomic::AtomicBool::new(false) }
+        Self { communities: RwLock::new(HashMap::new()), pins: RwLock::new(HashMap::new()), annotations: RwLock::new(HashMap::new()), drawings: RwLock::new(HashMap::new()), tombstones: RwLock::new(HashMap::new()), votes: RwLock::new(HashMap::new()), tokens: RwLock::new(HashMap::new()), public_layers: RwLock::new(HashMap::new()), layer_subscriptions: RwLock::new(HashMap::new()), member_deks: RwLock::new(HashMap::new()), pending_dek_requests: RwLock::new(HashMap::new()), snapshot_path, dirty: std::sync::atomic::AtomicBool::new(false), max_pins_per_community }
     }
 
     pub async fn save_snapshot(&self) {
@@ -207,18 +209,28 @@ impl PersistentStore {
                 c.secret_key = String::new();
                 c.wrapped_dek = String::new();
             }
+            let pins = self.pins.read().await.clone();
+            let annotations = self.annotations.read().await.clone();
+            let drawings = self.drawings.read().await.clone();
+            let tombstones = self.tombstones.read().await.clone();
+            let votes = self.votes.read().await.clone();
+            let tokens = self.tokens.read().await.clone();
+            let public_layers = self.public_layers.read().await.clone();
+            let layer_subscriptions = self.layer_subscriptions.read().await.clone();
+            let member_deks = self.member_deks.read().await.clone();
+            let pending_dek_requests = self.pending_dek_requests.read().await.clone();
             let snap = SnapshotData {
                 communities,
-                pins: self.pins.read().await.clone(),
-                annotations: self.annotations.read().await.clone(),
-                drawings: self.drawings.read().await.clone(),
-                tombstones: self.tombstones.read().await.clone(),
-                votes: self.votes.read().await.clone(),
-                tokens: self.tokens.read().await.clone(),
-                public_layers: self.public_layers.read().await.clone(),
-                layer_subscriptions: self.layer_subscriptions.read().await.clone(),
-                member_deks: self.member_deks.read().await.clone(),
-                pending_dek_requests: self.pending_dek_requests.read().await.clone(),
+                pins,
+                annotations,
+                drawings,
+                tombstones,
+                votes,
+                tokens,
+                public_layers,
+                layer_subscriptions,
+                member_deks,
+                pending_dek_requests,
             };
             if let Ok(json) = serde_json::to_string_pretty(&snap) {
                 let tmp = path.with_file_name(
@@ -242,8 +254,9 @@ impl PersistentStore {
     }
 
     pub async fn flush_if_dirty(&self) {
-        if self.dirty.swap(false, std::sync::atomic::Ordering::AcqRel) {
+        if self.dirty.load(std::sync::atomic::Ordering::Acquire) {
             self.save_snapshot().await;
+            self.dirty.store(false, std::sync::atomic::Ordering::Release);
         }
     }
 
@@ -328,12 +341,37 @@ impl PersistentStore {
     }
 
     pub async fn store_pin(&self, pin: StoredPin) {
+        let community_id = pin.community_id.clone();
+        let pin_id = pin.pin_id.clone();
         let mut pins = self.pins.write().await;
-        let list = pins.entry(pin.community_id.clone()).or_default();
+        let list = pins.entry(community_id.clone()).or_default();
         if let Some(pos) = list.iter().position(|p| p.pin_id == pin.pin_id) {
             list[pos] = pin;
         } else {
             list.push(pin);
+            // Evict oldest if over cap
+            if self.max_pins_per_community > 0 && list.len() > self.max_pins_per_community {
+                if let Some(oldest_idx) = list.iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.pin_id != pin_id)
+                    .min_by_key(|(_, p)| p.created_at)
+                    .map(|(i, _)| i)
+                {
+                    let evicted = list.remove(oldest_idx);
+                    let evicted_pin_id = evicted.pin_id.clone();
+                    drop(pins);
+                    // Cascade cleanup
+                    self.votes.write().await.remove(&format!("{}:{}", community_id, evicted_pin_id));
+                    if let Some(list) = self.annotations.write().await.get_mut(&community_id) {
+                        list.retain(|a| a.pin_id != evicted_pin_id);
+                    }
+                    self.tombstones.write().await.retain(|_, t| {
+                        !(t.community_id == community_id && t.target_id == evicted_pin_id)
+                    });
+                    tracing::info!("[relay] evicted pin {} from {} (cap={})",
+                        evicted_pin_id, community_id, self.max_pins_per_community);
+                }
+            }
         }
     }
 

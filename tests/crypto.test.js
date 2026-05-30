@@ -28,6 +28,16 @@ import {
   generate_user_keypair_from_password,
   encrypt_raw_bytes,
   decrypt_raw_bytes,
+  base64_encode,
+  base64_decode,
+  base64url_encode,
+  base64url_decode,
+  compress_gzip_to_base64,
+  decompress_gzip,
+  Store,
+  ChunkStore,
+  compact_and_pack_json,
+  compact_pack_gzip_json,
 } from "../core/pkg/e2e_core.js";
 
 describe("decode_hex", () => {
@@ -346,5 +356,272 @@ describe("DEK generation", () => {
     const dk2 = generate_dek();
     const same = dk1.every((b, i) => b === dk2[i]);
     expect(same).toBe(false);
+  });
+});
+
+describe("Base64 encoding / decoding", () => {
+  it("round-trips standard base64", () => {
+    const data = new Uint8Array([0, 1, 127, 128, 255, 0xde, 0xad, 0xbe, 0xef]);
+    const encoded = base64_encode(data);
+    const decoded = base64_decode(encoded);
+    expect([...decoded]).toEqual([...data]);
+  });
+
+  it("round-trips URL-safe base64", () => {
+    const data = new Uint8Array([0xff, 0xff, 0xff, 0xab, 0xcd, 0xef]);
+    const encoded = base64url_encode(data);
+    expect(encoded).not.toContain("+");
+    expect(encoded).not.toContain("/");
+    expect(encoded).not.toContain("=");
+    const decoded = base64url_decode(encoded);
+    expect([...decoded]).toEqual([...data]);
+  });
+
+  it("handles empty input", () => {
+    expect(base64_encode(new Uint8Array([]))).toBe("");
+    expect([...base64_decode("")]).toEqual([]);
+    expect(base64url_encode(new Uint8Array([]))).toBe("");
+    expect(() => base64url_decode("")).not.toThrow();
+  });
+
+  it("base64_decode returns empty on invalid input", () => {
+    expect([...base64_decode("!!!")]).toEqual([]);
+  });
+
+  it("base64url_decode throws on invalid input", () => {
+    expect(() => base64url_decode("!!!")).toThrow();
+  });
+
+  it("large data round-trips", () => {
+    const size = 50_000;
+    const data = new Uint8Array(size);
+    for (let i = 0; i < size; i++) data[i] = i & 0xff;
+    const encoded = base64_encode(data);
+    const decoded = base64_decode(encoded);
+    expect(decoded.length).toBe(size);
+    for (let i = 0; i < size; i++) expect(decoded[i]).toBe(data[i]);
+  });
+
+  it("compress_gzip_to_base64 round-trips", () => {
+    const input = new TextEncoder().encode("hello world ".repeat(100));
+    const b64 = compress_gzip_to_base64(input);
+    const compressed = base64_decode(b64);
+    const output = decompress_gzip(compressed);
+    expect(new TextDecoder().decode(output)).toBe("hello world ".repeat(100));
+  });
+
+  it("URL-safe encode matches expected output for known bytes", () => {
+    // 0xff * 3 → 6-bit groups: 63,63,63,63 → standard "////" → URL-safe no-pad "____"
+    const data = new Uint8Array([0xff, 0xff, 0xff]);
+    const encoded = base64url_encode(data);
+    expect(encoded).toBe("____");
+  });
+
+  it("produces deterministic output", () => {
+    const data = new Uint8Array([1, 2, 3, 4, 5]);
+    expect(base64_encode(data)).toBe(base64_encode(data));
+    expect(base64url_encode(data)).toBe(base64url_encode(data));
+  });
+});
+
+describe("Store (bounded key-value with TTL)", () => {
+  it("round-trips set/get", () => {
+    const store = new Store(100, 60_000);
+    store.set("a", 1);
+    store.set("b", { x: 42 });
+    expect(store.get("a")).toBe(1);
+    expect(store.get("b")).toEqual(new Map([["x", 42]]));
+  });
+
+  it("has and delete", () => {
+    const store = new Store(100, 60_000);
+    expect(store.has("x")).toBe(false);
+    store.set("x", "hello");
+    expect(store.has("x")).toBe(true);
+    expect(store.delete("x")).toBe(true);
+    expect(store.has("x")).toBe(false);
+    expect(store.delete("x")).toBe(false);
+  });
+
+  it("size reflects entries", () => {
+    const store = new Store(100, 60_000);
+    expect(store.size()).toBe(0);
+    store.set("a", 1);
+    store.set("b", 2);
+    expect(store.size()).toBe(2);
+    store.delete("a");
+    expect(store.size()).toBe(1);
+  });
+
+  it("keys, values, entries", () => {
+    const store = new Store(100, 60_000);
+    store.set("a", 1);
+    store.set("b", 2);
+    const keys = store.keys();
+    expect(keys.length).toBe(2);
+    expect(keys).toContain("a");
+    expect(keys).toContain("b");
+    const vals = store.values();
+    expect(vals.length).toBe(2);
+    const entries = store.entries();
+    expect(entries.length).toBe(2);
+  });
+
+  it("clear empties the store", () => {
+    const store = new Store(100, 60_000);
+    store.set("a", 1);
+    store.clear();
+    expect(store.size()).toBe(0);
+    expect(store.get("a")).toBeUndefined();
+  });
+
+  it("FIFO eviction at capacity", () => {
+    const store = new Store(3, 60_000);
+    store.set("a", 1);
+    store.set("b", 2);
+    store.set("c", 3);
+    store.set("d", 4);  // should evict "a" (FIFO)
+    expect(store.has("a")).toBe(false);
+    expect(store.has("b")).toBe(true);
+    expect(store.has("c")).toBe(true);
+    expect(store.has("d")).toBe(true);
+  });
+
+  it("set on existing key replaces value", () => {
+    const store = new Store(100, 60_000);
+    store.set("a", 1);
+    store.set("a", 2);
+    expect(store.get("a")).toBe(2);
+    expect(store.size()).toBe(1);
+  });
+});
+
+describe("ChunkStore (message reassembly)", () => {
+  it("completes when all chunks arrive in any order", () => {
+    const cs = new ChunkStore(100, 60_000);
+    expect(cs.add_chunk("msg1", 0, 3, "hel")).toBe(false);
+    expect(cs.add_chunk("msg1", 2, 3, "rld")).toBe(false);
+    expect(cs.add_chunk("msg1", 1, 3, "lo wo")).toBe(true);
+    expect(cs.assemble("msg1")).toBe("hello world");
+  });
+
+  it("reassembles chunks in correct order", () => {
+    const cs = new ChunkStore(50, 60_000);
+    cs.add_chunk("key1", 1, 3, "bar");
+    cs.add_chunk("key1", 0, 3, "foo");
+    expect(cs.add_chunk("key1", 2, 3, "baz")).toBe(true);
+    expect(cs.assemble("key1")).toBe("foobarbaz");
+  });
+
+  it("returns false for out-of-range index", () => {
+    const cs = new ChunkStore(50, 60_000);
+    expect(cs.add_chunk("x", 5, 3, "data")).toBe(false);
+  });
+
+  it("returns false for total=0", () => {
+    const cs = new ChunkStore(50, 60_000);
+    expect(cs.add_chunk("x", 0, 0, "data")).toBe(false);
+  });
+
+  it("assemble returns None for incomplete buffer", () => {
+    const cs = new ChunkStore(50, 60_000);
+    cs.add_chunk("key", 0, 3, "a");
+    expect(cs.assemble("key")).toBeUndefined();
+  });
+
+  it("remove deletes the entry", () => {
+    const cs = new ChunkStore(50, 60_000);
+    cs.add_chunk("rm", 0, 1, "x");
+    expect(cs.remove("rm")).toBe(true);
+    expect(cs.assemble("rm")).toBeUndefined();
+  });
+
+  it("handles duplicate chunk at same index", () => {
+    const cs = new ChunkStore(50, 60_000);
+    cs.add_chunk("dup", 0, 2, "first");
+    cs.add_chunk("dup", 0, 2, "second");  // duplicate index, ignored
+    expect(cs.add_chunk("dup", 1, 2, "last")).toBe(true);
+    expect(cs.assemble("dup")).toBe("firstlast");
+  });
+
+  it("FIFO eviction at capacity", () => {
+    const cs = new ChunkStore(2, 60_000);
+    cs.add_chunk("a", 0, 1, "1");
+    cs.add_chunk("b", 0, 1, "2");
+    cs.add_chunk("c", 0, 1, "3");  // should evict "a"
+    expect(cs.assemble("a")).toBeUndefined();
+    expect(cs.assemble("c")).toBe("3");
+  });
+});
+
+describe("compact_and_pack_json (strip + hex→b64)", () => {
+  it("strips null and empty values", () => {
+    const input = JSON.stringify({ name: "test", empty: "", nil: null, arr: [null, "", "keep"] });
+    const result = compact_and_pack_json(input);
+    const parsed = JSON.parse(result);
+    expect(parsed.name).toBe("test");
+    expect(parsed.empty).toBeUndefined();
+    expect(parsed.nil).toBeUndefined();
+    expect(parsed.arr).toEqual(["keep"]);
+  });
+
+  it("converts hex fields to base64", () => {
+    const hex = "aabbccdd";
+    const input = JSON.stringify({ ciphertext: hex, nonce: hex, title: "hello" });
+    const result = compact_and_pack_json(input);
+    const parsed = JSON.parse(result);
+    // hex field → base64
+    expect(parsed.ciphertext).not.toBe(hex);
+    expect(parsed.ciphertext).toBe(base64_encode(decode_hex(hex)));
+    expect(parsed.nonce).toBe(base64_encode(decode_hex(hex)));
+    // non-hex-key field stays as-is
+    expect(parsed.title).toBe("hello");
+  });
+
+  it("leaves non-hex strings in hex-keyed fields unchanged", () => {
+    const input = JSON.stringify({ ciphertext: "not-hex!" });
+    const result = compact_and_pack_json(input);
+    const parsed = JSON.parse(result);
+    expect(parsed.ciphertext).toBe("not-hex!");
+  });
+
+  it("handles nested objects with hex keys", () => {
+    const input = JSON.stringify({
+      pins: [{ ciphertext: "deadbeef", nonce: "cafe" }],
+      keys: { public_key: "00ff", secret_key: "abcd" },
+    });
+    const result = compact_and_pack_json(input);
+    const parsed = JSON.parse(result);
+    // pin-level hex fields converted
+    expect(parsed.pins[0].ciphertext).toBe(base64_encode(decode_hex("deadbeef")));
+    expect(parsed.pins[0].nonce).toBe(base64_encode(decode_hex("cafe")));
+    // key-level hex fields converted
+    expect(parsed.keys.public_key).toBe(base64_encode(decode_hex("00ff")));
+    expect(parsed.keys.secret_key).toBe(base64_encode(decode_hex("abcd")));
+  });
+
+  it("handles empty input", () => {
+    const result = compact_and_pack_json("{}");
+    expect(() => JSON.parse(result)).not.toThrow();
+  });
+});
+
+describe("compact_pack_gzip_json (strip + hex→b64 + gzip)", () => {
+  it("produces decompressable data", () => {
+    const input = JSON.stringify({ name: "test", data: [1, 2, 3] });
+    const compressed = compact_pack_gzip_json(input);
+    const decompressed = decompress_gzip(compressed);
+    const parsed = JSON.parse(new TextDecoder().decode(decompressed));
+    expect(parsed.name).toBe("test");
+    expect(parsed.data).toEqual([1, 2, 3]);
+  });
+
+  it("converts hex fields in gzipped output", () => {
+    const hex = "aabb";
+    const input = JSON.stringify({ ciphertext: hex });
+    const compressed = compact_pack_gzip_json(input);
+    const decompressed = decompress_gzip(compressed);
+    const parsed = JSON.parse(new TextDecoder().decode(decompressed));
+    expect(parsed.ciphertext).toBe(base64_encode(decode_hex(hex)));
   });
 });

@@ -6,32 +6,28 @@ import init, {
   encrypt_with_password, decrypt_with_password,
   encrypt_bytes_with_password, decrypt_bytes_with_password,
   compress_gzip, decompress_gzip, compress_gzip_max,
+  base64_encode, base64_decode, base64url_encode, base64url_decode,
+  compress_gzip_to_base64,
+  compact_and_pack_json, compact_pack_gzip_json,
+  sign, verify,
   generate_qr_svg, serialize_container, deserialize_container,
 } from "./core/pkg/e2e_core.js";
 import * as DB from "./db.js";
 import * as Peer from "./peer.js";
 import { state } from "./state.js";
 import { compressVideoBytes } from "./map.js";
+import { compressImageBuffer } from "./workers/media-compress.js";
 import { toast, showQRHostDialog, showQRJoinDialog, showQRAnswerDialog, showPeerPaste, showQRScanDialog, showPasswordDialog, showProgressDialog, escapeHtml, promptRoomPassword, confirmDialog, alertDialog } from "./dialogs.js";
+import { DeferredBoundedMap, DeferredChunkStore } from "./store-helpers.js";
 
-// --- JS-side message chunking ---
-const chunkStore = new Map();
-const syncBatchStore = new Map();
-const CHUNK_CLEANUP_MS = 60_000;
-const BATCH_CLEANUP_MS = 30_000;
+// --- Message chunking (WASM-backed, size-capped + TTL-auto-eviction) ---
 const MAX_CHUNKS = 500;
 const MAX_BATCH_CHUNKS = 200;
-let _chunkCleanupTimer = null;
-_chunkCleanupTimer = setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of chunkStore) {
-    if (now - entry.ts > CHUNK_CLEANUP_MS) chunkStore.delete(key);
-  }
-  for (const [key, entry] of syncBatchStore) {
-    if (now - entry.ts > BATCH_CLEANUP_MS) syncBatchStore.delete(key);
-  }
-}, CHUNK_CLEANUP_MS + 10_000);
-if (typeof window !== "undefined") window.addEventListener("pagehide", () => { if (_chunkCleanupTimer) { clearInterval(_chunkCleanupTimer); _chunkCleanupTimer = null; } });
+const chunkStore = new DeferredChunkStore(MAX_CHUNKS, 60_000);
+const syncBatchStore = new DeferredBoundedMap(200, 30_000);
+
+// Peer location store (120s TTL, accessed from map.js via window._peerLocations)
+window._peerLocations = new DeferredBoundedMap(200, 120_000);
 
 function splitMessage(msg) {
   if (msg.length < 16000) return null;
@@ -39,7 +35,6 @@ function splitMessage(msg) {
   const nonce = crypto.randomUUID();
   const total = Math.ceil(msg.length / 15000);
   const chunks = [];
-  chunkStore.set(`sent:${id}`, { nonce, total, ts: Date.now() });
   for (let i = 0; i < total; i++) {
     chunks.push(msg.slice(i * 15000, (i + 1) * 15000));
   }
@@ -48,23 +43,14 @@ function splitMessage(msg) {
 
 function reassembleChunk(senderId, id, index, total, chunk, nonce) {
   if (total > MAX_CHUNKS || index >= total) return null;
-  const key = `${senderId}:${id}`;
-  let entry = chunkStore.get(key);
-  if (!entry) {
-    entry = { chunks: new Array(total), ts: Date.now(), count: 0, nonce, total };
-    chunkStore.set(key, entry);
-  }
-  if (entry.nonce !== nonce || entry.total !== total) return null;
-  entry.ts = Date.now();
-  if (!(index in entry.chunks)) {
-    entry.chunks[index] = chunk;
-    entry.count++;
-  }
-  if (entry.count === total) {
-    const full = entry.chunks.join("");
-    chunkStore.delete(key);
-    try { JSON.parse(full); } catch (_) { return null; }
-    return full;
+  const key = `${senderId}:${id}:${nonce}`;
+  if (chunkStore.add_chunk(key, index, total, chunk)) {
+    const full = chunkStore.assemble(key);
+    chunkStore.remove(key);
+    if (full) {
+      try { JSON.parse(full); } catch (_) { return null; }
+      return full;
+    }
   }
   return null;
 }
@@ -75,15 +61,15 @@ function accumulateBatch(key, batchIndex, totalBatches, data) {
   if (totalBatches > MAX_BATCH_CHUNKS || batchIndex >= totalBatches) return null;
   let entry = syncBatchStore.get(key);
   if (!entry) {
-    entry = { chunks: new Array(totalBatches), ts: Date.now(), count: 0 };
+    entry = { chunks: new Array(totalBatches), count: 0 };
     syncBatchStore.set(key, entry);
   }
-  entry.ts = Date.now();
   if (entry.chunks[batchIndex] === undefined) {
     entry.chunks[batchIndex] = data;
     entry.count++;
+    syncBatchStore.set(key, entry);  // persist mutation to WASM Store
   }
-  if (entry.count === totalBatches) {
+  if (entry.count >= totalBatches) {
     const merged = entry.chunks.flat();
     syncBatchStore.delete(key);
     return merged;
@@ -129,18 +115,11 @@ function hexToBytes(hex) {
 }
 
 function bytesToBase64(bytes) {
-  let bin = "";
-  for (let i = 0; i < bytes.length; i += 4096) {
-    bin += String.fromCharCode(...bytes.slice(i, i + 4096));
-  }
-    return btoa(bin);
+  return base64_encode(bytes);
 }
 
 function base64ToBytes(b64) {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
+  return base64_decode(b64);
 }
 
 function walkHexFields(obj, fn, depth = 0) {
@@ -203,24 +182,7 @@ async function compactStoredMedia(data, onProgress, compressVideos = false) {
           toast("Video skipped — " + (result.reason || "unsupported format"), "#f97316");
         }
       } else if (m.type && m.type.startsWith("image/") && !m.type.includes("gif") && !m.type.includes("svg")) {
-        const blob = new Blob([raw], { type: m.type });
-        const bitmap = await createImageBitmap(blob);
-        let w = bitmap.width, h = bitmap.height;
-        if (w > 1920 || h > 1920) {
-          const r = Math.min(1920 / w, 1920 / h);
-          w = Math.round(w * r);
-          h = Math.round(h * r);
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
-        bitmap.close();
-        const outBlob = await new Promise(r => canvas.toBlob(r, "image/webp", 0.8));
-        result = {
-          buffer: new Uint8Array(await outBlob.arrayBuffer()),
-          type: "image/webp",
-          name: m.name.replace(/\.[^.]+$/, ".webp"),
-        };
+        result = await compressImageBuffer(raw, m.type, m.name);
       }
       if (result && result.buffer.byteLength < raw.byteLength) {
         const enc = encrypt_raw_bytes(result.buffer, state.dek);
@@ -375,7 +337,7 @@ export async function handleMessage(msg, connId) {
       window._names[sid] = (d.name || sid.slice(0, 8)) + " (← peer)";
       window._pendingSet = sid;
       if (sid === state.currentSet) {
-        state.dek = window._unwrap_dek(d.wrapped_dek, secret_key);
+        state.dek = unwrap_dek(d.wrapped_dek, secret_key);
         await window._loadPins();
         await window._loadDrawings();
       }
@@ -403,11 +365,11 @@ export async function handleMessage(msg, connId) {
             console.warn("[sync] delete_pin: unauthorized deletion of", d.pin_id);
             return;
           }
-          if (d.signature && window._verify && window._encode_hex) {
+          if (d.signature) {
             try {
               const rawPayload = d.pin_id + "|" + (d.timestamp || "");
-              const payloadHex = window._encode_hex(new TextEncoder().encode(rawPayload));
-              if (!window._verify(payloadHex, d.signature, d.by_pubkey)) {
+              const payloadHex = encode_hex(new TextEncoder().encode(rawPayload));
+              if (!verify(payloadHex, d.signature, d.by_pubkey)) {
                 console.warn("[sync] delete_pin: invalid signature", d.pin_id);
                 return;
               }
@@ -441,11 +403,11 @@ export async function handleMessage(msg, connId) {
             console.warn("[sync] delete_drawing: unauthorized deletion of", d.drawing_id);
             return;
           }
-          if (d.signature && window._verify && window._encode_hex) {
+          if (d.signature) {
             try {
               const rawPayload = d.drawing_id + "|" + (d.timestamp || "");
-              const payloadHex = window._encode_hex(new TextEncoder().encode(rawPayload));
-              if (!window._verify(payloadHex, d.signature, d.by_pubkey)) {
+              const payloadHex = encode_hex(new TextEncoder().encode(rawPayload));
+              if (!verify(payloadHex, d.signature, d.by_pubkey)) {
                 console.warn("[sync] delete_drawing: invalid signature", d.drawing_id);
                 return;
               }
@@ -562,11 +524,11 @@ export async function handleMessage(msg, connId) {
         console.warn("[sync] tombstone: pubkey mismatch, rejecting", d.tombstone_id);
         return;
       }
-      if (d.signature && window._verify && window._encode_hex) {
+      if (d.signature && verify && encode_hex) {
         try {
           const rawPayload = d.target_id + "|" + d.tombstone_id + "|" + (d.timestamp || "");
-          const payloadHex = window._encode_hex(new TextEncoder().encode(rawPayload));
-          if (!window._verify(payloadHex, d.signature, d.by_pubkey)) {
+          const payloadHex = encode_hex(new TextEncoder().encode(rawPayload));
+          if (!verify(payloadHex, d.signature, d.by_pubkey)) {
             console.warn("[sync] tombstone: invalid signature", d.tombstone_id);
             return;
           }
@@ -606,8 +568,7 @@ export async function handleMessage(msg, connId) {
       }
       const peer = state.peers.get(connId);
       if (d.center && peer && d.team_id) {
-        window._peerLocations = window._peerLocations || new Map();
-        window._peerLocations.set(connId, { lat: d.center[0], lng: d.center[1], name: peer.name, team_id: d.team_id, ts: Date.now() });
+        window._peerLocations.set(connId, { lat: d.center[0], lng: d.center[1], name: peer.name, team_id: d.team_id });
         window._renderPeerMarkers?.();
       }
       if (!msg._relay) relayToOthers(msg, connId);
@@ -655,10 +616,11 @@ export function broadcastPinVote(pinId, dir) {
 
 async function processSyncPins(setId, data) {
   const sid = setId || window._pendingSet;
-  for (const p of (data || [])) {
+  const pins = (data || []).map(p => {
     if (!p.author_pubkey) delete p.author_pubkey;
-    await DB.importPin({ ...p, team_id: sid });
-  }
+    return { ...p, team_id: sid };
+  });
+  await DB.importPins(pins);
   window._pendingSet = null;
   await window._loadSetList();
   if (sid === state.currentSet) await window._loadPins();
@@ -667,13 +629,13 @@ async function processSyncPins(setId, data) {
 
 async function processSyncDrawings(setId, data) {
   const sid = setId || window._pendingSet;
-  for (const draw of (data || [])) await DB.importDrawing({ ...draw, team_id: sid });
+  await DB.importDrawings((data || []).map(d => ({ ...d, team_id: sid })));
   if (sid === state.currentSet) await window._loadDrawings();
   window._renderUI?.();
 }
 
 async function processSyncAnnotations(setId, data) {
-  for (const a of (data || [])) await DB.saveAnnotation({ ...a, community_id: setId });
+  await DB.saveAnnotations((data || []).map(a => ({ ...a, community_id: setId })));
   window._refreshAllPinPopups?.();
 }
 
@@ -763,10 +725,12 @@ export function broadcast(type, data, connId) {
         try {
           const ts = Date.now();
           const rawPayload = (data.pin_id || data.drawing_id) + "|" + ts;
-          const payloadHex = window._encode_hex?.(new TextEncoder().encode(rawPayload));
-          const sig = window._sign?.(payloadHex, state.signingSecretKey);
+          const payloadHex = encode_hex(new TextEncoder().encode(rawPayload));
+          const sig = sign(payloadHex, state.signingSecretKey);
           if (sig) meshData = { ...meshData, signature: sig, timestamp: ts };
-        } catch (_) {}
+        } catch (e) {
+          console.warn("[sync] sig failed for", type, data?.pin_id || data?.drawing_id || "", e.message);
+        }
       }
     }
   }
@@ -819,24 +783,19 @@ export async function hostGroup() {
   } catch (e) { ov.remove(); await alertDialog("Failed: " + e.message); }
 }
 
-export async function hostGroupViaRelay(relayUrl) {
-  if (!state.currentSet) return;
-  const roomId = generate_uuid().slice(0, 12);
-  const password = await promptRoomPassword("Room password (optional)");
-
+function connectRelayRoom({ relayUrl, roomId, password, title, retryFn, onWelcome, onMessage }) {
   const ov = document.createElement("div");
   ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
-  ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:360px;max-width:420px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">Host Group</h3><p style="color:var(--text-dim);font-size:13px;">Connecting relay...</p></div>`;
+  ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;max-width:420px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${escapeHtml(title)}</h3><p style="color:var(--text-dim);font-size:13px;">Connecting relay...</p></div>`;
   document.body.appendChild(ov);
 
   let ws;
   let done = false;
-  let myClientId = null;
-  const pendingOffers = new Map();
+  let clientId = null;
 
   try {
     ws = new WebSocket(relayUrl.replace(/\/$/, ""));
-  } catch (e) { ov.remove(); await alertDialog("Invalid relay URL"); return; }
+  } catch (e) { ov.remove(); alertDialog("Invalid relay URL"); return; }
 
   const cleanup = () => {
     done = true;
@@ -846,24 +805,14 @@ export async function hostGroupViaRelay(relayUrl) {
 
   const sendJoin = () => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "join", room: roomId, pw: password || undefined })); };
 
-  const createOfferFor = async (targetId) => {
-    try {
-      const { connId, code } = await Peer.createOffer(state.user.id, state.displayName, state.currentSet);
-      state.hostedConnections.add(connId);
-      pendingOffers.set(connId, targetId);
-      ws.send(JSON.stringify({ type: "offer", code, connId, to: targetId }));
-    } catch (e) { console.error("offer failed:", e); }
-  };
-
   ws.onerror = () => {
     if (ov.querySelector("button")) return;
     ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">Relay unreachable</h3><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;"><button id="relay-retry" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">Retry</button><button id="relay-close" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">Close</button></div></div>`;
-    document.getElementById("relay-retry").onclick = () => { done = true; ws.close(); ov.remove(); hostGroupViaRelay(relayUrl); };
+    document.getElementById("relay-retry").onclick = () => { done = true; ws.close(); ov.remove(); retryFn(); };
     document.getElementById("relay-close").onclick = () => { done = true; ws.close(); ov.remove(); };
   };
 
   ws.onclose = () => { if (!done) cleanup(); };
-
   ws.onopen = sendJoin;
 
   ws.onmessage = async (e) => {
@@ -878,21 +827,51 @@ export async function hostGroupViaRelay(relayUrl) {
         return;
       }
 
-      if (msg.type === "hello") {
-        sendJoin();
+      if (msg.type === "hello") { sendJoin(); return; }
+
+      if (msg.type === "welcome") {
+        clientId = msg.clientId;
+        onWelcome(clientId, ov, relayUrl, roomId, cleanup);
         return;
       }
 
-      if (msg.type === "welcome") {
-        myClientId = msg.clientId;
-        let joinLink = window.location.origin + window.location.pathname + "#relay=" + encodeURIComponent(relayUrl) + "&room=" + roomId;
-        ov.remove();
-        showQRHostDialog("Relay Room " + roomId, joinLink, joinLink, joinLink, {
-          onPeerHandshake: hostPeerHandshake,
-          onRenderUI: window._renderUI,
-          onAddAnother: () => hostGroupViaRelay(relayUrl),
-        });
-      }
+      onMessage(msg, ws, clientId, cleanup);
+    } catch (err) { console.error("Relay message error:", err); }
+  };
+}
+
+export async function hostGroupViaRelay(relayUrl) {
+  if (!state.currentSet) return;
+  const roomId = generate_uuid().slice(0, 12);
+  const password = await promptRoomPassword("Room password (optional)");
+  const pendingOffers = new Map();
+
+  const createOfferFor = async (targetId) => {
+    try {
+      const { connId, code } = await Peer.createOffer(state.user.id, state.displayName, state.currentSet);
+      state.hostedConnections.add(connId);
+      pendingOffers.set(connId, targetId);
+      ws?.send(JSON.stringify({ type: "offer", code, connId, to: targetId }));
+    } catch (e) { console.error("offer failed:", e); toast("Failed to connect to peer — retry", "#dc2626"); }
+  };
+
+  let ws; // captured by closure for host-only message sending
+
+  connectRelayRoom({
+    relayUrl, roomId, password,
+    title: "Host Group",
+    retryFn: () => hostGroupViaRelay(relayUrl),
+    onWelcome: (clientId, ov, relayUrl, roomId, cleanup) => {
+      let joinLink = window.location.origin + window.location.pathname + "#relay=" + encodeURIComponent(relayUrl) + "&room=" + roomId;
+      ov.remove();
+      showQRHostDialog("Relay Room " + roomId, joinLink, joinLink, joinLink, {
+        onPeerHandshake: hostPeerHandshake,
+        onRenderUI: window._renderUI,
+        onAddAnother: () => hostGroupViaRelay(relayUrl),
+      });
+    },
+    onMessage: async (msg, w, clientId) => {
+      ws = w; // capture for createOfferFor
 
       if (msg.type === "peer_joined") {
         createOfferFor(msg.clientId);
@@ -914,64 +893,19 @@ export async function hostGroupViaRelay(relayUrl) {
           toast("Received answer for unknown peer", "#f97316");
         }
       }
-    } catch (e) { console.error("Relay host error:", e); }
-  };
+    },
+  });
 }
 
 export async function joinPeerViaRelay(relayUrl, roomId) {
   const password = await promptRoomPassword("Room password (leave blank if none)");
-  const ov = document.createElement("div");
-  ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
-  ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">Joining via relay...</h3></div>`;
-  document.body.appendChild(ov);
 
-  let ws;
-  let done = false;
-  let clientId = null;
-
-  try {
-    ws = new WebSocket(relayUrl.replace(/\/$/, ""));
-  } catch (e) { ov.remove(); await alertDialog("Invalid relay URL"); return; }
-
-  const sendJoin = () => { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "join", room: roomId, pw: password || undefined })); };
-  if (ws.readyState === WebSocket.OPEN) sendJoin();
-  else ws.onopen = sendJoin;
-
-  const cleanup = () => {
-    done = true;
-    if (ws && ws.readyState < 2) ws.close();
-    ov.remove();
-  };
-
-  ws.onerror = () => {
-    if (ov.querySelector("button")) return;
-    ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">Relay unreachable</h3><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;"><button id="relay-retry" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">Retry</button><button id="relay-close" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">Close</button></div></div>`;
-    document.getElementById("relay-retry").onclick = () => { done = true; ws.close(); ov.remove(); joinPeerViaRelay(relayUrl, roomId); };
-    document.getElementById("relay-close").onclick = () => { done = true; ws.close(); ov.remove(); };
-  };
-  ws.onclose = () => { if (!done) cleanup(); };
-
-  ws.onmessage = async (e) => {
-    try {
-      const msg = JSON.parse(e.data);
-
-      if (msg.type === "error") {
-        done = true;
-        ws.close();
-        ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">Relay Error</h3><p style="color:var(--text-dim);font-size:13px;margin:0 0 12px;">${escapeHtml(msg.reason || "Unknown error")}</p><button id="relay-err-close" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">Close</button></div>`;
-        document.getElementById("relay-err-close").onclick = cleanup;
-        return;
-      }
-
-      if (msg.type === "hello") {
-        sendJoin();
-        return;
-      }
-
-      if (msg.type === "welcome") {
-        clientId = msg.clientId;
-      }
-
+  connectRelayRoom({
+    relayUrl, roomId, password,
+    title: "Joining via relay...",
+    retryFn: () => joinPeerViaRelay(relayUrl, roomId),
+    onWelcome: (clientId, ov, relayUrl, roomId, cleanup) => {},
+    onMessage: async (msg, ws, clientId, cleanup) => {
       if (msg.type === "offer" && msg.code) {
         const result = await Peer.acceptOffer(msg.code, state.user.id, state.displayName);
         const { setId, connId, code: answer } = result;
@@ -981,11 +915,8 @@ export async function joinPeerViaRelay(relayUrl, roomId) {
         cleanup();
         toast("Connected via relay", "#16a34a");
       }
-    } catch (e) {
-      console.error("Relay join error:", e);
-      cleanup();
-    }
-  };
+    },
+  });
 }
 
 export async function joinPeer() {
@@ -1066,7 +997,7 @@ export async function exportSet() {
       }, compressVideos);
       // exportSet continues after compact
       prog.update(75, "Serializing...");
-      const json = JSON.stringify(packHexFields(stripEmpties(data)));
+      const json = compact_and_pack_json(JSON.stringify(data));
       let payload;
       if (password) {
         prog.update(80, "Encrypting...");
@@ -1127,7 +1058,7 @@ export async function shareMap() {
         prog.update(10 + Math.round(done / Math.max(total, 1) * 40), `Compacting (${done}/${total})`);
       });
       prog.update(60, "Serializing...");
-      const jsonPayload = compress_gzip_max(new TextEncoder().encode(JSON.stringify(packHexFields(stripEmpties(data)))));
+      const jsonPayload = compact_pack_gzip_json(JSON.stringify(data));
       let payload = serializeBinary(data);
       if (password) {
         prog.update(75, "Encrypting...");
@@ -1191,11 +1122,7 @@ function generateCommunityLinkUrl(community, communitySk) {
   if (skLen > 0) buf.set(skBytes, pos);
   pos += skLen;
   if (viewBytes.length > 0) buf.set(viewBytes, pos);
-  let bin = "";
-  for (let i = 0; i < buf.length; i += 4096) {
-    bin += String.fromCharCode(...buf.slice(i, i + 4096));
-  }
-  const b64 = btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+  const b64 = base64url_encode(buf);
   return window.location.origin + window.location.pathname + "#community=" + b64;
 }
 
@@ -1272,9 +1199,7 @@ function showShareMethodDialog(compressed, tooLarge, bgm, preview = {}, jsonPayl
   document.getElementById("sm-embed").onclick = () => {
     clean();
     const payload = jsonPayload || compressed;
-    let b64 = "";
-    for (let i = 0; i < payload.length; i++) b64 += String.fromCharCode(payload[i]);
-    const urlCode = btoa(b64).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+    const urlCode = base64url_encode(payload);
     const mapUrl = window.location.origin + window.location.pathname + "?embed=1#map=" + urlCode;
     const embedCode = `<iframe src="${mapUrl}" width="100%" height="400" frameborder="0" allowfullscreen></iframe>`;
     copy(embedCode, "Embed code copied to clipboard");
@@ -1286,18 +1211,14 @@ function showShareMethodDialog(compressed, tooLarge, bgm, preview = {}, jsonPayl
   document.getElementById("sm-raw").onclick = () => {
     if (tooLarge) return;
     clean();
-    let b64 = "";
-    for (let i = 0; i < compressed.length; i++) b64 += String.fromCharCode(compressed[i]);
-    const urlCode = btoa(b64).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+    const urlCode = base64url_encode(compressed);
     copy(window.location.origin + window.location.pathname + "#map=" + urlCode);
   };
 
   document.getElementById("sm-tinyurl").onclick = async () => {
     if (tooLarge) return;
     clean();
-    let b64 = "";
-    for (let i = 0; i < compressed.length; i++) b64 += String.fromCharCode(compressed[i]);
-    const urlCode = btoa(b64).replace(/\+/g, "-").replace(/\//g, "_").replace(/=/g, "");
+    const urlCode = base64url_encode(compressed);
     const longUrl = window.location.origin + window.location.pathname + "#map=" + urlCode;
     const shortBtn = document.getElementById("sm-tinyurl");
     if (shortBtn) shortBtn.textContent = "Shortening…";
@@ -1514,8 +1435,8 @@ async function doImport(data) {
     relay_nodes: data.relay_nodes || [],
     visibility: "local",
   });
-  for (const p of data.pins || []) await DB.importPin({ ...p, team_id: sid });
-  for (const d of data.drawings || []) await DB.importDrawing({ ...d, team_id: sid });
+  await DB.importPins((data.pins || []).map(p => ({ ...p, team_id: sid })));
+  await DB.importDrawings((data.drawings || []).map(d => ({ ...d, team_id: sid })));
   if (data.schemas && Array.isArray(data.schemas)) {
     const existing = await DB.getSchemas();
     for (const s of data.schemas) {

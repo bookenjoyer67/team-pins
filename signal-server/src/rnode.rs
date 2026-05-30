@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::thread;
 use std::time::Duration;
 
@@ -162,8 +163,8 @@ pub async fn start_bridge(state: Arc<AppState>) {
         rooms.entry(room_name.clone()).or_insert_with(|| Room {
             clients: HashMap::new(),
             pw_hash: None,
-            last_act: tokio::time::Instant::now(),
-            challenges: HashMap::new(),
+            last_act: StdMutex::new(tokio::time::Instant::now()),
+            challenges: StdMutex::new(HashMap::new()),
         });
     }
 
@@ -181,7 +182,7 @@ pub async fn start_bridge(state: Arc<AppState>) {
             sleep(Duration::from_secs(120)).await;
             let mut rooms = state_room.rooms.write().await;
             if let Some(room) = rooms.get_mut(&room_keepalive) {
-                room.last_act = tokio::time::Instant::now();
+                *room.last_act.lock().unwrap() = tokio::time::Instant::now();
             }
         }
     });
@@ -201,8 +202,8 @@ pub async fn start_bridge(state: Arc<AppState>) {
                 let room = rooms.entry(room_name.clone()).or_insert_with(|| Room {
                     clients: HashMap::new(),
                     pw_hash: None,
-                    last_act: tokio::time::Instant::now(),
-                    challenges: HashMap::new(),
+                    last_act: StdMutex::new(tokio::time::Instant::now()),
+                    challenges: StdMutex::new(HashMap::new()),
                 });
 
                 // Try to parse as JSON for type detection
@@ -222,5 +223,73 @@ pub async fn start_bridge(state: Arc<AppState>) {
             }
             None => break,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_kiss_roundtrip_simple() {
+        let payload = b"hello world";
+        let encoded = kiss_encode(payload);
+        let mut frames = Vec::new();
+        kiss_decode_into(&encoded, &mut frames);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(&frames[0][1..], payload); // skip leading CMD byte
+    }
+
+    #[test]
+    fn test_kiss_roundtrip_with_special_chars() {
+        let payload = vec![FEND, FESC, 0x41, TFEND, TFESC];
+        let encoded = kiss_encode(&payload);
+        let mut frames = Vec::new();
+        kiss_decode_into(&encoded, &mut frames);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(&frames[0][1..], &payload[..]); // skip leading CMD byte
+    }
+
+    #[test]
+    fn test_kiss_roundtrip_large() {
+        let payload: Vec<u8> = (0..255).collect();
+        let encoded = kiss_encode(&payload);
+        let mut frames = Vec::new();
+        kiss_decode_into(&encoded, &mut frames);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(&frames[0][1..], &payload[..]); // skip leading CMD byte
+    }
+
+    #[test]
+    fn test_kiss_decode_multiple_frames() {
+        let payload1 = b"frame one";
+        let payload2 = b"frame two";
+        let mut combined = kiss_encode(payload1);
+        combined.extend_from_slice(&kiss_encode(payload2));
+        let mut frames = Vec::new();
+        kiss_decode_into(&combined, &mut frames);
+        assert_eq!(frames.len(), 2);
+        assert_eq!(&frames[0][1..], payload1); // skip leading CMD byte
+        assert_eq!(&frames[1][1..], payload2);
+    }
+
+    #[test]
+    fn test_kiss_decode_empty() {
+        let mut frames = Vec::new();
+        let consumed = kiss_decode_into(&[], &mut frames);
+        assert_eq!(consumed, 0);
+        assert!(frames.is_empty());
+    }
+
+    #[test]
+    fn test_kiss_roundtrip_empty_payload() {
+        let payload: &[u8] = &[];
+        let encoded = kiss_encode(payload);
+        let mut frames = Vec::new();
+        kiss_decode_into(&encoded, &mut frames);
+        // Frame with only CMD byte + FEND is decoded with just the CMD byte
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].len(), 1); // only the CMD byte
+        assert_eq!(frames[0][0], 0);    // CMD = 0
     }
 }

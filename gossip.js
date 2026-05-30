@@ -1,11 +1,12 @@
 import * as DB from "./db.js";
 import { state } from "./state.js";
+import { DeferredBoundedMap } from "./store-helpers.js";
 
 const _gossipListeners = new Map(); // queryId → handler
 const _gossipMultiHandler = (resp) => {
   for (const [qid, cb] of _gossipListeners) { try { cb(resp); } catch(_) {} }
 };
-const discoveryCache = new Map();
+const discoveryCache = new DeferredBoundedMap(500, 600_000);  // 500 max, 10min TTL
 // Register global handler once
 if (typeof window !== "undefined") {
   window._gossipResponseHandler = _gossipMultiHandler;
@@ -43,15 +44,10 @@ export async function sendCapabilityAnnounce(targetConnId) {
 
 export function handleCapabilityAnnounce(msg) {
   if (!msg || !msg.communities) return;
-  const MAX_CACHE = 500;
   for (const c of msg.communities) {
     const key = c.community_id;
     const existing = discoveryCache.get(key);
     if (!existing || existing.ts < msg.ts) {
-      if (discoveryCache.size >= MAX_CACHE) {
-        const firstKey = discoveryCache.keys().next().value;
-        if (firstKey) discoveryCache.delete(firstKey);
-      }
       discoveryCache.set(key, { ...c, ts: msg.ts, peer_id: msg.peer_id });
     }
   }
@@ -90,6 +86,61 @@ function bboxesOverlap(b1, b2) {
   return !(e1 < w2 || e2 < w1 || n1 < s2 || n2 < s1);
 }
 
+// --- Spatial hash grid for O(1) marker queries ---
+const _markerGrid = new Map();
+const CELL = 0.5; // degrees (~55km at equator)
+
+function _cellKey(lat, lng) {
+  return `${lat / CELL | 0},${lng / CELL | 0}`;
+}
+
+export function indexMarker(m) {
+  const ll = m.getLatLng();
+  if (!ll) return;
+  const key = _cellKey(ll.lat, ll.lng);
+  let cell = _markerGrid.get(key);
+  if (!cell) _markerGrid.set(key, cell = []);
+  if (!cell.includes(m)) cell.push(m);
+}
+
+export function unindexMarker(m) {
+  const ll = m.getLatLng();
+  if (!ll) return;
+  const key = _cellKey(ll.lat, ll.lng);
+  const cell = _markerGrid.get(key);
+  if (cell) {
+    const idx = cell.indexOf(m);
+    if (idx !== -1) cell.splice(idx, 1);
+  }
+}
+
+export function clearMarkerGrid() {
+  _markerGrid.clear();
+}
+
+// export function for test access
+export { _queryMarkersInBbox };
+function _queryMarkersInBbox(bbox) {
+  const [s, w, n, e] = bbox;
+  const seen = new Set();
+  const results = [];
+  const minLat = Math.floor(s / CELL) * CELL;
+  const minLng = Math.floor(w / CELL) * CELL;
+  for (let lat = minLat; lat <= n + CELL; lat += CELL) {
+    for (let lng = minLng; lng <= e + CELL; lng += CELL) {
+      const cell = _markerGrid.get(_cellKey(lat, lng));
+      if (cell) for (const m of cell) {
+        const id = m._leaflet_id ?? m;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const ll = m.getLatLng();
+        if (ll && ll.lat >= s && ll.lat <= n && ll.lng >= w && ll.lng <= e) results.push(m);
+      }
+    }
+  }
+  return results;
+}
+
 export async function handleQuery(query, fromConnId) {
   if (!query.bbox || query.bbox.length !== 4) return;
   const results = [];
@@ -109,15 +160,9 @@ export async function handleQuery(query, fromConnId) {
     let lastUpdated = c.last_updated || 0;
     let categorySet = new Set();
 
-    // For the active community, we have decrypted markers with full data
-    if (c.community_id === state.currentSet && state.markers) {
-      for (const marker of state.markers) {
-        const latlng = marker.getLatLng();
-        if (!latlng) continue;
-        const lat = latlng.lat;
-        const lng = latlng.lng;
-        const [s, w, n, e] = query.bbox;
-        if (lat < s || lat > n || lng < w || lng > e) continue;
+    // For the active community, use the spatial hash grid for O(k) marker queries
+    if (c.community_id === state.currentSet && state.markers && state.markers.length > 0) {
+      for (const marker of _queryMarkersInBbox(query.bbox)) {
         // Age filter
         if (ageThreshold > 0 && marker._pinCreatedAt && marker._pinCreatedAt < ageThreshold) continue;
         pinCount++;
@@ -167,7 +212,7 @@ export async function handleQuery(query, fromConnId) {
 }
 
 export function getDiscoveredCommunities() {
-  return [...discoveryCache.values()].sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return discoveryCache.values().sort((a, b) => (b.ts || 0) - (a.ts || 0));
 }
 
 export function clearDiscoveryCache() {

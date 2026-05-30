@@ -20,6 +20,8 @@ let widthBtn = null;
 let widthPopout = null;
 let hexInput = null;
 let shapeActive = false;
+let _drawCreatedHandler = null;
+let _drawStopHandler = null;
 
 export function initFreeDraw(doneCb) {
   onDoneCb = doneCb;
@@ -71,6 +73,8 @@ export function exitDrawingMode() {
   state.map.getContainer().style.cursor = "";
   state.map.getContainer().style.touchAction = "";
   state.map.dragging.enable();
+  if (_drawCreatedHandler) { state.map.off(L.Draw.Event.CREATED, _drawCreatedHandler); _drawCreatedHandler = null; }
+  if (_drawStopHandler) { state.map.off(L.Draw.Event.DRAWSTOP, _drawStopHandler); _drawStopHandler = null; }
   hideToolbar();
   if (state.freePreview) {
     state.map.removeLayer(state.freePreview);
@@ -370,7 +374,10 @@ function createToolbar() {
 
   state.map.getContainer().appendChild(toolbar);
 
-  state.map.on(L.Draw.Event.CREATED, (e) => {
+  if (_drawCreatedHandler) state.map.off(L.Draw.Event.CREATED, _drawCreatedHandler);
+  if (_drawStopHandler) state.map.off(L.Draw.Event.DRAWSTOP, _drawStopHandler);
+
+  _drawCreatedHandler = (e) => {
     resetShapeTool();
     const l = e.layer, g = l.toGeoJSON();
     if (l instanceof L.Circle) {
@@ -378,8 +385,11 @@ function createToolbar() {
       g.properties.radius = l.getRadius();
     }
     if (onDoneCb) onDoneCb(g);
-  });
-  state.map.on(L.Draw.Event.DRAWSTOP, () => resetShapeTool());
+  };
+  _drawStopHandler = () => resetShapeTool();
+
+  state.map.on(L.Draw.Event.CREATED, _drawCreatedHandler);
+  state.map.on(L.Draw.Event.DRAWSTOP, _drawStopHandler);
 }
 
 function showToolbar() {

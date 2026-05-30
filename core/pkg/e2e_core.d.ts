@@ -1,9 +1,66 @@
 /* tslint:disable */
 /* eslint-disable */
 
+export class ChunkStore {
+    free(): void;
+    [Symbol.dispose](): void;
+    /**
+     * Add a chunk at the given index. Returns true when all chunks received.
+     */
+    add_chunk(key: string, index: number, total: number, data: string): boolean;
+    /**
+     * Assemble all chunks in order, joined as a single string.
+     * Returns None if not complete.
+     */
+    assemble(key: string): string | undefined;
+    clear(): void;
+    evict_expired(): number;
+    constructor(max_entries: number, ttl_ms: number);
+    remove(key: string): boolean;
+}
+
+export class Store {
+    free(): void;
+    [Symbol.dispose](): void;
+    clear(): void;
+    delete(key: string): boolean;
+    entries(): any[];
+    evict_expired(): number;
+    get(key: string): any;
+    has(key: string): boolean;
+    keys(): any[];
+    constructor(max_entries: number, default_ttl_ms: number);
+    set(key: string, value: any): void;
+    set_ttl(key: string, ttl_ms: number): void;
+    size(): number;
+    values(): any[];
+}
+
+export function base64_decode(b64: string): Uint8Array;
+
+export function base64_encode(data: Uint8Array): string;
+
+export function base64url_decode(b64url: string): Uint8Array;
+
+export function base64url_encode(data: Uint8Array): string;
+
+/**
+ * strip_empty + hex→base64 for hex-keyed fields + serialize back to JSON.
+ * Replaces: JSON.stringify(packHexFields(stripEmpties(data)))
+ */
+export function compact_and_pack_json(json: string): string;
+
+/**
+ * Same as compact_and_pack_json + compress_gzip_max. Returns compressed bytes.
+ * Replaces: compress_gzip_max(new TextEncoder().encode(JSON.stringify(packHexFields(stripEmpties(data)))))
+ */
+export function compact_pack_gzip_json(json: string): Uint8Array;
+
 export function compress_gzip(data: Uint8Array): Uint8Array;
 
 export function compress_gzip_max(data: Uint8Array): Uint8Array;
+
+export function compress_gzip_to_base64(data: Uint8Array): string;
 
 export function compute_geometry(geojson_json: string): string;
 
@@ -92,8 +149,15 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly base64_decode: (a: number, b: number) => [number, number];
+    readonly base64_encode: (a: number, b: number) => [number, number];
+    readonly base64url_decode: (a: number, b: number) => [number, number, number, number];
+    readonly base64url_encode: (a: number, b: number) => [number, number];
+    readonly compact_and_pack_json: (a: number, b: number) => [number, number, number, number];
+    readonly compact_pack_gzip_json: (a: number, b: number) => [number, number, number, number];
     readonly compress_gzip: (a: number, b: number) => [number, number];
     readonly compress_gzip_max: (a: number, b: number) => [number, number];
+    readonly compress_gzip_to_base64: (a: number, b: number) => [number, number];
     readonly compute_geometry: (a: number, b: number) => [number, number];
     readonly decode_hex: (a: number, b: number) => [number, number];
     readonly decompress_gzip: (a: number, b: number) => [number, number, number, number];
@@ -126,9 +190,29 @@ export interface InitOutput {
     readonly unwrap_dek: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly verify: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];
     readonly wrap_dek: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly __wbg_chunkstore_free: (a: number, b: number) => void;
+    readonly __wbg_store_free: (a: number, b: number) => void;
+    readonly chunkstore_add_chunk: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
+    readonly chunkstore_assemble: (a: number, b: number, c: number) => [number, number];
+    readonly chunkstore_clear: (a: number) => void;
+    readonly chunkstore_evict_expired: (a: number) => number;
+    readonly chunkstore_new: (a: number, b: number) => number;
+    readonly chunkstore_remove: (a: number, b: number, c: number) => number;
     readonly reticulum_address: (a: number, b: number) => [number, number];
     readonly reticulum_generate_identity: () => [number, number];
     readonly reticulum_hash_data: (a: number, b: number) => [number, number];
+    readonly store_clear: (a: number) => void;
+    readonly store_delete: (a: number, b: number, c: number) => number;
+    readonly store_entries: (a: number) => [number, number];
+    readonly store_evict_expired: (a: number) => number;
+    readonly store_get: (a: number, b: number, c: number) => any;
+    readonly store_has: (a: number, b: number, c: number) => number;
+    readonly store_keys: (a: number) => [number, number];
+    readonly store_set: (a: number, b: number, c: number, d: any) => void;
+    readonly store_set_ttl: (a: number, b: number, c: number, d: number) => void;
+    readonly store_size: (a: number) => number;
+    readonly store_values: (a: number) => [number, number];
+    readonly store_new: (a: number, b: number) => number;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;
@@ -136,6 +220,7 @@ export interface InitOutput {
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
     readonly __externref_table_dealloc: (a: number) => void;
+    readonly __externref_drop_slice: (a: number, b: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

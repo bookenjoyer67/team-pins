@@ -99,3 +99,105 @@ impl RateLimiter {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> RateLimitConfig {
+        RateLimitConfig {
+            messages_per_sec: 5,
+            connections_per_min: 3,
+            ban_duration_secs: 10,
+            community_regs_per_window: 2,
+            community_reg_window_secs: 60,
+        }
+    }
+
+    #[test]
+    fn test_check_msg_within_limit() {
+        let mut rl = RateLimiter::new(test_config());
+        for _ in 0..5 {
+            assert!(rl.check_msg("192.168.1.1"), "msg within limit should pass");
+        }
+    }
+
+    #[test]
+    fn test_check_msg_exceeds_limit() {
+        let mut rl = RateLimiter::new(test_config());
+        for _ in 0..5 {
+            rl.check_msg("192.168.1.1");
+        }
+        assert!(!rl.check_msg("192.168.1.1"), "6th msg should be rate-limited");
+    }
+
+    #[test]
+    fn test_check_msg_bans_on_flood() {
+        let config = RateLimitConfig {
+            messages_per_sec: 1,
+            connections_per_min: 30,
+            ban_duration_secs: 10,
+            community_regs_per_window: 5,
+            community_reg_window_secs: 60,
+        };
+        let mut rl = RateLimiter::new(config);
+        // 1 * 3 = 3 msg/sec threshold → 4th msg triggers ban
+        for _ in 0..4 {
+            rl.check_msg("192.168.1.2");
+        }
+        assert!(!rl.check_msg("192.168.1.2"), "banned IP should be blocked");
+    }
+
+    #[test]
+    fn test_check_conn_within_limit() {
+        let mut rl = RateLimiter::new(test_config());
+        for _ in 0..3 {
+            assert!(rl.check_conn("10.0.0.1"), "conn within limit should pass");
+        }
+        assert!(!rl.check_conn("10.0.0.1"), "4th connection should be rejected");
+    }
+
+    #[test]
+    fn test_different_ips_independent() {
+        let mut rl = RateLimiter::new(test_config());
+        for _ in 0..5 {
+            assert!(rl.check_msg("1.1.1.1"));
+        }
+        assert!(!rl.check_msg("1.1.1.1"), "IP1 should be limited");
+        assert!(rl.check_msg("2.2.2.2"), "IP2 should still be allowed");
+    }
+
+    #[test]
+    fn test_community_reg_limit() {
+        let config = RateLimitConfig {
+            messages_per_sec: 20,
+            connections_per_min: 30,
+            ban_duration_secs: 10,
+            community_regs_per_window: 2,
+            community_reg_window_secs: 60,
+        };
+        let mut rl = RateLimiter::new(config);
+        assert!(rl.check_community_reg("10.0.0.1"));
+        assert!(rl.check_community_reg("10.0.0.1"));
+        assert!(!rl.check_community_reg("10.0.0.1"), "3rd reg should be rejected");
+    }
+
+    #[test]
+    fn test_clean_removes_bans() {
+        let config = RateLimitConfig {
+            messages_per_sec: 1,
+            connections_per_min: 30,
+            ban_duration_secs: 1, // 1 second ban
+            community_regs_per_window: 5,
+            community_reg_window_secs: 60,
+        };
+        let mut rl = RateLimiter::new(config);
+        for _ in 0..4 {
+            rl.check_msg("1.1.1.1");
+        }
+        assert!(!rl.check_msg("1.1.1.1"), "should be banned");
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        rl.clean();
+        assert!(rl.check_msg("1.1.1.1"), "ban should expire after clean");
+    }
+}

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 
 use rns_transport::iface::{Interface, InterfaceContext};
 use rns_transport::identity::PrivateIdentity;
@@ -42,8 +43,8 @@ pub async fn start_bridge(state: Arc<AppState>) {
         rooms.entry(bridge_room.clone()).or_insert_with(|| Room {
             clients: HashMap::new(),
             pw_hash: None,
-            last_act: tokio::time::Instant::now(),
-            challenges: HashMap::new(),
+            last_act: StdMutex::new(tokio::time::Instant::now()),
+            challenges: StdMutex::new(HashMap::new()),
         });
     }
 
@@ -68,7 +69,7 @@ pub async fn start_bridge(state: Arc<AppState>) {
             sleep(std::time::Duration::from_secs(120)).await;
             let mut rooms = state_keep.rooms.write().await;
             if let Some(room) = rooms.get_mut(&room_keep) {
-                room.last_act = tokio::time::Instant::now();
+                *room.last_act.lock().unwrap() = tokio::time::Instant::now();
             }
         }
     });

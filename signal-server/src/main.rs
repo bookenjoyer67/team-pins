@@ -1,36 +1,26 @@
-mod config;
-mod detect;
-mod handler;
-mod messages;
-mod mqtt_bridge;
-mod peer_relay;
-mod rate;
-mod reticulum_bridge;
-mod rnode;
-mod room;
-mod share;
-mod share_http;
-mod state;
-mod storage;
-mod auth;
-
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, RwLock};
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, timeout, Duration};
 use tracing::info;
 
 use socket2::{Socket, Domain, Type, TcpKeepalive};
 use std::net::SocketAddr;
 
-use crate::config::load_config;
-use crate::detect::handle_combined;
-use crate::rate::RateLimiter;
-use crate::share::ShareStore;
-use crate::state::AppState;
-use crate::storage::PersistentStore;
+use piggpin_signal::config::{load_config, Config};
+use piggpin_signal::detect;
+use piggpin_signal::rate::RateLimiter;
+use piggpin_signal::share::ShareStore;
+use piggpin_signal::state::AppState;
+use piggpin_signal::storage::PersistentStore;
+use piggpin_signal::mqtt_bridge;
+use piggpin_signal::rnode;
+use piggpin_signal::reticulum_bridge;
+use piggpin_signal::peer_relay;
+use piggpin_signal::share_http;
 
 fn bind_with_keepalive(addr: SocketAddr) -> std::io::Result<TcpListener> {
     let socket = Socket::new(Domain::for_address(addr), Type::STREAM, None)?;
@@ -62,7 +52,7 @@ async fn main() {
         shares: Mutex::new(ShareStore::new(config.share.max_shares, config.share.share_ttl_secs)),
         rl: Mutex::new(RateLimiter::new(config.rate_limit.clone())),
         config: config.clone(),
-        store: PersistentStore::new(Some(std::path::PathBuf::from("community_data.json"))),
+        store: PersistentStore::new(Some(std::path::PathBuf::from("community_data.json")), config.storage.max_pins_per_community),
         mesh_uplink: RwLock::new(None),
         reticulum_inject: RwLock::new(None),
         mqtt_client: RwLock::new(None),
@@ -70,116 +60,15 @@ async fn main() {
         conn_semaphore: Arc::new(tokio::sync::Semaphore::new(1000)),
     });
 
-    // Room cleanup
-    {
-        let s = state.clone();
-        tokio::spawn(async move {
-            let timeout = Duration::from_secs(s.config.rooms.room_timeout_secs);
-            loop {
-                sleep(Duration::from_secs(60)).await;
-                let mut rooms = s.rooms.write().await;
-                rooms.retain(|name, r| {
-                    let keep = !r.clients.is_empty() || r.last_act.elapsed() < timeout;
-                    if !keep { info!("Cleaned room {}", name); }
-                    keep
-                });
-            }
-        });
-    }
+    let shutdown = Arc::new(AtomicBool::new(false));
 
-    // Share cleanup
-    {
-        let s = state.clone();
-        tokio::spawn(async move {
-            loop {
-                sleep(Duration::from_secs(300)).await;
-                let mut store = s.shares.lock().await;
-                store.cleanup();
-            }
-        });
-    }
+    spawn_background_tasks(state.clone());
 
-    // Rate limit cleanup
-    {
-        let s = state.clone();
-        tokio::spawn(async move {
-            loop {
-                sleep(Duration::from_secs(300)).await;
-                s.rl.lock().await.clean();
-            }
-        });
-    }
-
-    // TTL expiry cleanup
-    {
-        let s = state.clone();
-        tokio::spawn(async move {
-            loop {
-                sleep(Duration::from_secs(60)).await;
-                s.store.cleanup_expired_ttls().await;
-            }
-        });
-    }
-
-    // Token expiry cleanup
-    {
-        let s = state.clone();
-        tokio::spawn(async move {
-            loop {
-                sleep(Duration::from_secs(300)).await;
-                s.store.cleanup_expired_tokens().await;
-            }
-        });
-    }
-
-    // MQTT mesh bridge (only if enabled in config)
-    if config.mqtt.enabled {
-        let s = state.clone();
-        tokio::spawn(async move {
-            mqtt_bridge::start_bridge(s).await;
-        });
-    }
-
-    // RNode bridge (only if enabled in config)
-    if config.rnode.enabled {
-        let s = state.clone();
-        tokio::spawn(async move {
-            rnode::start_bridge(s).await;
-        });
-    }
-
-    // Reticulum transport bridge
-    {
-        let s = state.clone();
-        tokio::spawn(async move {
-            reticulum_bridge::start_bridge(s).await;
-        });
-    }
-
-    // Periodic snapshot flush (5-second interval)
-    let flush_state = state.clone();
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            flush_state.store.flush_if_dirty().await;
-        }
-    });
-
-    // Relay federation — peer-to-peer relay connections
-    if config.peer_relays.enabled {
-        let s = state.clone();
-        tokio::spawn(async move {
-            peer_relay::start_federation(s).await;
-        });
-    }
-
-    // Main listener (port 9000) — detects WS vs HTTP share
     let addr: SocketAddr = format!("{}:{}", config.server.bind_address, config.server.port).parse().expect("Invalid bind address");
     let listener = match bind_with_keepalive(addr) {
-        Ok(l) => l,
+        Ok(l) => { tracing::info!("piggPin relay on {} (WS + share HTTP)", addr); l }
         Err(e) => { tracing::error!("Failed to bind {}: {}", addr, e); return; }
     };
-    tracing::info!("piggPin relay on {} (WS + share HTTP)", addr);
 
     let http_addr: SocketAddr = format!("{}:{}", config.server.bind_address, config.share.share_http_port).parse().expect("Invalid bind address");
     let http_listener = match bind_with_keepalive(http_addr) {
@@ -187,87 +76,80 @@ async fn main() {
         Err(e) => { tracing::error!("Failed to bind HTTP {}: {}", http_addr, e); return; }
     };
 
+    run_server(state, listener, http_listener, shutdown).await;
+}
+
+pub fn spawn_background_tasks(state: Arc<AppState>) {
+    let st = state.clone();
+    tokio::spawn(async move {
+        let timeout = Duration::from_secs(st.config.rooms.room_timeout_secs);
+        loop { sleep(Duration::from_secs(60)).await; let mut rooms = st.rooms.write().await;
+            rooms.retain(|name, r| { let keep = !r.clients.is_empty() || r.last_act.lock().unwrap().elapsed() < timeout; if !keep { info!("Cleaned room {}", name); } keep }); }
+    });
+    let st = state.clone();
+    tokio::spawn(async move { loop { sleep(Duration::from_secs(300)).await; st.shares.lock().await.cleanup(); } });
+    let st = state.clone();
+    tokio::spawn(async move { loop { sleep(Duration::from_secs(300)).await; st.rl.lock().await.clean(); } });
+    let st = state.clone();
+    tokio::spawn(async move { loop { sleep(Duration::from_secs(60)).await; st.store.cleanup_expired_ttls().await; } });
+    let st = state.clone();
+    tokio::spawn(async move { loop { sleep(Duration::from_secs(300)).await; st.store.cleanup_expired_tokens().await; } });
+    let st = state.clone();
+    tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_secs(5)).await; st.store.flush_if_dirty().await; } });
+
+    let cfg = &state.config;
+    if cfg.mqtt.enabled { let s = state.clone(); tokio::spawn(async move { mqtt_bridge::start_bridge(s).await; }); }
+    if cfg.rnode.enabled { let s = state.clone(); tokio::spawn(async move { rnode::start_bridge(s).await; }); }
+    { let s = state.clone(); tokio::spawn(async move { reticulum_bridge::start_bridge(s).await; }); }
+    if cfg.peer_relays.enabled { let s = state.clone(); tokio::spawn(async move { peer_relay::start_federation(s).await; }); }
+}
+
+pub async fn run_server(
+    state: Arc<AppState>,
+    listener: TcpListener,
+    http_listener: TcpListener,
+    shutdown: Arc<AtomicBool>,
+) {
+    let main_l = Arc::new(tokio::sync::Mutex::new(Some(listener)));
+    let http_l = Arc::new(tokio::sync::Mutex::new(Some(http_listener)));
     let main_state = state.clone();
     let http_state = state.clone();
+    let main_shutdown = shutdown.clone();
+    let http_shutdown = shutdown.clone();
+    let main_l_clone = main_l.clone();
+    let http_l_clone = http_l.clone();
 
     let main_handle = tokio::spawn(async move {
-        while let Ok((stream, addr)) = listener.accept().await {
-            let permit = match tokio::time::timeout(Duration::from_secs(10), main_state.conn_semaphore.clone().acquire_owned()).await {
-                Ok(p) => p,
-                Err(_) => { continue; }
-            };
-            let s = main_state.clone();
-            tokio::spawn(async move {
-                let _permit = permit;
-                handle_combined(s, stream, addr).await;
-            });
+        loop {
+            if main_shutdown.load(Ordering::Acquire) { break; }
+            let result = { let guard = main_l_clone.lock().await; match guard.as_ref() { Some(l) => timeout(Duration::from_secs(1), l.accept()).await, None => break } };
+            match result { Ok(Ok((stream, addr))) => {
+                let permit = match tokio::time::timeout(Duration::from_secs(10), main_state.conn_semaphore.clone().acquire_owned()).await { Ok(p) => p, Err(_) => { continue; } };
+                let s = main_state.clone(); tokio::spawn(async move { let _permit = permit; detect::handle_combined(s, stream, addr).await; });
+            } Ok(Err(_)) => break, Err(_) => continue }
         }
     });
 
     let http_handle = tokio::spawn(async move {
-        while let Ok((stream, _addr)) = http_listener.accept().await {
-            let s = http_state.clone();
-            tokio::spawn(async move {
-                share_http::handle_http(s, stream).await;
-            });
+        loop {
+            if http_shutdown.load(Ordering::Acquire) { break; }
+            let result = { let guard = http_l_clone.lock().await; match guard.as_ref() { Some(l) => timeout(Duration::from_secs(1), l.accept()).await, None => break } };
+            match result { Ok(Ok((stream, _addr))) => { let s = http_state.clone(); tokio::spawn(async move { share_http::handle_http(s, stream).await; }); } Ok(Err(_)) => break, Err(_) => continue }
         }
     });
 
     tokio::select! {
         _ = main_handle => {},
         _ = http_handle => {},
+        _ = tokio::signal::ctrl_c() => { shutdown.store(true, Ordering::Release); main_l.lock().await.take(); http_l.lock().await.take();
+            sleep(Duration::from_secs(2)).await; let _ = tokio::time::timeout(Duration::from_secs(5), state.store.save_snapshot()).await; info!("Shutdown complete"); },
     }
 }
 
-fn print_startup_banner(cfg: &config::Config) {
+fn print_startup_banner(cfg: &Config) {
     let ws_addr = format!("{}:{}", cfg.server.bind_address, cfg.server.port);
-    let http_addr = format!("{}:{}", cfg.server.bind_address, cfg.share.share_http_port);
-
-    info!("══════════════════════════════════════════");
-    info!("  piggPin Signal Relay");
-    info!("══════════════════════════════════════════");
-    info!("");
-    info!("  Listeners:");
-    info!("    WebSocket + Share HTTP   ws://{}", ws_addr);
-    info!("    Share HTTP (direct)      http://{}", http_addr);
-    info!("");
-    info!("  MQTT Mesh Bridge:");
-    if cfg.mqtt.enabled {
-        info!("    Broker                   mqtt://{}:{}", cfg.mqtt.broker, cfg.mqtt.port);
-        info!("    Bridge room              \"{}\"", cfg.mqtt.bridge_room);
-        info!("    Uplink                   {}", if cfg.mqtt.uplink_enabled { "enabled" } else { "disabled" });
-    } else {
-        info!("    Status                   disabled");
-    }
-    info!("");
-    info!("  RNode LoRa Bridge:");
-    if cfg.rnode.enabled && !cfg.rnode.serial_port.is_empty() {
-        info!("    Serial port              {}", cfg.rnode.serial_port);
-        info!("    Baud rate                {}", cfg.rnode.baud_rate);
-        info!("    Bridge room              \"{}\"", cfg.rnode.bridge_room);
-    } else {
-        info!("    Status                   disabled");
-    }
-    info!("");
-    info!("  Rooms:");
-    info!("    Max clients per room     {}", if cfg.rooms.max_clients == 0 { "unlimited".to_string() } else { cfg.rooms.max_clients.to_string() });
-    info!("    Max rooms                {}", cfg.rooms.max_rooms);
-    info!("    Room timeout             {}s", cfg.rooms.room_timeout_secs);
-    info!("");
-    info!("  Rate Limiting:");
-    info!("    Messages/sec             {}", cfg.rate_limit.messages_per_sec);
-    info!("    Connections/min          {}", cfg.rate_limit.connections_per_min);
-    info!("    Ban duration             {}s", cfg.rate_limit.ban_duration_secs);
-    info!("");
-    info!("  Security:");
-    info!("    Passwords required       {}", cfg.security.require_passwords);
-    info!("    Max message size         {} bytes", cfg.security.max_message_size);
-    info!("    Max room name length     {}", cfg.security.max_room_len);
-    info!("");
-    info!("  Share:");
-    info!("    Max shares               {}", cfg.share.max_shares);
-    info!("    Share TTL                {}s ({}h)", cfg.share.share_ttl_secs, cfg.share.share_ttl_secs / 3600);
-    info!("    Max share payload        {} bytes ({} MB)", cfg.share.max_share_bytes, cfg.share.max_share_bytes / (1024 * 1024));
-    info!("");
-    info!("══════════════════════════════════════════");
+    info!("piggPin relay on {} (WS + share HTTP)", ws_addr);
+    info!("  Rooms: max_clients={} timeout={}s", cfg.rooms.max_clients, cfg.rooms.room_timeout_secs);
+    info!("  Rate: {} msg/s {} conn/min", cfg.rate_limit.messages_per_sec, cfg.rate_limit.connections_per_min);
+    info!("  Share: port={} max={} ttl={}s", cfg.share.share_http_port, cfg.share.max_shares, cfg.share.share_ttl_secs);
 }

@@ -6,6 +6,7 @@ import {
   encrypt_raw_bytes,
   decrypt_raw_bytes,
   generate_uuid,
+  unwrap_dek,
 } from "./core/pkg/e2e_core.js";
 import * as DB from "./db.js";
 import { state } from "./state.js";
@@ -22,7 +23,7 @@ export async function importLayerFromMap(sourceTeamId, sourceLayerId, targetLaye
 
   const srcTeam = await DB.getTeam(sourceTeamId);
   if (!srcTeam) { toast("Cannot access source map", "#dc2626"); return; }
-  const srcDek = window._unwrap_dek(srcTeam.wrapped_dek, srcTeam.secret_key);
+  const srcDek = unwrap_dek(srcTeam.wrapped_dek, srcTeam.secret_key);
   if (!srcDek) { toast("Cannot decrypt source map", "#dc2626"); return; }
 
   let importedPins = 0, importedDrawings = 0;

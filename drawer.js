@@ -3,6 +3,7 @@ import * as Map from "./map.js";
 import L from "leaflet";
 import { initFreeDraw, addFreeDrawButton as initFreeDrawSetup, enterDrawingMode, exitDrawingMode } from "./freeDraw.js";
 import { escapeHtml, toast } from "./dialogs.js";
+import { _queryMarkersInBbox } from "./gossip.js";
 import { t, getLang, getSupported, setLang } from "./i18n.js";
 import * as Relay from "./relay.js";
 import * as Mesh from "./mesh.js";
@@ -216,7 +217,7 @@ function enableSelection() {
 
   function selectionForBounds(bounds) {
     clearSelection();
-    state.markers.forEach(m => { if (bounds.contains(m.getLatLng())) { selMarkers.push(m); const icon = m._icon; if (icon) icon.style.filter = "drop-shadow(0 0 4px #2563eb) brightness(1.2)"; } });
+    _queryMarkersInBbox([bounds.getSouth(), bounds.getWest(), bounds.getNorth(), bounds.getEast()]).forEach(m => { selMarkers.push(m); const icon = m._icon; if (icon) icon.style.filter = "drop-shadow(0 0 4px #2563eb) brightness(1.2)"; });
     state.drawingLayers.forEach(l => { try { const lb = l.getBounds(); if (lb && bounds.intersects(lb)) { selDrawings.push(l); l._origColor = l.options?.color || l._origColor; l.setStyle({ color: "#2563eb", weight: (l.options?.weight || 2) + 1 }); } } catch (_) {} });
     if (selMarkers.length + selDrawings.length > 0) showSelBar();
   }

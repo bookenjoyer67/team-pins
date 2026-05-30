@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Mutex as StdMutex;
 use tokio::time::Instant;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
@@ -12,14 +13,14 @@ pub struct Client {
     pub tx: tokio::sync::mpsc::Sender<Message>,
     pub id: String,
     pub ip: String,
-    pub pubkey: Option<String>,
+    pub pubkey: StdMutex<Option<String>>,
 }
 
 pub struct Room {
     pub clients: HashMap<String, Client>,
     pub pw_hash: Option<String>,
-    pub last_act: Instant,
-    pub challenges: HashMap<String, (String, u64)>,  // cid → (challenge_hex, ts)
+    pub last_act: StdMutex<Instant>,
+    pub challenges: StdMutex<HashMap<String, (String, u64)>>,  // cid → (challenge_hex, ts)
 }
 
 impl Room {
@@ -63,7 +64,7 @@ impl Room {
         let msg = Message::Text(txt.to_string());
         for (cid, c) in &self.clients {
             if cid != exclude {
-                if let Some(ref pk) = c.pubkey {
+                if let Some(ref pk) = *c.pubkey.lock().unwrap() {
                     if community.members.iter().any(|m| m.pubkey == *pk) {
                         if c.tx.try_send(msg.clone()).is_err() {
                             warn!("[room] broadcast_to_members drop for client {} (channel full)", c.id);
@@ -86,7 +87,7 @@ pub async fn remove_client(state: &AppState, room_name: &str, cid: &str) {
             info!("Room {} deleted", room_name);
         } else {
             room.broadcast(&messages::json_left(cid), "");
-            room.last_act = Instant::now();
+            *room.last_act.lock().unwrap() = Instant::now();
         }
     }
 }

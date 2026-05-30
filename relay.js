@@ -1,6 +1,7 @@
 import * as DB from "./db.js";
 import { state } from "./state.js";
 import { toast } from "./dialogs.js";
+import { verify, encode_hex, wrap_dek, unwrap_dek } from "./core/pkg/e2e_core.js";
 
 const connections = new Map();  // url → { ws, connected, url, pendingLists: [], communityPeers: Map, reconnectTimer, authPubkey }
 
@@ -93,7 +94,7 @@ export function connect(relayUrl) {
 
   try {
     conn.ws = new WebSocket(url);
-  } catch (_) { connections.delete(url); return; }
+  } catch (_) { connections.delete(url); toast("Cannot connect to " + url, "#dc2626"); return; }
 
   conn.ws.onopen = async () => {
     reconnectAttempts.delete(url);
@@ -159,7 +160,7 @@ export function connect(relayUrl) {
         registerCommunitiesOn(conn);
         requestCommunityListOn(conn);
       } else if (msg.type === "sync_delta") {
-        await handleSyncDelta(msg);
+        await handleDelta(msg, true);
       } else if (msg.type === "community_registered") {
         console.log("[relay] community registered:", msg.community_id);
       } else if (msg.type === "community_list") {
@@ -184,9 +185,9 @@ export function connect(relayUrl) {
       } else if (msg.type === "delta_stored") {
         // acknowledged
       } else if (msg.type === "push_delta") {
-        handleIncomingDelta(msg);
+        handleDelta(msg);
       } else if (msg.type === "push_delta_bc") {
-        handleIncomingDelta(msg);
+        handleDelta(msg);
       } else if (msg.type === "pin_vote_bc") {
         handlePinVoteUpdate(msg);
       } else if (msg.type === "annotation_vote") {
@@ -260,6 +261,7 @@ export function disconnect(url) {
     if (conn) {
       if (conn.reconnectTimer) clearTimeout(conn.reconnectTimer);
       conn.ws.onclose = null;
+      conn.ws.onmessage = null;
       try { conn.ws.close(); } catch (_) {}
       connections.delete(url);
     }
@@ -267,6 +269,7 @@ export function disconnect(url) {
     for (const [u, conn] of connections) {
       if (conn.reconnectTimer) clearTimeout(conn.reconnectTimer);
       conn.ws.onclose = null;
+      conn.ws.onmessage = null;
       try { conn.ws.close(); } catch (_) {}
     }
     connections.clear();
@@ -342,7 +345,7 @@ export async function syncDelta(communityId) {
   return syncDeltaOn(conn, communityId);
 }
 
-async function handleIncomingDelta(msg) {
+async function handleDelta(msg, isSync = false) {
   const communityId = msg.community_id;
   if (!communityId) return;
 
@@ -378,74 +381,20 @@ async function handleIncomingDelta(msg) {
       : normalized;
     await DB.importDrawing(merged);
   }
-  for (const pid of msg.deleted_pin_ids || []) {
-    await DB.deletePin(pid);
-  }
-  for (const did of (msg.deleted_drawing_ids || [])) {
-    await DB.deleteDrawing(did);
-  }
-  if (communityId === state.currentSet) {
-    await window._loadPins?.();
-    await window._loadDrawings?.();
-  }
-  window._renderUI?.();
-}
+  await DB.deletePins(msg.deleted_pin_ids || []);
+  await DB.deleteDrawings(msg.deleted_drawing_ids || []);
 
-async function handleSyncDelta(msg) {
-  const communityId = msg.community_id;
-  if (!communityId) return;
-
-  for (const pin of msg.pins || []) {
-    if (!pin.author_pubkey) delete pin.author_pubkey;
-    const existing = await DB.getPin(pin.pin_id).catch(() => null);
-    const merged = existing
-      ? { ...pin, team_id: communityId, media: pin.media || existing.media, author_pubkey: pin.author_pubkey || existing.author_pubkey, ttl_expires_at: pin.ttl_expires_at ?? existing.ttl_expires_at, ttl_base_at: pin.ttl_base_at ?? existing.ttl_base_at, vote_count_up: pin.vote_count_up ?? existing.vote_count_up, vote_count_down: pin.vote_count_down ?? existing.vote_count_down, posted_anonymously: pin.posted_anonymously ?? existing.posted_anonymously }
-      : { ...pin, team_id: communityId };
-    await DB.importPin(merged);
-  }
-  for (const ann of (msg.annotations || [])) {
-    const existing = await DB.getAnnotation(ann.annotation_id).catch(() => null);
-    if (existing) {
-      const mergedVotes = [...(existing.votes || [])];
-      for (const v of (ann.votes || [])) {
-        if (!mergedVotes.some(ev => ev.pubkey === v.pubkey)) mergedVotes.push(v);
-      }
-      await DB.saveAnnotation({ ...existing, ...ann, community_id: communityId, votes: mergedVotes });
-    } else {
-      await DB.saveAnnotation({ ...ann, community_id: communityId });
+  if (isSync) {
+    const now = Date.now();
+    lastSyncTimestamps.set(communityId, now);
+    if (msg.pins?.length || msg.drawings?.length || msg.annotations?.length) {
+      const c = await DB.getCommunity(communityId).catch(() => null);
+      if (c) { c.last_updated = Date.now(); await DB.saveCommunity(c); }
     }
-  }
-  for (const tomb of msg.tombstones || []) {
-    await DB.saveTombstone({ ...tomb, community_id: communityId });
-  }
-  for (const dwg of (msg.drawings || [])) {
-    const existing = await DB.getDrawing(dwg.drawing_id).catch(() => null);
-    const normalized = { ...dwg, team_id: communityId, encrypted_geojson: dwg.ciphertext || dwg.encrypted_geojson };
-    delete normalized.ciphertext;
-    const merged = existing
-      ? { ...existing, ...normalized }
-      : normalized;
-    await DB.importDrawing(merged);
-  }
-  for (const pid of msg.deleted_pin_ids || []) {
-    await DB.deletePin(pid);
-  }
-  for (const did of (msg.deleted_drawing_ids || [])) {
-    await DB.deleteDrawing(did);
-  }
-
-  const now = Date.now();
-  lastSyncTimestamps.set(communityId, now);
-
-  // Update last_updated on the community for gossip freshness
-  if (msg.pins?.length || msg.drawings?.length || msg.annotations?.length) {
-    const c = await DB.getCommunity(communityId).catch(() => null);
-    if (c) { c.last_updated = Date.now(); await DB.saveCommunity(c); }
-  }
-
-  if (msg.governance && state.currentCommunity && state.currentCommunity.community_id === communityId) {
-    state.currentCommunity.governance = msg.governance;
-    DB.saveCommunity(state.currentCommunity);
+    if (msg.governance && state.currentCommunity && state.currentCommunity.community_id === communityId) {
+      state.currentCommunity.governance = msg.governance;
+      DB.saveCommunity(state.currentCommunity);
+    }
   }
 
   if (communityId === state.currentSet) {
@@ -561,14 +510,10 @@ async function handleAnnotationVote(msg) {
       console.warn("[relay] annotation_vote: missing signature from", msg.pubkey);
       return false;
     }
-    if (!window._verify || !window._encode_hex) {
-      console.warn("[relay] annotation_vote: verification primitives not loaded, rejecting vote");
-      return false;
-    }
     try {
       const rawPayload = msg.annotation_id + "|" + (msg.direction || "") + "|" + (msg.timestamp || "");
-      const payloadHex = window._encode_hex(new TextEncoder().encode(rawPayload));
-      if (!window._verify(payloadHex, msg.signature, msg.pubkey)) {
+      const payloadHex = encode_hex(new TextEncoder().encode(rawPayload));
+      if (!verify(payloadHex, msg.signature, msg.pubkey)) {
         console.warn("[relay] annotation_vote: invalid signature from", msg.pubkey);
         return false;
       }
@@ -875,12 +820,14 @@ async function handleMemberDekRequested(msg) {
   if (!communitySecret) return;
   try {
     const communityDek = team.community_wrapped_dek || team.wrapped_dek;
-    const dk = window._unwrap_dek(communityDek, communitySecret);
+    const dk = unwrap_dek(communityDek, communitySecret);
     if (!dk) return;
-    const memberDek = window._wrap_dek(dk, member_pubkey);
+    const memberDek = wrap_dek(dk, member_pubkey);
     rewrapMemberDek(community_id, member_pubkey, memberDek);
     console.log("[relay] auto-rewrapped DEK for", member_pubkey, "in", community_id);
-  } catch (_) {}
+  } catch (e) {
+    console.warn("[relay] DEK rewrap for", member_pubkey?.slice(0, 10), "failed:", e.message);
+  }
 }
 
 async function handleMemberDekReady(msg) {
@@ -899,7 +846,7 @@ async function handleMemberDekReady(msg) {
 
     // Try to decrypt and load immediately
     try {
-      const dk = window._unwrap_dek(individually_wrapped_dek, team.secret_key);
+      const dk = unwrap_dek(individually_wrapped_dek, team.secret_key);
       console.log("[relay] member_dek_ready: unwrap returned", !!dk, "currentSet=", state.currentSet, "cid=", community_id);
       if (dk && community_id === state.currentSet) {
         state.dek = dk;
@@ -1157,16 +1104,15 @@ async function handleLayerSubscribed(msg) {
     });
 
     // Store initial pins and drawings
-    for (const p of msg.pins || []) {
-      await DB.importPin({ ...p, team_id: communityId });
-    }
-    for (const d of msg.drawings || []) {
-      await DB.importDrawing({ ...d, team_id: communityId });
-    }
+    await DB.importPins((msg.pins || []).map(p => ({ ...p, team_id: communityId })));
+    await DB.importDrawings((msg.drawings || []).map(d => ({ ...d, team_id: communityId })));
 
     window._loadSubscribedPins?.();
     window._renderUI?.();
-  } catch (_) {}
+  } catch (e) {
+    console.error("[relay] layer subscribe failed:", e.message);
+    window._toast?.("Layer subscription failed", "#dc2626");
+  }
 }
 
 async function handleLayerUpdate(msg) {
@@ -1174,12 +1120,8 @@ async function handleLayerUpdate(msg) {
   const layerId = msg.layer_id;
   if (!communityId || !layerId) return;
 
-  for (const p of msg.pins || []) {
-    await DB.importPin({ ...p, team_id: communityId });
-  }
-  for (const d of msg.drawings || []) {
-    await DB.importDrawing({ ...d, team_id: communityId });
-  }
+  await DB.importPins((msg.pins || []).map(p => ({ ...p, team_id: communityId })));
+  await DB.importDrawings((msg.drawings || []).map(d => ({ ...d, team_id: communityId })));
 
   // Update last_synced_at
   const sub = await DB.getSubscribedLayer(layerId).catch(() => null);
@@ -1206,12 +1148,8 @@ async function handleLayerUnpublished(msg) {
 }
 
 async function handleSubscribedSync(msg) {
-  for (const p of msg.pins || []) {
-    await DB.importPin({ ...p, team_id: p.community_id || state.currentSet });
-  }
-  for (const d of msg.drawings || []) {
-    await DB.importDrawing({ ...d, team_id: d.community_id || state.currentSet });
-  }
+  await DB.importPins((msg.pins || []).map(p => ({ ...p, team_id: p.community_id || state.currentSet })));
+  await DB.importDrawings((msg.drawings || []).map(d => ({ ...d, team_id: d.community_id || state.currentSet })));
   window._loadSubscribedPins?.();
   window._renderUI?.();
 }

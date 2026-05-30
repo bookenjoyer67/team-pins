@@ -1,0 +1,237 @@
+// E2E test helpers for the piggPin signal server.
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use futures_util::{SinkExt, StreamExt};
+use tokio::net::TcpListener;
+use tokio::sync::{Mutex, RwLock};
+use tokio::time::{sleep, timeout, Duration};
+
+use piggpin_signal::config::Config;
+use piggpin_signal::detect;
+use piggpin_signal::rate::RateLimiter;
+use piggpin_signal::share_http;
+use piggpin_signal::state::AppState;
+use piggpin_signal::storage::PersistentStore;
+
+/// A connected WebSocket test client.
+pub struct TestClient {
+    pub ws: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+}
+
+impl TestClient {
+    /// Send a JSON value as text.
+    pub async fn send(&mut self, msg: &serde_json::Value) {
+        self.ws
+            .send(tokio_tungstenite::tungstenite::Message::Text(msg.to_string()))
+            .await
+            .unwrap();
+    }
+
+    /// Receive the next text message and parse as JSON.
+    pub async fn recv(&mut self) -> serde_json::Value {
+        loop {
+            let msg = self.ws.next().await.unwrap().unwrap();
+            if let tokio_tungstenite::tungstenite::Message::Text(t) = msg {
+                return serde_json::from_str(&t).unwrap();
+            }
+        }
+    }
+
+    /// Receive with a timeout. Returns None if no message arrives in time.
+    pub async fn recv_timeout(&mut self, dur: Duration) -> Option<serde_json::Value> {
+        tokio::time::timeout(dur, self.recv()).await.ok()
+    }
+
+    /// Skip any pending messages (use after joining to clear peer_joined broadcasts).
+    #[allow(dead_code)]
+    pub async fn drain(&mut self) {
+        while self.recv_timeout(Duration::from_millis(200)).await.is_some() {}
+    }
+}
+
+/// Start a signal server on random ports with in-memory storage.
+/// Spawns background tasks and accept loops. Returns the WS address.
+pub async fn start_server() -> SocketAddr {
+    let _ = tracing_subscriber::fmt().try_init();
+
+    let config = Config::default();
+    let state = Arc::new(AppState {
+        rooms: RwLock::new(HashMap::new()),
+        shares: Mutex::new(piggpin_signal::share::ShareStore::new(
+            config.share.max_shares,
+            config.share.share_ttl_secs,
+        )),
+        rl: Mutex::new(RateLimiter::new(config.rate_limit.clone())),
+        config: config.clone(),
+        store: PersistentStore::new(None, config.storage.max_pins_per_community),
+        mesh_uplink: RwLock::new(None),
+        reticulum_inject: RwLock::new(None),
+        mqtt_client: RwLock::new(None),
+        peer_relay_txs: RwLock::new(HashMap::new()),
+        conn_semaphore: Arc::new(tokio::sync::Semaphore::new(100)),
+    });
+
+    let shutdown = Arc::new(AtomicBool::new(false));
+    spawn_background_tasks(state.clone());
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let http_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+
+    let s = state.clone();
+    let sd = shutdown.clone();
+    tokio::spawn(async move { run_accept_loop(s, listener, http_listener, sd).await });
+
+    // Give the server a moment to start
+    sleep(Duration::from_millis(50)).await;
+    addr
+}
+
+/// Connect a WebSocket client to the server in a specific room.
+pub async fn connect_to(addr: SocketAddr, room: &str) -> TestClient {
+    let url = format!("ws://{}/?room={}", addr, room);
+    let (ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    TestClient { ws }
+}
+
+/// Connect and complete the join handshake.
+/// The protocol is: connect → receive "hello" → send "join" → receive "welcome"
+pub async fn join_room(addr: SocketAddr, room: &str) -> (TestClient, serde_json::Value) {
+    let mut client = connect_to(addr, room).await;
+
+    // Server sends "hello" first
+    let hello = client.recv().await;
+    assert_eq!(hello["type"], "hello", "expected hello, got: {}", hello);
+
+    // Send join request
+    client.send(&serde_json::json!({"type":"join","room":room})).await;
+
+    // Receive welcome
+    let welcome = client.recv().await;
+    assert_eq!(welcome["type"], "welcome", "expected welcome, got: {}", welcome);
+    (client, welcome)
+}
+
+// ---- Internal server helpers (duplicated from main.rs for test access) ----
+
+fn spawn_background_tasks(state: Arc<AppState>) {
+    let st = state.clone();
+    tokio::spawn(async move {
+        let timeout = Duration::from_secs(st.config.rooms.room_timeout_secs);
+        loop {
+            sleep(Duration::from_secs(60)).await;
+            let mut rooms = st.rooms.write().await;
+            rooms.retain(|name, r| {
+                let keep = !r.clients.is_empty()
+                    || r.last_act.lock().unwrap().elapsed() < timeout;
+                if !keep {
+                    tracing::info!("Cleaned room {}", name);
+                }
+                keep
+            });
+        }
+    });
+    let st = state.clone();
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(300)).await;
+            st.shares.lock().await.cleanup();
+        }
+    });
+    let st = state.clone();
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(300)).await;
+            st.rl.lock().await.clean();
+        }
+    });
+    let st = state.clone();
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(60)).await;
+            st.store.cleanup_expired_ttls().await;
+        }
+    });
+    let st = state.clone();
+    tokio::spawn(async move {
+        loop {
+            sleep(Duration::from_secs(300)).await;
+            st.store.cleanup_expired_tokens().await;
+        }
+    });
+    let st = state.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            st.store.flush_if_dirty().await;
+        }
+    });
+}
+
+async fn run_accept_loop(
+    state: Arc<AppState>,
+    listener: TcpListener,
+    http_listener: TcpListener,
+    shutdown: Arc<AtomicBool>,
+) {
+    let main_l = Arc::new(tokio::sync::Mutex::new(Some(listener)));
+    let http_l = Arc::new(tokio::sync::Mutex::new(Some(http_listener)));
+    let main_state = state.clone();
+    let http_state = state.clone();
+    let main_shutdown = shutdown.clone();
+    let http_shutdown = shutdown.clone();
+
+    let main_handle = tokio::spawn(async move {
+        loop {
+            if main_shutdown.load(Ordering::Acquire) { break; }
+            let result = {
+                let guard = main_l.lock().await;
+                match guard.as_ref() {
+                    Some(l) => timeout(Duration::from_secs(1), l.accept()).await,
+                    None => break,
+                }
+            };
+            match result {
+                Ok(Ok((stream, addr))) => {
+                    let permit = match tokio::time::timeout(Duration::from_secs(10), main_state.conn_semaphore.clone().acquire_owned()).await {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
+                    let s = main_state.clone();
+                    tokio::spawn(async move {
+                        let _permit = permit;
+                        detect::handle_combined(s, stream, addr).await;
+                    });
+                }
+                Ok(Err(_)) => break,
+                Err(_) => continue,
+            }
+        }
+    });
+
+    let http_handle = tokio::spawn(async move {
+        loop {
+            if http_shutdown.load(Ordering::Acquire) { break; }
+            let result = {
+                let guard = http_l.lock().await;
+                match guard.as_ref() {
+                    Some(l) => timeout(Duration::from_secs(1), l.accept()).await,
+                    None => break,
+                }
+            };
+            match result {
+                Ok(Ok((stream, _addr))) => {
+                    let s = http_state.clone();
+                    tokio::spawn(async move { share_http::handle_http(s, stream).await; });
+                }
+                Ok(Err(_)) => break,
+                Err(_) => continue,
+            }
+        }
+    });
+
+    let _ = tokio::join!(main_handle, http_handle);
+}

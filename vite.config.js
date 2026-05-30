@@ -34,19 +34,28 @@ function injectPrecache() {
   sw = sw.replace("__PRECACHE_URLS__", JSON.stringify(precacheUrls));
   sw = sw.replace("__VERSION__", version);
   writeFileSync(swPath, sw);
-  console.log(`[precache] Injected ${precacheUrls.length} URLs into sw.js (v${version})`);
+  console.log(
+    `[precache] Injected ${precacheUrls.length} URLs into sw.js (v${version})`,
+  );
 }
 
 export default defineConfig({
   plugins: [
     basicSsl(),
     {
+      name: "dev-csp",
+      apply: "serve",
+      transformIndexHtml(html) {
+        return html.replace(/<meta http-equiv="Content-Security-Policy"[^>]*>/g, "");
+      },
+    },
+    {
       name: "inject-precache",
       apply: "build",
       closeBundle: injectPrecache,
     },
   ],
-  server: { open: false, host: "127.0.0.1" },
+  server: { open: false, host: "0.0.0.0" },
   optimizeDeps: {
     exclude: ["./core/pkg/e2e_core.js"],
   },

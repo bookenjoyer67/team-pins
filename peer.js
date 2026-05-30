@@ -1,5 +1,5 @@
 // WebRTC multi-peer manager
-import { compress_gzip, decompress_gzip } from "./core/pkg/e2e_core.js";
+import { compress_gzip, decompress_gzip, compress_gzip_to_base64 } from "./core/pkg/e2e_core.js";
 
 const defaultConfig = {
   iceServers: [
@@ -66,7 +66,9 @@ function setupDataChannel(connId, dc) {
          return;
        }
       onMessage?.(msg, connId);
-    } catch (_) {}
+    } catch (e) {
+      console.warn("[peer] bad message from", connId, e.message);
+    }
   };
 }
 
@@ -107,12 +109,8 @@ function signalSdpToDesc(signal) {
 }
 
 function compact(type, connId, sdp) {
-  const compressed = compress_gzip(new TextEncoder().encode(sdp));
-  let bin = "";
-  for (let i = 0; i < compressed.length; i += 4096) {
-    bin += String.fromCharCode(...compressed.slice(i, Math.min(i + 4096, compressed.length)));
-  }
-  return (type === "offer" ? "o" : "a") + "|" + connId + "|" + btoa(bin);
+  const b64 = compress_gzip_to_base64(new TextEncoder().encode(sdp));
+  return (type === "offer" ? "o" : "a") + "|" + connId + "|" + b64;
 }
 
 function waitForEarlyIce(pc) {

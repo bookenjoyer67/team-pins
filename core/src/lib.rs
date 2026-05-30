@@ -3,6 +3,7 @@ use chacha20poly1305::{ChaCha20Poly1305, KeyInit, Nonce};
 use chacha20poly1305::aead::{Aead, OsRng};
 
 mod mesh_core;
+mod store;
 use rand::RngCore;
 use serde::{Serialize, Deserialize};
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -575,6 +576,66 @@ fn strip_empty(v: &serde_json::Value) -> Option<serde_json::Value> {
     }
 }
 
+// HEX_KEYS from sync.js — fields containing hex-encoded ciphertext/keys
+const HEX_KEYS: &[&str] = &["public_key", "secret_key", "wrapped_dek", "ciphertext", "nonce", "encrypted_geojson"];
+
+fn is_valid_hex(s: &str) -> bool {
+    s.len() % 2 == 0 && s.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn hex_to_b64(hex: &str) -> String {
+    if !is_valid_hex(hex) { return hex.to_string(); }
+    let bytes = decode_hex_vec(hex).unwrap_or_default();
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes)
+}
+
+fn compact_and_pack_value(v: &serde_json::Value) -> Option<serde_json::Value> {
+    match v {
+        serde_json::Value::Null => None,
+        serde_json::Value::String(s) if s.is_empty() => None,
+        serde_json::Value::Array(arr) => {
+            let out: Vec<_> = arr.iter().filter_map(compact_and_pack_value).collect();
+            if out.is_empty() { None } else { Some(serde_json::Value::Array(out)) }
+        }
+        serde_json::Value::Object(obj) => {
+            let out: serde_json::Map<_, _> = obj.iter()
+                .filter_map(|(k, v)| {
+                    let processed = match v {
+                        serde_json::Value::String(s) if HEX_KEYS.contains(&k.as_str()) && is_valid_hex(s) => {
+                            serde_json::Value::String(hex_to_b64(s))
+                        }
+                        _ => v.clone(),
+                    };
+                    compact_and_pack_value(&processed).map(|c| (k.clone(), c))
+                })
+                .collect();
+            if out.is_empty() { None } else { Some(serde_json::Value::Object(out)) }
+        }
+        other => Some(other.clone()),
+    }
+}
+
+/// strip_empty + hex→base64 for hex-keyed fields + serialize back to JSON.
+/// Replaces: JSON.stringify(packHexFields(stripEmpties(data)))
+#[wasm_bindgen]
+pub fn compact_and_pack_json(json: &str) -> Result<String, JsError> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(js_err)?;
+    let packed = compact_and_pack_value(&v).unwrap_or(serde_json::Value::Object(Default::default()));
+    serde_json::to_string(&packed).map_err(js_err)
+}
+
+/// Same as compact_and_pack_json + compress_gzip_max. Returns compressed bytes.
+/// Replaces: compress_gzip_max(new TextEncoder().encode(JSON.stringify(packHexFields(stripEmpties(data)))))
+#[wasm_bindgen]
+pub fn compact_pack_gzip_json(json: &str) -> Result<Vec<u8>, JsError> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(js_err)?;
+    let packed = compact_and_pack_value(&v).unwrap_or(serde_json::Value::Object(Default::default()));
+    let packed_json = serde_json::to_vec(&packed).map_err(js_err)?;
+    let mut e = GzEncoder::new(Vec::new(), Compression::best());
+    e.write_all(&packed_json).map_err(js_err)?;
+    e.finish().map_err(js_err)
+}
+
 #[wasm_bindgen]
 pub fn serialize_container(json: &str) -> Result<Vec<u8>, JsError> {
     let v: serde_json::Value = serde_json::from_str(json).map_err(js_err)?;
@@ -874,6 +935,36 @@ pub fn mesh_chunk_encode(data: &[u8]) -> String {
         chunks.push(serde_json::json!({"i":i,"n":total,"id":id,"d":chunk}));
     }
     serde_json::to_string(&chunks).unwrap_or_else(|_| "[]".to_string())
+}
+
+// ---- Base64 encoding / decoding ----
+
+#[wasm_bindgen]
+pub fn base64_encode(data: &[u8]) -> String {
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data)
+}
+
+#[wasm_bindgen]
+pub fn base64_decode(b64: &str) -> Vec<u8> {
+    base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64)
+        .unwrap_or_default()
+}
+
+#[wasm_bindgen]
+pub fn base64url_encode(data: &[u8]) -> String {
+    base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, data)
+}
+
+#[wasm_bindgen]
+pub fn base64url_decode(b64url: &str) -> Result<Vec<u8>, JsError> {
+    base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, b64url)
+        .map_err(js_err)
+}
+
+#[wasm_bindgen]
+pub fn compress_gzip_to_base64(data: &[u8]) -> String {
+    let compressed = compress_gzip(data);
+    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &compressed)
 }
 
 // ---- Hardware model lookup ----
