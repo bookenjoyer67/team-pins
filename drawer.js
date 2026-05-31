@@ -76,7 +76,7 @@ const SECTIONS = [
       { id: "theme", icon: "🌓", label: "Theme", action: () => window._toggleTheme?.() },
       { id: "push", icon: "🔔", label: "Notifications",
         active: () => window._isPushEnabled?.() || false,
-        action: () => { const on = window._togglePush?.(); toast(on ? "Notifications ON" : "Notifications OFF", on ? "#16a34a" : "#9ca3af"); } },
+        action: async () => { const on = await window._togglePush?.(); toast(on ? "Notifications ON" : "Notifications OFF", on ? "#16a34a" : "#9ca3af"); } },
       { id: "language", icon: "🌐", label: "Language", action: showLangChooser },
       { id: "github", icon: "🐙", label: "GitHub", action: () => window.open("https://github.com/bookenjoyer67/team-pins", "_blank") },
       { id: "donate", icon: "💸", label: "Donate", action: showDonateModal },

@@ -1,5 +1,7 @@
 use tracing::{info, warn};
 
+use crate::storage::MemberRecord;
+
 use super::{auth_err, get_conn_pubkey, is_founder, HandlerContext};
 
 pub async fn handle_publish_community(ctx: &HandlerContext<'_>, v: &serde_json::Value) {
@@ -141,7 +143,7 @@ pub async fn handle_delete_community(ctx: &HandlerContext<'_>, v: &serde_json::V
 pub async fn handle_join_community(ctx: &HandlerContext<'_>, v: &serde_json::Value) {
     let cid_val = v.get("community_id").and_then(|c| c.as_str()).unwrap_or("").to_string();
     let request_id = v.get("request_id").and_then(|r| r.as_str()).unwrap_or("");
-    if let Some(c) = ctx.state.store.get_community(&cid_val).await {
+    if let Some(mut c) = ctx.state.store.get_community(&cid_val).await {
         let mut denied = false;
         if let Some(ref stored_hash) = c.password_hash {
             let provided_hash = v.get("password_hash").and_then(|p| p.as_str()).unwrap_or("");
@@ -157,7 +159,21 @@ pub async fn handle_join_community(ctx: &HandlerContext<'_>, v: &serde_json::Val
         if !denied {
             info!("[relay] join_community: {} -> {}", ctx.ip, c.name);
             let conn_pubkey = get_conn_pubkey(ctx.room, ctx.cid);
-            let is_mbr = conn_pubkey.as_ref().map_or(false, |pk| c.members.iter().any(|m| m.pubkey == *pk));
+            // Auto-add joining user as a member so they receive push notifications
+            let mut is_mbr = conn_pubkey.as_ref().map_or(false, |pk| c.members.iter().any(|m| m.pubkey == *pk));
+            if !is_mbr {
+                if let Some(ref pk) = conn_pubkey {
+                    let name = v.get("display_name").and_then(|n| n.as_str()).unwrap_or("");
+                    ctx.state.store.ensure_member(&cid_val, pk, name, "contributor").await;
+                    c.members.push(MemberRecord {
+                        pubkey: pk.clone(),
+                        display_name: name.to_string(),
+                        role: "contributor".to_string(),
+                    });
+                    info!("[relay] auto-added member {} to community {}", pk, c.name);
+                    is_mbr = true;
+                }
+            }
             let members_for_response: serde_json::Value =
                 serde_json::json!(c.members.iter().map(|m| serde_json::json!({
                     "pubkey": m.pubkey,

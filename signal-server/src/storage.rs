@@ -644,6 +644,20 @@ impl PersistentStore {
         Ok(())
     }
 
+    pub async fn ensure_member(&self, community_id: &str, pubkey: &str, display_name: &str, role: &str) {
+        let mut communities = self.communities.write().await;
+        if let Some(c) = communities.get_mut(community_id) {
+            if !c.members.iter().any(|m| m.pubkey == pubkey) {
+                c.members.push(MemberRecord {
+                    pubkey: pubkey.to_string(),
+                    display_name: display_name.to_string(),
+                    role: role.to_string(),
+                });
+                self.mark_dirty();
+            }
+        }
+    }
+
     pub async fn remove_member(&self, community_id: &str, target_pubkey: &str, requester_pubkey: &str) -> Result<(), &'static str> {
         let mut communities = self.communities.write().await;
         let c = communities.get_mut(community_id).ok_or("community not found")?;
@@ -968,5 +982,105 @@ mod tests {
 
         let subs = restored.get_push_subscriptions("pk1").await;
         assert_eq!(subs.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_ensure_member_adds_to_empty() {
+        let store = PersistentStore::new(None, 0);
+        store.register_community(CommunityConfig {
+            community_id: "test-cid".into(),
+            name: "Test".into(),
+            genesis_public_key: "00".into(),
+            public_key: "00".into(),
+            secret_key: "00".into(),
+            wrapped_dek: "00".into(),
+            key_derivation: "random".into(),
+            published: false,
+            description: "".into(),
+            owner_pubkey: "pk1".into(),
+            members: vec![],
+            governance: serde_json::json!({}),
+            bounds: None,
+            password_hash: None,
+            join_wrapped_dek: None,
+            used_token_nonces: vec![],
+        }).await;
+
+        store.ensure_member("test-cid", "pkA", "Alice", "contributor").await;
+        let c = store.get_community("test-cid").await.unwrap();
+        assert_eq!(c.members.len(), 1);
+        assert_eq!(c.members[0].pubkey, "pkA");
+        assert_eq!(c.members[0].display_name, "Alice");
+        assert_eq!(c.members[0].role, "contributor");
+    }
+
+    #[tokio::test]
+    async fn test_ensure_member_no_duplicate() {
+        let store = PersistentStore::new(None, 0);
+        store.register_community(CommunityConfig {
+            community_id: "test-cid2".into(),
+            name: "Test2".into(),
+            genesis_public_key: "00".into(),
+            public_key: "00".into(),
+            secret_key: "00".into(),
+            wrapped_dek: "00".into(),
+            key_derivation: "random".into(),
+            published: false,
+            description: "".into(),
+            owner_pubkey: "pk1".into(),
+            members: vec![],
+            governance: serde_json::json!({}),
+            bounds: None,
+            password_hash: None,
+            join_wrapped_dek: None,
+            used_token_nonces: vec![],
+        }).await;
+
+        store.ensure_member("test-cid2", "pkA", "Alice", "contributor").await;
+        store.ensure_member("test-cid2", "pkA", "Alice", "contributor").await;
+        let c = store.get_community("test-cid2").await.unwrap();
+        assert_eq!(c.members.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_ensure_member_nonexistent_community() {
+        let store = PersistentStore::new(None, 0);
+        store.ensure_member("nonexistent", "pkA", "Alice", "contributor").await;
+        let c = store.get_community("nonexistent").await;
+        assert!(c.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_ensure_member_preserves_existing() {
+        let store = PersistentStore::new(None, 0);
+        store.register_community(CommunityConfig {
+            community_id: "test-cid3".into(),
+            name: "Test3".into(),
+            genesis_public_key: "00".into(),
+            public_key: "00".into(),
+            secret_key: "00".into(),
+            wrapped_dek: "00".into(),
+            key_derivation: "random".into(),
+            published: false,
+            description: "".into(),
+            owner_pubkey: "pk1".into(),
+            members: vec![
+                MemberRecord { pubkey: "pkA".into(), display_name: "A".into(), role: "founder".into() },
+                MemberRecord { pubkey: "pkB".into(), display_name: "B".into(), role: "contributor".into() },
+            ],
+            governance: serde_json::json!({}),
+            bounds: None,
+            password_hash: None,
+            join_wrapped_dek: None,
+            used_token_nonces: vec![],
+        }).await;
+
+        store.ensure_member("test-cid3", "pkC", "Charlie", "contributor").await;
+        let c = store.get_community("test-cid3").await.unwrap();
+        assert_eq!(c.members.len(), 3);
+        let pubs: Vec<_> = c.members.iter().map(|m| &m.pubkey).collect();
+        assert!(pubs.contains(&&"pkA".to_string()));
+        assert!(pubs.contains(&&"pkB".to_string()));
+        assert!(pubs.contains(&&"pkC".to_string()));
     }
 }

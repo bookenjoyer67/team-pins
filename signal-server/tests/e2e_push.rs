@@ -282,10 +282,37 @@ fn push_cfg() -> PushConfig {
         enabled: true,
         vapid_private_key_pem: Some(VAPID_TEST_PEM.to_string()),
         vapid_subject: Some("mailto:test@localhost".to_string()),
-        vapid_public_key: Some("test_public_key_base64url".to_string()),
+        vapid_public_key: Some("BBUf53OU0Yb7RcCKxJmK90TF4Whq_t7h5CIrPulhlFp4K7w7SapqRNwSngRCkHS9y3GlnItoLiH4wUmkBRH3-1s".to_string()),
         min_interval_secs: 1,
         batch_max: 50,
     }
+}
+
+#[tokio::test]
+async fn test_push_info_returns_valid_public_key() {
+    let mut config = piggpin_signal::config::Config::default();
+    config.push = push_cfg();
+    let addr = start_server_with_config(config).await;
+
+    let (mut client, _) = join_room(addr, "community-relay").await;
+    let (sk, vk) = make_keypair(171);
+    auth_client(&mut client, &sk, &vk).await;
+    client.drain().await;
+
+    client.send(&serde_json::json!({"type":"push_info"})).await;
+    let resp = client.recv_timeout(Duration::from_secs(3)).await.unwrap();
+
+    assert_eq!(resp["type"], "push_info");
+    assert!(resp["enabled"].as_bool().unwrap_or(false));
+
+    let key = resp["vapid_public_key"].as_str().unwrap();
+    assert!(!key.is_empty(), "public key must not be empty");
+    // Valid base64url: only A-Z a-z 0-9 - _
+    assert!(key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'),
+        "public key must be valid base64url, got: {}", key);
+    // Uncompressed P-256 key: 65 bytes → 87 chars base64 without padding
+    assert!(key.len() >= 85, "base64url-encoded 65-byte key should be ~87 chars, got {}", key.len());
+    drop(client);
 }
 
 async fn setup_community_with_push(
@@ -527,4 +554,75 @@ async fn test_push_stale_endpoint_410() {
     assert_eq!(second_len, first_len, "stale sub cleaned up — no second push");
     drop(client_a);
     drop(mock);
+}
+
+// ── push_info returns disabled when push not configured ──
+
+#[tokio::test]
+async fn test_push_info_disabled_returns_null_key() {
+    let addr = start_server().await;
+
+    let (mut client, _) = join_room(addr, "community-relay").await;
+    let (sk, vk) = make_keypair(101);
+    auth_client(&mut client, &sk, &vk).await;
+    client.drain().await;
+
+    client.send(&serde_json::json!({"type":"push_info"})).await;
+    let resp = client.recv_timeout(Duration::from_secs(3)).await.unwrap();
+
+    assert_eq!(resp["type"], "push_info");
+    assert_eq!(resp["enabled"].as_bool().unwrap_or(true), false);
+    assert!(resp["vapid_public_key"].is_null());
+
+    drop(client);
+}
+
+// ── Auto-add member on join_community ──
+
+#[tokio::test]
+async fn test_auto_add_member_on_join() {
+    let addr = start_server().await;
+
+    // Founder registers a community
+    let (mut founder, _) = join_room(addr, "community-relay").await;
+    let (sk_f, vk_f) = make_keypair(111);
+    let pk_f = auth_client(&mut founder, &sk_f, &vk_f).await;
+    founder.drain().await;
+
+    let cid = "auto-add-cid";
+    let now = piggpin_signal::messages::unix_millis();
+    founder.send(&serde_json::json!({
+        "type":"register_community","community_id":cid,"name":"OpenTest","description":"",
+        "public_key":"00".repeat(32),"wrapped_dek":"00".repeat(32),"key_derivation":"random",
+        "genesis_public_key":"00".repeat(32),"governance":{},
+        "members":[{"pubkey":pk_f,"display_name":"Founder","role":"founder"}]
+    })).await;
+    founder.recv_timeout(Duration::from_secs(3)).await;
+    founder.drain().await;
+
+    // Newcomer joins open community
+    let (mut joiner, _) = join_room(addr, "community-relay").await;
+    let (sk_j, vk_j) = make_keypair(112);
+    auth_client(&mut joiner, &sk_j, &vk_j).await;
+    joiner.drain().await;
+
+    joiner.send(&serde_json::json!({
+        "type":"join_community","community_id":cid,"request_id":"req1"
+    })).await;
+    let resp = joiner.recv_timeout(Duration::from_secs(3)).await.unwrap();
+    assert_eq!(resp["type"], "community_joined");
+    assert_eq!(resp["community_id"], cid);
+
+    // your_membership should be present and not null
+    let membership = resp.get("your_membership");
+    assert!(membership.is_some() && !membership.unwrap().is_null(), "your_membership should be present after auto-add");
+
+    // Members list should contain the joiner
+    let members = resp["members"].as_array().unwrap();
+    let pk_j = hex::encode(vk_j.to_bytes());
+    let found = members.iter().any(|m| m["pubkey"].as_str() == Some(&pk_j));
+    assert!(found, "joiner should appear in members list after auto-add");
+
+    drop(founder);
+    drop(joiner);
 }

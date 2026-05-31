@@ -17,8 +17,10 @@ export function handlePushInfo(msg) {
 }
 
 export async function initPushNotifications() {
+  // Push subscription is triggered by handlePushInfo() when the VAPID
+  // key arrives from the relay after auth. Just check saved state here.
   if (isPushEnabled()) {
-    subscribeToPush();
+    // No-op: actual subscription happens when push_info response arrives
   }
 }
 
@@ -68,22 +70,25 @@ function sendSubToRelay(subscription) {
   const key = subscription.getKey("p256dh");
   const auth = subscription.getKey("auth");
   if (!key || !auth) return;
-  Relay.registerPushSubscription(
+  const sent = Relay.registerPushSubscription(
     subscription.endpoint,
     arrayBufferToBase64(key),
     arrayBufferToBase64(auth)
   );
+  if (!sent) console.warn("[push] relay not connected — subscription not sent");
 }
 
 export async function togglePush() {
-  const on = !isPushEnabled();
-  localStorage.setItem("pins-push-enabled", on ? "true" : "false");
-  if (on) {
-    await subscribeToPush();
-  } else {
+  const wasOn = isPushEnabled();
+  if (wasOn) {
     await unsubscribeFromPush();
+    localStorage.setItem("pins-push-enabled", "false");
+    return false;
+  } else {
+    await subscribeToPush();
+    localStorage.setItem("pins-push-enabled", "true");
+    return true;
   }
-  return on;
 }
 
 function urlBase64ToUint8Array(base64String) {

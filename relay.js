@@ -101,6 +101,11 @@ export function connect(relayUrl) {
     conn.connected = true;
     reconnectAttempts.set(url, 0);
     conn.ws.send(JSON.stringify({ type: "join", room: "community-relay" }));
+    setTimeout(() => {
+      if (conn.ws && conn.ws.readyState === WebSocket.OPEN) {
+        conn.ws.send(JSON.stringify({ type: "push_info" }));
+      }
+    }, 500);
     window._renderUI?.();
     await registerCommunitiesOn(conn);
     requestCommunityListOn(conn);
@@ -203,9 +208,14 @@ export function connect(relayUrl) {
         handleAuthChallenge(conn, msg);
       } else if (msg.type === "auth_ok") {
         conn.authPubkey = msg.pubkey || null;
-        // Request push info from relay
         conn.ws.send(JSON.stringify({ type: "push_info" }));
+        conn._pushInfoTimer = setTimeout(() => {
+          if (window._handlePushInfo) {
+            window._handlePushInfo({ enabled: false, vapid_public_key: null });
+          }
+        }, 10000);
       } else if (msg.type === "push_info") {
+        if (conn._pushInfoTimer) { clearTimeout(conn._pushInfoTimer); delete conn._pushInfoTimer; }
         if (window._handlePushInfo) window._handlePushInfo(msg);
       } else if (msg.type === "member_added") {
         handleMemberAdded(msg);

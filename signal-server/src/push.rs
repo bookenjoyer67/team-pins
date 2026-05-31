@@ -16,6 +16,11 @@ use crate::state::AppState;
 static CLIENT: OnceLock<HyperWebPushClient> = OnceLock::new();
 static DEBOUNCER: OnceLock<RwLock<HashMap<String, u64>>> = OnceLock::new();
 
+fn is_stale_push_error(e: &web_push::WebPushError) -> bool {
+    let s = e.to_string();
+    s.contains("endpoint not valid") || s.contains("endpoint not found") || s.contains("410") || s.contains("Gone")
+}
+
 pub fn init(config: &PushConfig) -> Result<(), String> {
     if !config.enabled {
         return Ok(());
@@ -23,6 +28,10 @@ pub fn init(config: &PushConfig) -> Result<(), String> {
     if config.vapid_private_key_pem.is_none() || config.vapid_subject.is_none() {
         return Err("push enabled but vapid_private_key_pem or vapid_subject not set".into());
     }
+    let pem_bytes = config.vapid_private_key_pem.as_ref().unwrap().as_bytes();
+    let dummy = SubscriptionInfo::new("https://example.com", "test", "test");
+    let _ = VapidSignatureBuilder::from_pem(pem_bytes, &dummy)
+        .map_err(|e| format!("invalid VAPID private key: {}", e))?;
     let client = HyperWebPushClient::new();
     CLIENT.set(client).map_err(|_| "push already initialized".to_string())?;
     DEBOUNCER.set(RwLock::new(HashMap::new())).ok();
@@ -52,9 +61,54 @@ fn base64url_encode_bytes(bytes: &[u8]) -> String {
     out
 }
 
+#[cfg(test)]
+fn base64url_decode(s: &str) -> Vec<u8> {
+    let mut s = s.to_string();
+    // Add padding
+    while s.len() % 4 != 0 { s.push('='); }
+    // URL-safe to standard
+    let s = s.replace('-', "+").replace('_', "/");
+    // Decode each char
+    const TABLE: [i8; 128] = {
+        let mut t = [-1i8; 128];
+        let b64 = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut i = 0u8;
+        while i < 64 { t[b64[i as usize] as usize] = i as i8; i += 1; }
+        t
+    };
+    let mut out = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'=' { break; }
+        let b0 = TABLE[bytes[i] as usize]; i += 1;
+        if b0 < 0 || i >= bytes.len() { break; }
+        let b1 = TABLE[bytes[i] as usize]; i += 1;
+        if b1 < 0 { break; }
+        out.push(((b0 as u8) << 2) | ((b1 as u8) >> 4));
+        if i < bytes.len() && bytes[i] != b'=' {
+            let b2 = TABLE[bytes[i] as usize]; i += 1;
+            if b2 < 0 { break; }
+            out.push(((b1 as u8) << 4) | ((b2 as u8) >> 2));
+            if i < bytes.len() && bytes[i] != b'=' {
+                let b3 = TABLE[bytes[i] as usize]; i += 1;
+                if b3 < 0 { break; }
+                out.push(((b2 as u8) << 6) | (b3 as u8));
+            }
+        }
+    }
+    out
+}
+
 /// Ensure VAPID keys exist. If not configured, auto-generate and save.
 /// Sets config.vapid_private_key_pem and config.vapid_public_key in-place.
 pub async fn ensure_vapid_keys(config: &mut PushConfig) -> Result<(), String> {
+    ensure_vapid_keys_at(config, std::path::Path::new("vapid_keys.json")).await
+}
+
+/// Same as ensure_vapid_keys but with custom file path (for testing).
+pub async fn ensure_vapid_keys_at(config: &mut PushConfig, path: impl AsRef<std::path::Path>) -> Result<(), String> {
+    let path = path.as_ref();
     if !config.enabled { return Ok(()); }
 
     // Already configured — nothing to do
@@ -62,8 +116,7 @@ pub async fn ensure_vapid_keys(config: &mut PushConfig) -> Result<(), String> {
         return Ok(());
     }
 
-    // Try to load from vapid_keys.json
-    let path = std::path::Path::new("vapid_keys.json");
+    // Try to load from file
     if let Ok(data) = std::fs::read_to_string(path) {
         if let Ok(stored) = serde_json::from_str::<serde_json::Value>(&data) {
             if let (Some(pem), Some(pubkey)) = (
@@ -85,8 +138,9 @@ pub async fn ensure_vapid_keys(config: &mut PushConfig) -> Result<(), String> {
     let secret = SecretKey::random(&mut OsRng);
     let public = secret.public_key();
 
-    // Get public key bytes via EncodedPoint
-    let point = p256::EncodedPoint::from(&public);
+    // Get public key bytes (uncompressed — 65 bytes, 0x04 || x || y)
+    use p256::elliptic_curve::sec1::ToEncodedPoint;
+    let point = public.to_encoded_point(false); // false = uncompressed
     let pubkey_str = base64url_encode_bytes(point.as_bytes());
 
     // Encode private key as PKCS#8 PEM
@@ -235,7 +289,7 @@ pub async fn send_push_to_offline_members(
                     debouncer.insert(member.pubkey.clone(), now);
                     info!("[push] sent to {} ({}), total sent: {}", &member.pubkey[..usize::min(16, member.pubkey.len())], &sub.endpoint[..usize::min(40, sub.endpoint.len())], sent);
                 }
-                Err(ref e) if e.to_string().contains("410") || e.to_string().contains("Gone") => {
+                Err(ref e) if is_stale_push_error(e) => {
                     warn!("[push] stale endpoint (410): {}", &sub.endpoint[..usize::min(40, sub.endpoint.len())]);
                     state.store.remove_stale_subscription(&sub.endpoint).await;
                 }
@@ -313,7 +367,7 @@ pub async fn notify_single_member(
             Ok(_) => {
                 info!("[push] notify sent to {}", &sub.endpoint[..usize::min(40, sub.endpoint.len())]);
             }
-            Err(ref e) if e.to_string().contains("410") || e.to_string().contains("Gone") => {
+            Err(ref e) if is_stale_push_error(e) => {
                 warn!("[push] notify stale (410): {}", &sub.endpoint[..usize::min(40, sub.endpoint.len())]);
                 state.store.remove_stale_subscription(&sub.endpoint).await;
             }
@@ -321,5 +375,65 @@ pub async fn notify_single_member(
                 warn!("[push] notify failed: {}", e);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_base64url_encode_roundtrip() {
+        let input: Vec<u8> = (0u8..=64).collect(); // 0x00 to 0x40 (65 bytes like uncompressed point)
+        let encoded = base64url_encode_bytes(&input);
+        let decoded = base64url_decode(&encoded);
+        assert_eq!(decoded, input, "base64url encode → decode should roundtrip");
+    }
+
+    #[test]
+    fn test_base64url_encode_no_padding() {
+        // 65 bytes encodes to 87 chars, no padding needed for URL-safe
+        let data = vec![0xFFu8; 65];
+        let enc = base64url_encode_bytes(&data);
+        assert!(!enc.contains('='), "URL-safe base64 should have no padding");
+    }
+
+    #[tokio::test]
+    async fn test_auto_keygen_produces_uncompressed_public_key() {
+        let mut config = PushConfig::default();
+        config.enabled = true;
+        config.vapid_subject = Some("mailto:test@localhost".into());
+        let tmp = std::env::temp_dir().join("test_vapid_keys_push.json");
+        let _ = std::fs::remove_file(&tmp);
+
+        ensure_vapid_keys_at(&mut config, &tmp).await.unwrap();
+
+        let data = std::fs::read_to_string(&tmp).unwrap();
+        let stored: serde_json::Value = serde_json::from_str(&data).unwrap();
+        let pubkey_b64 = stored["public_key"].as_str().unwrap();
+        let bytes = base64url_decode(pubkey_b64);
+
+        assert_eq!(bytes.len(), 65, "uncompressed P-256 public key must be 65 bytes, got {}", bytes.len());
+        assert_eq!(bytes[0], 0x04, "first byte must be 0x04 (uncompressed EC point), got 0x{:02x}", bytes[0]);
+
+        // Also verify the PEM can be loaded
+        let pem = config.vapid_private_key_pem.as_ref().unwrap();
+        assert!(pem.starts_with("-----BEGIN PRIVATE KEY-----"), "PEM header wrong");
+        assert!(pem.contains("-----END PRIVATE KEY-----"), "PEM footer missing");
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[tokio::test]
+    async fn test_auto_keygen_skip_if_already_configured() {
+        let mut config = PushConfig::default();
+        config.enabled = true;
+        config.vapid_private_key_pem = Some("existing".into());
+        config.vapid_public_key = Some("existing".into());
+
+        let tmp = std::env::temp_dir().join("test_skip_keys.json");
+        ensure_vapid_keys_at(&mut config, &tmp).await.unwrap();
+        assert_eq!(config.vapid_private_key_pem.as_deref(), Some("existing"));
+        assert_eq!(config.vapid_public_key.as_deref(), Some("existing"));
     }
 }
