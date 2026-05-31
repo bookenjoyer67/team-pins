@@ -53,6 +53,7 @@ window._isEmbed = isEmbed;
 if ("serviceWorker" in navigator) {
   let swRefreshing = false;
   navigator.serviceWorker.register("/sw.js").then(reg => {
+    window._swReg = reg;
     console.log("[pwa] SW registered, scope:", reg.scope);
     reg.addEventListener("updatefound", () => {
       const installing = reg.installing;
@@ -83,6 +84,17 @@ if ("serviceWorker" in navigator) {
   }).catch(err => {
     console.warn("[pwa] SW unavailable — expected on dev HTTP:", err.message);
   });
+
+  window._checkForUpdates = async () => {
+    if (!navigator.onLine) { toast(t("updateNoConnection") || "No connection", "#f97316"); return; }
+    if (!window._swReg) { toast(t("updateNotInstalled") || "Not installed as PWA", "#9ca3af"); return; }
+    toast(t("updateChecking") || "Checking for updates…", "#2563eb");
+    try {
+      await window._swReg.update();
+    } catch (_) {
+      toast(t("updateFailed") || "Update check failed", "#dc2626");
+    }
+  };
 }
 
 function updateOfflineBar() {

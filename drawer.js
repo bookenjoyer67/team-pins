@@ -77,6 +77,7 @@ const SECTIONS = [
       { id: "language", icon: "🌐", label: "Language", action: showLangChooser },
       { id: "github", icon: "🐙", label: "GitHub", action: () => window.open("https://github.com/bookenjoyer67/team-pins", "_blank") },
       { id: "donate", icon: "💸", label: "Donate", action: showDonateModal },
+      { id: "update", icon: "↻", label: "Check Updates", action: () => window._checkForUpdates?.() },
     ],
   },
 ];
