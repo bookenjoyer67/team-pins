@@ -687,6 +687,19 @@ wasmReady.then(async () => {
       }
     } catch (e) { console.error("relay join error:", e); toast("Relay join failed: " + (e.message || "unknown"), "#dc2626"); }
   }
+
+  // Handle PWA app shortcut actions
+  const action = new URLSearchParams(window.location.search).get("action");
+  if (action === "maps") {
+    setTimeout(() => Map.showSetsModal(), 600);
+  } else if (action === "new") {
+    setTimeout(() => {
+      const name = prompt(t("newMapPrompt") || "New map name:")?.trim();
+      if (name) Map.createSet(name);
+    }, 600);
+  } else if (action === "join") {
+    setTimeout(() => window._showJoinModal?.(), 600);
+  }
 }).catch(err => {
   document.getElementById("app-loader")?.remove();
   document.getElementById("map-container").innerHTML =
