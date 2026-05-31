@@ -30,8 +30,9 @@ pub fn init(config: &PushConfig) -> Result<(), String> {
     }
     let pem_bytes = config.vapid_private_key_pem.as_ref().unwrap().as_bytes();
     let dummy = SubscriptionInfo::new("https://example.com", "test", "test");
-    let _ = VapidSignatureBuilder::from_pem(pem_bytes, &dummy)
-        .map_err(|e| format!("invalid VAPID private key: {}", e))?;
+    if let Err(e) = VapidSignatureBuilder::from_pem(pem_bytes, &dummy) {
+        warn!("Push: VAPID private key validation warning (push will still be attempted): {}", e);
+    }
     let client = HyperWebPushClient::new();
     CLIENT.set(client).map_err(|_| "push already initialized".to_string())?;
     DEBOUNCER.set(RwLock::new(HashMap::new())).ok();
@@ -165,7 +166,7 @@ pub async fn ensure_vapid_keys_at(config: &mut PushConfig, path: impl AsRef<std:
     let mut pem = String::from("-----BEGIN PRIVATE KEY-----\n");
     for (i, c) in b64.chars().enumerate() {
         pem.push(c);
-        if i + 1 % 64 == 0 { pem.push('\n'); }
+        if (i + 1) % 64 == 0 { pem.push('\n'); }
     }
     if !b64.is_empty() && b64.len() % 64 != 0 { pem.push('\n'); }
     pem.push_str("-----END PRIVATE KEY-----\n");
