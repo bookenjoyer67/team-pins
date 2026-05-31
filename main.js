@@ -769,7 +769,7 @@ async function joinCommunityFromInvite({
           myWrappedDek = wrap_dek(dkBytes, public_key);
           import("./relay.js").then(r => {
             r.rewrapMemberDek(sid, public_key, myWrappedDek);
-          }).catch(() => {});
+      }).catch(() => { toast(t("searchUnavailableOffline") || "Search unavailable", "#dc2626"); });
         }
       } catch (e) {
         console.warn(logTag, "bootstrap DEK unwrap failed:", e.message);
