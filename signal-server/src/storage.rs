@@ -127,6 +127,14 @@ pub struct LayerSubscription {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PushSubscription {
+    pub endpoint: String,
+    pub p256dh: String,
+    pub auth: String,
+    pub created_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct SnapshotData {
     pub communities: Vec<CommunityConfig>,
     pub pins: HashMap<String, Vec<StoredPin>>,
@@ -139,6 +147,7 @@ struct SnapshotData {
     pub layer_subscriptions: HashMap<String, Vec<LayerSubscription>>,
     pub member_deks: HashMap<String, HashMap<String, MemberDek>>,
     pub pending_dek_requests: HashMap<String, Vec<String>>,
+    pub push_subscriptions: HashMap<String, Vec<PushSubscription>>,
 }
 
 #[derive(Debug)]
@@ -154,6 +163,7 @@ pub struct PersistentStore {
     pub layer_subscriptions: RwLock<HashMap<String, Vec<LayerSubscription>>>,
     pub member_deks: RwLock<HashMap<String, HashMap<String, MemberDek>>>,
     pub pending_dek_requests: RwLock<HashMap<String, Vec<String>>>,
+    pub push_subscriptions: RwLock<HashMap<String, Vec<PushSubscription>>>,
     snapshot_path: Option<PathBuf>,
     dirty: std::sync::atomic::AtomicBool,
     max_pins_per_community: usize,
@@ -187,6 +197,7 @@ impl PersistentStore {
                             layer_subscriptions: RwLock::new(snap.layer_subscriptions),
                             member_deks: RwLock::new(snap.member_deks),
                             pending_dek_requests: RwLock::new(snap.pending_dek_requests),
+                            push_subscriptions: RwLock::new(snap.push_subscriptions),
                             snapshot_path,
                             dirty: std::sync::atomic::AtomicBool::new(false),
                             max_pins_per_community,
@@ -199,7 +210,7 @@ impl PersistentStore {
                 }
             }
         }
-        Self { communities: RwLock::new(HashMap::new()), pins: RwLock::new(HashMap::new()), annotations: RwLock::new(HashMap::new()), drawings: RwLock::new(HashMap::new()), tombstones: RwLock::new(HashMap::new()), votes: RwLock::new(HashMap::new()), tokens: RwLock::new(HashMap::new()), public_layers: RwLock::new(HashMap::new()), layer_subscriptions: RwLock::new(HashMap::new()), member_deks: RwLock::new(HashMap::new()), pending_dek_requests: RwLock::new(HashMap::new()), snapshot_path, dirty: std::sync::atomic::AtomicBool::new(false), max_pins_per_community }
+        Self { communities: RwLock::new(HashMap::new()), pins: RwLock::new(HashMap::new()), annotations: RwLock::new(HashMap::new()), drawings: RwLock::new(HashMap::new()), tombstones: RwLock::new(HashMap::new()), votes: RwLock::new(HashMap::new()), tokens: RwLock::new(HashMap::new()), public_layers: RwLock::new(HashMap::new()), layer_subscriptions: RwLock::new(HashMap::new()), member_deks: RwLock::new(HashMap::new()), pending_dek_requests: RwLock::new(HashMap::new()), push_subscriptions: RwLock::new(HashMap::new()), snapshot_path, dirty: std::sync::atomic::AtomicBool::new(false), max_pins_per_community }
     }
 
     pub async fn save_snapshot(&self) {
@@ -219,6 +230,7 @@ impl PersistentStore {
             let layer_subscriptions = self.layer_subscriptions.read().await.clone();
             let member_deks = self.member_deks.read().await.clone();
             let pending_dek_requests = self.pending_dek_requests.read().await.clone();
+            let push_subscriptions = self.push_subscriptions.read().await.clone();
             let snap = SnapshotData {
                 communities,
                 pins,
@@ -231,6 +243,7 @@ impl PersistentStore {
                 layer_subscriptions,
                 member_deks,
                 pending_dek_requests,
+                push_subscriptions,
             };
             if let Ok(json) = serde_json::to_string_pretty(&snap) {
                 let tmp = path.with_file_name(
@@ -798,5 +811,162 @@ impl PersistentStore {
             map.remove(member_pubkey);
         }
         self.mark_dirty();
+    }
+
+    // ── Push notification subscriptions ──
+
+    pub async fn add_push_subscription(&self, pubkey: &str, sub: PushSubscription) {
+        let mut subs = self.push_subscriptions.write().await;
+        subs.entry(pubkey.to_string()).or_default().push(sub);
+        self.mark_dirty();
+    }
+
+    pub async fn remove_push_subscription(&self, pubkey: &str, endpoint: &str) {
+        let mut subs = self.push_subscriptions.write().await;
+        if let Some(list) = subs.get_mut(pubkey) {
+            let len_before = list.len();
+            list.retain(|s| s.endpoint != endpoint);
+            if list.len() != len_before { self.mark_dirty(); }
+            if list.is_empty() { subs.remove(pubkey); }
+        }
+    }
+
+    pub async fn get_push_subscriptions(&self, pubkey: &str) -> Vec<PushSubscription> {
+        self.push_subscriptions.read().await
+            .get(pubkey)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    pub async fn remove_stale_subscription(&self, endpoint: &str) {
+        let mut subs = self.push_subscriptions.write().await;
+        let mut dirty = false;
+        subs.retain(|_pk, list| {
+            let old = list.len();
+            list.retain(|s| s.endpoint != endpoint);
+            if list.len() != old { dirty = true; }
+            !list.is_empty()
+        });
+        if dirty { self.mark_dirty(); }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sub(url: &str) -> PushSubscription {
+        PushSubscription {
+            endpoint: url.to_string(),
+            p256dh: "p256dh_key".into(),
+            auth: "auth_secret".into(),
+            created_at: 1,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_push_sub_add_and_get() {
+        let store = PersistentStore::new(None, 0);
+        store.add_push_subscription("pk1", sub("https://fcm.com/1")).await;
+        let subs = store.get_push_subscriptions("pk1").await;
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].endpoint, "https://fcm.com/1");
+    }
+
+    #[tokio::test]
+    async fn test_push_sub_multiple_per_pubkey() {
+        let store = PersistentStore::new(None, 0);
+        store.add_push_subscription("pk1", sub("https://fcm.com/1")).await;
+        store.add_push_subscription("pk1", sub("https://fcm.com/2")).await;
+        store.add_push_subscription("pk1", sub("https://fcm.com/3")).await;
+        assert_eq!(store.get_push_subscriptions("pk1").await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_push_sub_remove_by_endpoint() {
+        let store = PersistentStore::new(None, 0);
+        store.add_push_subscription("pk1", sub("https://fcm.com/1")).await;
+        store.add_push_subscription("pk1", sub("https://fcm.com/2")).await;
+        store.remove_push_subscription("pk1", "https://fcm.com/1").await;
+        let subs = store.get_push_subscriptions("pk1").await;
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].endpoint, "https://fcm.com/2");
+    }
+
+    #[tokio::test]
+    async fn test_push_sub_remove_nonexistent() {
+        let store = PersistentStore::new(None, 0);
+        store.add_push_subscription("pk1", sub("https://fcm.com/1")).await;
+        store.remove_push_subscription("pk1", "https://fcm.com/nope").await;
+        assert_eq!(store.get_push_subscriptions("pk1").await.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_push_sub_stale_cleanup() {
+        let store = PersistentStore::new(None, 0);
+        store.add_push_subscription("pk1", sub("https://fcm.com/1")).await;
+        store.add_push_subscription("pk2", sub("https://fcm.com/1")).await;
+        store.remove_stale_subscription("https://fcm.com/1").await;
+        assert!(store.get_push_subscriptions("pk1").await.is_empty());
+        assert!(store.get_push_subscriptions("pk2").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_push_sub_pubkey_isolation() {
+        let store = PersistentStore::new(None, 0);
+        store.add_push_subscription("pk_a", sub("https://fcm.com/a")).await;
+        store.add_push_subscription("pk_b", sub("https://fcm.com/b")).await;
+        let a_subs = store.get_push_subscriptions("pk_a").await;
+        let b_subs = store.get_push_subscriptions("pk_b").await;
+        assert_eq!(a_subs.len(), 1);
+        assert_eq!(b_subs.len(), 1);
+        assert_eq!(a_subs[0].endpoint, "https://fcm.com/a");
+        assert_eq!(b_subs[0].endpoint, "https://fcm.com/b");
+    }
+
+    #[tokio::test]
+    async fn test_push_snapshot_roundtrip() {
+        let store = PersistentStore::new(None, 0);
+        store.add_push_subscription("pk1", sub("https://fcm.com/1")).await;
+        store.add_push_subscription("pk1", sub("https://fcm.com/2")).await;
+
+        let subs_clone = store.push_subscriptions.read().await.clone();
+        let snap = SnapshotData {
+            communities: vec![],
+            pins: HashMap::new(),
+            annotations: HashMap::new(),
+            drawings: HashMap::new(),
+            tombstones: HashMap::new(),
+            votes: HashMap::new(),
+            tokens: HashMap::new(),
+            public_layers: HashMap::new(),
+            layer_subscriptions: HashMap::new(),
+            member_deks: HashMap::new(),
+            pending_dek_requests: HashMap::new(),
+            push_subscriptions: subs_clone,
+        };
+        let json = serde_json::to_string(&snap).unwrap();
+
+        let snap2: SnapshotData = serde_json::from_str(&json).unwrap();
+        let restored = PersistentStore {
+            communities: RwLock::new(HashMap::new()),
+            pins: RwLock::new(HashMap::new()),
+            annotations: RwLock::new(HashMap::new()),
+            drawings: RwLock::new(HashMap::new()),
+            tombstones: RwLock::new(HashMap::new()),
+            votes: RwLock::new(HashMap::new()),
+            tokens: RwLock::new(HashMap::new()),
+            public_layers: RwLock::new(HashMap::new()),
+            layer_subscriptions: RwLock::new(HashMap::new()),
+            member_deks: RwLock::new(HashMap::new()),
+            pending_dek_requests: RwLock::new(HashMap::new()),
+            push_subscriptions: RwLock::new(snap2.push_subscriptions),
+            snapshot_path: None,
+            dirty: std::sync::atomic::AtomicBool::new(false),
+            max_pins_per_community: 0,
+        };
+
+        let subs = restored.get_push_subscriptions("pk1").await;
+        assert_eq!(subs.len(), 2);
     }
 }

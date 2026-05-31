@@ -1,5 +1,5 @@
-const PRECACHE_URLS = ["/assets/db-B1yNvOyE.js","/assets/dialogs-C8pXuQ48.js","/assets/e2e_core-D_9vyewO.js","/assets/e2e_core-DlIKFwdC.js","/assets/e2e_core_bg-B1xls2O6.wasm","/assets/gossip-DLRLzjZC.js","/assets/index-CNh5uWQ-.css","/assets/index-haCEUbDs.js","/assets/map-DVGrs5b1.js","/assets/media-worker-DCXgtr1S.js","/assets/relay-BACxq_kz.js","/assets/rolldown-runtime-S-ySWqyJ.js","/assets/state-CgoyYCYF.js","/assets/video-compress-7-wl32Fj.js","/bgm.mp3","/globe.svg","/icon-192.png","/icon-512.png","/index.html","/leaflet/MarkerCluster.Default.css","/leaflet/MarkerCluster.css","/leaflet/images/layers-2x.png","/leaflet/images/layers.png","/leaflet/images/marker-icon-2x.png","/leaflet/images/marker-icon.png","/leaflet/images/marker-shadow.png","/leaflet/images/spritesheet-2x.png","/leaflet/images/spritesheet.png","/leaflet/images/spritesheet.svg","/leaflet/leaflet.css","/leaflet/leaflet.draw.css","/leaflet/leaflet.draw.js","/leaflet/leaflet.js","/leaflet/leaflet.markercluster.js","/manifest.json"];
-const APP_CACHE = "pins-app-53c81e7f";
+const PRECACHE_URLS = ["/assets/db-B1yNvOyE.js","/assets/dialogs-CSMdGtQ6.js","/assets/e2e_core-D_9vyewO.js","/assets/e2e_core-DlIKFwdC.js","/assets/e2e_core_bg-B1xls2O6.wasm","/assets/gossip-DLRLzjZC.js","/assets/index-CNh5uWQ-.css","/assets/index-DnQCcrNi.js","/assets/map-BaIhF1l6.js","/assets/media-worker-DCXgtr1S.js","/assets/relay-CRNUPM-b.js","/assets/rolldown-runtime-S-ySWqyJ.js","/assets/state-CgoyYCYF.js","/assets/video-compress-7-wl32Fj.js","/bgm.mp3","/globe.svg","/icon-192.png","/icon-512.png","/index.html","/leaflet/MarkerCluster.Default.css","/leaflet/MarkerCluster.css","/leaflet/images/layers-2x.png","/leaflet/images/layers.png","/leaflet/images/marker-icon-2x.png","/leaflet/images/marker-icon.png","/leaflet/images/marker-shadow.png","/leaflet/images/spritesheet-2x.png","/leaflet/images/spritesheet.png","/leaflet/images/spritesheet.svg","/leaflet/leaflet.css","/leaflet/leaflet.draw.css","/leaflet/leaflet.draw.js","/leaflet/leaflet.js","/leaflet/leaflet.markercluster.js","/manifest.json"];
+const APP_CACHE = "pins-app-67d582ff";
 const TILE_CACHE = "pins-tiles-__VERSION__";
 const TILE_MAX = 200;
 
@@ -30,6 +30,32 @@ self.addEventListener("activate", (e) => {
           .map((k) => caches.delete(k))
       )
     ).then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener("push", (e) => {
+  let data = {};
+  try { data = e.data?.json() || {}; } catch (_) {}
+  const options = {
+    body: data.body || "",
+    icon: data.icon || "/icon-192.png",
+    badge: "/icon-192.png",
+    tag: data.tag || "piggpin-default",
+    data: { url: data.url || "/" },
+  };
+  e.waitUntil(self.registration.showNotification(data.title || "piggPin", options));
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = e.notification.data?.url || "/";
+  e.waitUntil(
+    clients.matchAll({ type: "window" }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url.includes(url) && "focus" in client) return client.focus();
+      }
+      if (clients.openWindow) return clients.openWindow(url);
+    })
   );
 });
 

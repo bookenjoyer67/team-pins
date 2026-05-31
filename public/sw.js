@@ -33,6 +33,32 @@ self.addEventListener("activate", (e) => {
   );
 });
 
+self.addEventListener("push", (e) => {
+  let data = {};
+  try { data = e.data?.json() || {}; } catch (_) {}
+  const options = {
+    body: data.body || "",
+    icon: data.icon || "/icon-192.png",
+    badge: "/icon-192.png",
+    tag: data.tag || "piggpin-default",
+    data: { url: data.url || "/" },
+  };
+  e.waitUntil(self.registration.showNotification(data.title || "piggPin", options));
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = e.notification.data?.url || "/";
+  e.waitUntil(
+    clients.matchAll({ type: "window" }).then((windowClients) => {
+      for (const client of windowClients) {
+        if (client.url.includes(url) && "focus" in client) return client.focus();
+      }
+      if (clients.openWindow) return clients.openWindow(url);
+    })
+  );
+});
+
 function isTileHost(hostname) {
   return hostname === "tile.openstreetmap.org"
     || hostname.endsWith(".tile.openstreetmap.org")

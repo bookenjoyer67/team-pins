@@ -64,8 +64,15 @@ async fn main() {
         _ => { /* run server */ }
     }
 
-    let config = load_config();
+    let mut config = load_config();
     print_startup_banner(&config);
+
+    if let Err(e) = piggpin_signal::push::ensure_vapid_keys(&mut config.push).await {
+        tracing::warn!("Push: {}", e);
+    }
+    if let Err(e) = piggpin_signal::push::init(&config.push) {
+        tracing::warn!("Push: {}", e);
+    }
     let max_conn = config.server.max_connections.max(1);
     let state = Arc::new(AppState {
         rooms: DashMap::new(),
@@ -379,6 +386,13 @@ fn print_startup_banner(cfg: &Config) {
     info!("  Share: port={} max={} ttl={}s", cfg.share.share_http_port, cfg.share.max_shares, cfg.share.share_ttl_secs);
     if cfg.server.tls_cert.is_some() && cfg.server.tls_key.is_some() {
         info!("  TLS: enabled");
+    }
+    if cfg.push.enabled {
+        info!("  Push: enabled (subject: {}, interval: {}s, max/batch: {})",
+            cfg.push.vapid_subject.as_deref().unwrap_or("unset"),
+            cfg.push.min_interval_secs,
+            cfg.push.batch_max,
+        );
     }
 }
 

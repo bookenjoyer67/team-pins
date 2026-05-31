@@ -203,6 +203,10 @@ export function connect(relayUrl) {
         handleAuthChallenge(conn, msg);
       } else if (msg.type === "auth_ok") {
         conn.authPubkey = msg.pubkey || null;
+        // Request push info from relay
+        conn.ws.send(JSON.stringify({ type: "push_info" }));
+      } else if (msg.type === "push_info") {
+        if (window._handlePushInfo) window._handlePushInfo(msg);
       } else if (msg.type === "member_added") {
         handleMemberAdded(msg);
       } else if (msg.type === "member_removed") {
@@ -1109,12 +1113,29 @@ async function handleLayerSubscribed(msg) {
     await DB.importPins((msg.pins || []).map(p => ({ ...p, team_id: communityId })));
     await DB.importDrawings((msg.drawings || []).map(d => ({ ...d, team_id: communityId })));
 
+    } catch (_) {}
     window._loadSubscribedPins?.();
     window._renderUI?.();
-  } catch (e) {
-    console.error("[relay] layer subscribe failed:", e.message);
-    window._toast?.("Layer subscription failed", "#dc2626");
-  }
+}
+
+export function registerPushSubscription(endpoint, p256dh, auth) {
+  const conn = getConn();
+  if (!conn || !isAlive(conn)) return false;
+  conn.ws.send(JSON.stringify({
+    type: "register_push_subscription",
+    endpoint, p256dh, auth
+  }));
+  return true;
+}
+
+export function unregisterPushSubscription(endpoint) {
+  const conn = getConn();
+  if (!conn || !isAlive(conn)) return false;
+  conn.ws.send(JSON.stringify({
+    type: "unregister_push_subscription",
+    endpoint
+  }));
+  return true;
 }
 
 async function handleLayerUpdate(msg) {

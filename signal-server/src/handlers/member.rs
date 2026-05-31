@@ -33,6 +33,14 @@ pub async fn handle_add_member(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
             let member_msg = messages::json_member_added(cid_val, member_pubkey, display_name, role);
             ctx.room.broadcast_guaranteed(&member_msg, ctx.cid, 2000).await;
             ctx.room.send_to_guaranteed(&member_msg, ctx.cid, 2000).await;
+            // Push notify the new member
+            if ctx.state.config.push.enabled {
+                let body = format!("You've been added to {}", display_name);
+                crate::push::notify_single_member(
+                    ctx.state, member_pubkey,
+                    "piggPin", &body, "piggpin-addmember", "/"
+                ).await;
+            }
         }
         Err(e) => { ctx.room.send_to(&messages::json_err(e), ctx.cid); }
     }
@@ -62,6 +70,14 @@ pub async fn handle_remove_member(ctx: &HandlerContext<'_>, v: &serde_json::Valu
             let msg = messages::json_member_removed(cid_val, target_pubkey);
             ctx.room.broadcast_guaranteed(&msg, ctx.cid, 2000).await;
             ctx.room.send_to_guaranteed(&msg, ctx.cid, 2000).await;
+            // Push notify the removed member
+            if ctx.state.config.push.enabled {
+                crate::push::notify_single_member(
+                    ctx.state, target_pubkey,
+                    "piggPin", "You've been removed from a map",
+                    "piggpin-removemember", "/"
+                ).await;
+            }
         }
         Err(e) => { ctx.room.send_to(&messages::json_err(e), ctx.cid); }
     }

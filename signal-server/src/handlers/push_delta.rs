@@ -348,4 +348,24 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
     } else {
         ctx.room.broadcast_guaranteed(&broadcast.to_string(), ctx.cid, 2000).await;
     }
+
+    // Push notify offline members
+    if ctx.state.config.push.enabled {
+        if let Some(ref c) = c_opt {
+            let total = pin_count + dwg_count + ann_count;
+            if total > 0 {
+                let body = if total == 1 {
+                    format!("New update in {}", c.name)
+                } else {
+                    format!("{} new updates in {}", total, c.name)
+                };
+                let tag = format!("piggpin-delta-{}", community_id);
+                let url = format!("/?action=map&cid={}", community_id);
+                crate::push::send_push_to_offline_members(
+                    ctx.state, ctx.room, &community_id,
+                    &c.name, &body, &tag, &url,
+                ).await;
+            }
+        }
+    }
 }

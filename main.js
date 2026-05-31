@@ -15,6 +15,7 @@ import * as Map from "./map.js";
 import { init as initDrawer, initSliders as initDrawerSliders } from "./drawer.js";
 import * as Sync from "./sync.js";
 import * as Relay from "./relay.js";
+import { initPushNotifications, togglePush, isPushEnabled, handlePushInfo } from "./push-sub.js";
 import { clearDiscoveryCache } from "./gossip.js";
 let Mesh = null;
 const votedPins = {};
@@ -379,7 +380,10 @@ wasmReady.then(async () => {
     state.peers.set("known_" + kp.user_id, { name: kp.display_name, setId: null, userId: kp.user_id, offline: true });
   }
 
+  window._handlePushInfo = handlePushInfo;
+
   await Relay.connectAll();
+  await initPushNotifications();
 
   const hasPendingJoin = window.location.hash.startsWith("#community=")
     || window.location.hash.startsWith("#map=")
@@ -863,6 +867,8 @@ function wireGlobals() {
   window._toggleSound = toggleSound;
   window._isSoundEnabled = () => { try { return isSoundEnabled(); } catch (_) { return false; } };
   window._toggleTheme = toggleTheme;
+  window._togglePush = togglePush;
+  window._isPushEnabled = isPushEnabled;
   window._loadPins = Map.loadPins;
   window._loadDrawings = Map.loadDrawings;
   window._loadSetList = Map.loadSetList;

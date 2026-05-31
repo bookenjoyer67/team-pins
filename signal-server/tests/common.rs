@@ -59,14 +59,23 @@ impl TestClient {
 /// Start a signal server on random ports with in-memory storage.
 /// Spawns background tasks and accept loops. Returns the WS address.
 pub async fn start_server() -> SocketAddr {
-    start_server_with_max_conn(100).await
+    start_server_with_config(Config::default()).await
 }
 
 /// Start a server with a specific connection limit.
 pub async fn start_server_with_max_conn(max_conn: usize) -> SocketAddr {
+    let mut config = Config::default();
+    config.server.max_connections = max_conn;
+    start_server_with_config(config).await
+}
+
+/// Start a server with a custom Config.
+pub async fn start_server_with_config(config: Config) -> SocketAddr {
     let _ = tracing_subscriber::fmt().try_init();
 
-    let config = Config::default();
+    let max_conn = config.server.max_connections.max(1);
+    let _ = piggpin_signal::push::init(&config.push);
+
     let state = Arc::new(AppState {
         rooms: DashMap::new(),
         shares: Mutex::new(piggpin_signal::share::ShareStore::new(
@@ -286,4 +295,82 @@ async fn run_accept_loop(
     });
 
     let _ = tokio::join!(main_handle, http_handle);
+}
+
+// ── Mock push server for testing push notification dispatch ──
+
+use std::sync::atomic::{AtomicU16, Ordering as AtomicOrdering};
+
+pub struct CapturedPush {
+    pub path: String,
+    pub body: Vec<u8>,
+}
+
+pub struct MockPushServer {
+    pub addr: std::net::SocketAddr,
+    pub captured: Arc<Mutex<Vec<CapturedPush>>>,
+    pub status: Arc<AtomicU16>,
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for MockPushServer {
+    fn drop(&mut self) {
+        if let Some(h) = self.handle.take() {
+            h.abort();
+        }
+    }
+}
+
+pub async fn start_mock_push(status: u16) -> MockPushServer {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let captured: Arc<Mutex<Vec<CapturedPush>>> = Arc::new(Mutex::new(Vec::new()));
+    let status = Arc::new(AtomicU16::new(status));
+    let cap = captured.clone();
+    let st = status.clone();
+
+    let handle = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = match listener.accept().await {
+                Ok(c) => c,
+                Err(_) => break,
+            };
+            let cap = cap.clone();
+            let st = st.clone();
+            tokio::spawn(async move {
+                let mut buf = vec![0u8; 16384];
+                let n = match socket.read(&mut buf).await {
+                    Ok(n) if n > 0 => n,
+                    _ => return,
+                };
+                let raw = String::from_utf8_lossy(&buf[..n]);
+                let body_start = raw.find("\r\n\r\n").map(|i| i + 4).unwrap_or(raw.len());
+                let body = buf[body_start..n].to_vec();
+
+                // Extract path from first line
+                let first_line = raw.lines().next().unwrap_or("");
+                let path = first_line
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("/")
+                    .to_string();
+
+                cap.lock().await.push(CapturedPush { path, body });
+
+                let code = st.load(AtomicOrdering::Relaxed);
+                let resp = format!("HTTP/1.1 {} OK\r\nContent-Length: 0\r\n\r\n", code);
+                socket.write_all(resp.as_bytes()).await.ok();
+            });
+        }
+    });
+
+    MockPushServer {
+        addr,
+        captured,
+        status,
+        handle: Some(handle),
+    }
 }

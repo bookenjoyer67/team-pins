@@ -9,6 +9,7 @@ pub mod messages;
 pub mod mqtt_bridge;
 #[cfg(feature = "peer-relay")]
 pub mod peer_relay;
+pub mod push;
 pub mod rate;
 #[cfg(feature = "reticulum-bridge")]
 pub mod reticulum_bridge;

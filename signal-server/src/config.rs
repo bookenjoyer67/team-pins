@@ -18,6 +18,7 @@ pub struct Config {
     #[serde(default)]
     pub peer_relays: PeerRelayConfig,
     #[serde(default)] pub storage: StorageConfig,
+    #[serde(default)] pub push: PushConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -183,6 +184,31 @@ impl Default for StorageConfig {
     fn default() -> Self { Self { max_pins_per_community: 0 } }
 }
 
+#[derive(Debug, Deserialize, Clone)]
+pub struct PushConfig {
+    #[serde(default = "d_false")] pub enabled: bool,
+    #[serde(default)]            pub vapid_private_key_pem: Option<String>,
+    #[serde(default)]            pub vapid_subject: Option<String>,
+    #[serde(default)]            pub vapid_public_key: Option<String>,
+    #[serde(default = "d_push_interval")] pub min_interval_secs: u64,
+    #[serde(default = "d_push_batch")]    pub batch_max: usize,
+}
+fn d_push_interval() -> u64 { 300 }
+fn d_push_batch() -> usize { 50 }
+
+impl Default for PushConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            vapid_private_key_pem: None,
+            vapid_subject: None,
+            vapid_public_key: None,
+            min_interval_secs: 300,
+            batch_max: 50,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -198,6 +224,7 @@ impl Default for Config {
             #[cfg(feature = "peer-relay")]
             peer_relays: PeerRelayConfig::default(),
             storage: StorageConfig::default(),
+            push: PushConfig::default(),
         }
     }
 }
@@ -275,5 +302,18 @@ mod tests {
         let p = PeerRelayConfig::default();
         assert!(!p.enabled);
         assert_eq!(p.announce_interval_secs, 300);
+    }
+
+    #[test]
+    fn test_push_config_defaults() {
+        let p = PushConfig::default();
+        assert!(!p.enabled);
+        assert!(p.vapid_private_key_pem.is_none());
+        assert!(p.vapid_subject.is_none());
+        assert!(p.vapid_public_key.is_none());
+        assert_eq!(p.min_interval_secs, 300);
+        assert_eq!(p.batch_max, 50);
+        let cfg = Config::default();
+        assert!(!cfg.push.enabled);
     }
 }

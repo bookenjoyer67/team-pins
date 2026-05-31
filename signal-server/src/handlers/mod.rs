@@ -13,6 +13,7 @@ pub mod layer;
 pub mod member;
 #[cfg(feature = "mqtt-bridge")]
 pub mod mesh;
+pub mod push;
 pub mod push_delta;
 pub mod sync_request;
 pub mod vote;
@@ -32,6 +33,7 @@ pub use member::{
     handle_add_member, handle_claim_membership, handle_create_token, handle_remove_member,
     handle_update_governance,
 };
+pub use push::{handle_register_push_subscription, handle_unregister_push_subscription, handle_push_info};
 #[cfg(feature = "mqtt-bridge")]
 pub use mesh::{handle_mesh_uplink, handle_mesh_uplink_presence};
 pub use push_delta::handle_push_delta;
@@ -219,6 +221,15 @@ pub async fn route_message(
 
         "join_community" =>
             handle_join_community(ctx, &v).await,
+
+        "register_push_subscription" if ctx.room_name == "community-relay" =>
+            handle_register_push_subscription(ctx, &v).await,
+
+        "unregister_push_subscription" if ctx.room_name == "community-relay" =>
+            handle_unregister_push_subscription(ctx, &v).await,
+
+        "push_info" =>
+            handle_push_info(ctx, &v).await,
 
         _ => return false,
     }

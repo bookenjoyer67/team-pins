@@ -50,3 +50,14 @@ uplink_enabled = true
 # peer_urls = ["wss://other-relay.example.com"]
 # announce_interval_secs = 300
 # reconnect_delay_secs = 30
+
+# [push]
+# enabled = false
+# Keys are auto-generated on first run — just set enabled = true
+# They're saved to vapid_keys.json in the working directory.
+# Manual keys are optional; set these if you need fixed keys across deploys:
+# vapid_private_key_pem = "..."
+# vapid_public_key = "..."
+# vapid_subject = "mailto:admin@example.com"
+# min_interval_secs = 300
+# batch_max = 50

@@ -25,6 +25,9 @@ uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 hex = "0.4"
 getrandom = "0.2"
+web-push = { version = "0.11", default-features = false, features = ["hyper-client"] }
+p256 = { version = "0.13", features = ["pem"] }
+rand_core = "0.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ed25519-dalek = "2"
