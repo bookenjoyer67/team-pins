@@ -13,6 +13,38 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
     let ts = v.get("ts").and_then(|t| t.as_u64()).unwrap_or_else(messages::unix_millis);
     let conn_pubkey = get_conn_pubkey(ctx.room, ctx.cid);
 
+    // Validate all field limits upfront — reject entire delta if any exceeds
+    if v.get("pins").and_then(|p| p.as_array()).map_or(0, |a| a.len()) > 200 {
+        ctx.room.send_to(
+            &serde_json::json!({"type":"error","reason":"too many pins (max 200)"}).to_string(),
+            ctx.cid,
+        );
+        return;
+    }
+    if v.get("annotations").and_then(|a| a.as_array()).map_or(0, |a| a.len()) > 100 {
+        ctx.room.send_to(
+            &serde_json::json!({"type":"error","reason":"too many annotations (max 100)"}).to_string(),
+            ctx.cid,
+        );
+        return;
+    }
+    if v.get("drawings").and_then(|d| d.as_array()).map_or(0, |a| a.len()) > 100 {
+        ctx.room.send_to(
+            &serde_json::json!({"type":"error","reason":"too many drawings (max 100)"}).to_string(),
+            ctx.cid,
+        );
+        return;
+    }
+    if v.get("tombstones").and_then(|t| t.as_array()).map_or(0, |a| a.len()) > 200 {
+        return;
+    }
+    if v.get("deleted_pin_ids").and_then(|d| d.as_array()).map_or(0, |a| a.len()) > 500 {
+        return;
+    }
+    if v.get("deleted_drawing_ids").and_then(|d| d.as_array()).map_or(0, |a| a.len()) > 500 {
+        return;
+    }
+
     // Auth: get community config for policy checks
     let c_opt = ctx.state.store.get_community(&community_id).await;
     let join_policy = c_opt.as_ref()
@@ -22,14 +54,6 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
     let mut pin_count = 0;
     let mut ann_count = 0;
     if let Some(pins) = v.get("pins").and_then(|p| p.as_array()) {
-        if pins.len() > 200 {
-            warn!("[relay] push_delta: too many pins ({})", pins.len());
-            ctx.room.send_to(
-                &serde_json::json!({"type":"error","reason":"too many pins"}).to_string(),
-                ctx.cid,
-            );
-            return;
-        }
         for pin in pins {
             let pin_id = pin.get("pin_id").and_then(|p| p.as_str()).unwrap_or("");
             let author = pin.get("author_pubkey").and_then(|a| a.as_str()).unwrap_or("");
@@ -99,7 +123,6 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
         }
     }
     if let Some(anns) = v.get("annotations").and_then(|a| a.as_array()) {
-        if anns.len() > 100 { return; }
         for ann in anns {
             let author = ann.get("author_pubkey").and_then(|a| a.as_str()).unwrap_or("");
             if join_policy != "open" {
@@ -148,7 +171,6 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
     }
     let mut dwg_count = 0u32;
     if let Some(drawings) = v.get("drawings").and_then(|d| d.as_array()) {
-        if drawings.len() > 100 { return; }
         for dwg in drawings {
             let author = dwg.get("author_pubkey").and_then(|a| a.as_str()).unwrap_or("");
             if join_policy != "open" {
@@ -200,7 +222,6 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
         c_opt.as_ref().and_then(|c| get_member_role(c, cpk))
     });
     if let Some(tombs) = v.get("tombstones").and_then(|t| t.as_array()) {
-        if tombs.len() > 200 { return; }
         for t in tombs {
             let by_pubkey = t.get("by_pubkey").and_then(|b| b.as_str()).unwrap_or("");
             if !by_pubkey.is_empty() {
@@ -244,7 +265,6 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
         }
     }
     if let Some(del_pins) = v.get("deleted_pin_ids").and_then(|d| d.as_array()) {
-        if del_pins.len() > 500 { return; }
         for pid in del_pins {
             if let Some(id) = pid.as_str() {
                 // Auth: readers cannot delete; contributors can only delete own
@@ -266,7 +286,6 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
         }
     }
     if let Some(del_dwgs) = v.get("deleted_drawing_ids").and_then(|d| d.as_array()) {
-        if del_dwgs.len() > 500 { return; }
         for did in del_dwgs {
             if let Some(id) = did.as_str() {
                 let allow = match conn_role.as_deref() {
