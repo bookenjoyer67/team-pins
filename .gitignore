@@ -11,6 +11,11 @@ src-tauri/gen/
 *.dmg
 signal-server/config.toml
 signal-server/community_data.json
+signal-server/vapid_keys.json
+signal-server/*.bak
+
+# packaging
+code-server/
 
 # secrets & credentials
 .env
