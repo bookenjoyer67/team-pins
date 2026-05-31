@@ -121,7 +121,7 @@ pub fn verify_creation_attestation(pin: &serde_json::Value, pin_id: &str) -> boo
 
 /// Returns true if the message was fully handled. Returns false if it should
 /// fall through to passthrough logic.
-#[tracing::instrument(skip(ctx), fields(cid = %ctx.cid))]
+#[tracing::instrument(skip(ctx, txt), fields(cid = %ctx.cid))]
 pub async fn route_message(
     ctx: &HandlerContext<'_>,
     txt: &str,
