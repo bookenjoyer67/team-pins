@@ -83,3 +83,48 @@ export function compressImageBuffer(buffer, mimeType, fileName) {
     worker.postMessage({ id, buffer, mimeType, fileName }, [buffer]);
   });
 }
+
+// ── Video Compression (WebCodecs, with fallback) ─────
+
+let _videoWorker = null;
+let _nextVideoId = 1;
+const _videoPending = new Map();
+
+const webcodecsSupported =
+  typeof VideoEncoder !== "undefined" &&
+  typeof VideoDecoder !== "undefined";
+
+function getVideoWorker() {
+  if (!_videoWorker && webcodecsSupported) {
+    _videoWorker = new Worker(new URL("./video-compress.js", import.meta.url), { type: "module" });
+    _videoWorker.onmessage = (e) => {
+      const { id, buffer, type, name } = e.data;
+      const pending = _videoPending.get(id);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        _videoPending.delete(id);
+        pending.resolve({ buffer, type, name });
+      }
+    };
+    _videoWorker.onerror = () => {}; // let individual timeouts handle errors
+  }
+  return _videoWorker;
+}
+
+export function compressVideoBuffer(buffer, mimeType, fileName) {
+  if (!webcodecsSupported) return null;
+
+  const worker = getVideoWorker();
+  if (!worker) return null;
+
+  return new Promise((resolve) => {
+    const id = _nextVideoId++;
+    const timeout = setTimeout(() => {
+      _videoPending.delete(id);
+      resolve(null); // timeout → fall back to MediaRecorder
+    }, 120_000);
+    _videoPending.set(id, { resolve, timeout });
+    // Transfer the buffer to avoid copying
+    worker.postMessage({ id, buffer, mimeType, fileName }, [buffer.buffer]);
+  });
+}

@@ -28,7 +28,7 @@ import { COLORS, colorPresetsHTML, hueDotHTML, hexInputHTML, wireColorPicker, va
 import { compute_geometry } from "./core/pkg/e2e_core.js";
 import { getTrustWeight, computeAnnotationScore, trustScoreColor, computePinTrust, pinTrustIndicator } from "./trust.js";
 import { indexMarker, clearMarkerGrid } from "./gossip.js";
-import { compressImageBuffer } from "./workers/media-compress.js";
+import { compressImageBuffer, compressVideoBuffer } from "./workers/media-compress.js";
 import { showDiscoverModal, showLayersModal, loadLayersForSet } from "./map-layers.js";
 import { showImportFromMapModal } from "./map-import.js";
 import {
@@ -168,8 +168,17 @@ async function compressMedia(file, onProgress) {
           name: file.name,
         };
       }
+      // Non-webm video — try WebCodecs first (fast), fall back to MediaRecorder
       try {
         const buf = new Uint8Array(await file.arrayBuffer());
+        // Try WebCodecs Worker first (6-10x speed)
+        const fastResult = await compressVideoBuffer(buf, file.type, file.name);
+        if (fastResult) return {
+          buffer: fastResult.buffer.buffer,
+          type: fastResult.type,
+          name: fastResult.name,
+        };
+        // Fall back to MediaRecorder (1x real-time)
         const result = await compressVideoBytes(buf, file.type, file.name, onProgress);
         if (result) return {
           buffer: result.buffer.buffer,
@@ -243,7 +252,7 @@ export async function compressVideoBytes(bytes, mimeType, fileName, onProgress) 
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext("2d");
-    const canvasStream = canvas.captureStream(60);
+    const canvasStream = canvas.captureStream(30);
     let audioTracks = [];
     try {
       const vs = video.captureStream();
@@ -272,7 +281,6 @@ export async function compressVideoBytes(bytes, mimeType, fileName, onProgress) 
     video.currentTime = 0;
     video.muted = true;
     video.volume = 0;
-    video.playbackRate = 2.0;
     await video.play();
     if (onProgress && video.duration > 0) {
       video.addEventListener("timeupdate", () => {
@@ -290,7 +298,7 @@ export async function compressVideoBytes(bytes, mimeType, fileName, onProgress) 
       new Promise((r) => {
         video.addEventListener("ended", r, { once: true });
       }),
-      new Promise((r) => setTimeout(r, ((video.duration || 60) / 2) * 1000 + 5000)),
+      new Promise((r) => setTimeout(r, (video.duration || 60) * 1000 + 5000)),
     ]);
     recorder.stop();
     await stopped;
