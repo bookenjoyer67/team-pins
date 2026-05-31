@@ -1,7 +1,5 @@
-use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Arc;
-use std::sync::Mutex as StdMutex;
 use std::thread;
 use std::time::Duration;
 
@@ -159,13 +157,9 @@ pub async fn start_bridge(state: Arc<AppState>) {
 
     // Create bridge room
     {
-        let mut rooms = state.rooms.write().await;
-        rooms.entry(room_name.clone()).or_insert_with(|| Room {
-            clients: HashMap::new(),
-            pw_hash: None,
-            last_act: StdMutex::new(tokio::time::Instant::now()),
-            challenges: StdMutex::new(HashMap::new()),
-        });
+        if !state.rooms.contains_key(&room_name) {
+            state.rooms.insert(room_name.clone(), Room::new());
+        }
     }
 
     // Store write channel for WS uplinks
@@ -180,9 +174,8 @@ pub async fn start_bridge(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
             sleep(Duration::from_secs(120)).await;
-            let mut rooms = state_room.rooms.write().await;
-            if let Some(room) = rooms.get_mut(&room_keepalive) {
-                *room.last_act.lock().unwrap() = tokio::time::Instant::now();
+            if let Some(room) = state_room.rooms.get(&room_keepalive) {
+                room.touch();
             }
         }
     });
@@ -198,13 +191,13 @@ pub async fn start_bridge(state: Arc<AppState>) {
                 }
                 // Try to parse as JSON message from another piggPin node
                 let txt = String::from_utf8_lossy(&frame).to_string();
-                let mut rooms = state.rooms.write().await;
-                let room = rooms.entry(room_name.clone()).or_insert_with(|| Room {
-                    clients: HashMap::new(),
-                    pw_hash: None,
-                    last_act: StdMutex::new(tokio::time::Instant::now()),
-                    challenges: StdMutex::new(HashMap::new()),
-                });
+                if !state.rooms.contains_key(&room_name) {
+                    state.rooms.insert(room_name.clone(), Room::new());
+                }
+                let room = match state.rooms.get(&room_name) {
+                    Some(r) => r,
+                    None => continue,
+                };
 
                 // Try to parse as JSON for type detection
                 if let Ok(msg) = serde_json::from_str::<serde_json::Value>(&txt) {

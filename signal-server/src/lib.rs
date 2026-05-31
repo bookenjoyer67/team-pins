@@ -2,11 +2,17 @@ pub mod auth;
 pub mod config;
 pub mod detect;
 pub mod handler;
+pub mod handlers;
+pub mod manager;
 pub mod messages;
+#[cfg(feature = "mqtt-bridge")]
 pub mod mqtt_bridge;
+#[cfg(feature = "peer-relay")]
 pub mod peer_relay;
 pub mod rate;
+#[cfg(feature = "reticulum-bridge")]
 pub mod reticulum_bridge;
+#[cfg(feature = "rnode-bridge")]
 pub mod rnode;
 pub mod room;
 pub mod share;

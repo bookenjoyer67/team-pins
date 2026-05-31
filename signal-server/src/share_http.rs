@@ -147,7 +147,41 @@ pub async fn handle_http(state: Arc<AppState>, mut stream: TcpStream) {
             let _ = stream.write_all(&resp).await;
         }
         ("GET", p) if p == "health" => {
-            let resp = http_response("200 OK", "text/plain", b"ok", allowed_origin, req_origin);
+            use std::sync::atomic::Ordering;
+
+            let uptime = state.start_time.elapsed().as_secs();
+            let rooms: usize = state.rooms.iter().count();
+            let clients: usize = state.rooms.iter().map(|e| e.value().client_count()).sum();
+            let dropped: u64 = state.rooms.iter()
+                .map(|e| e.value().dropped_messages.load(Ordering::Relaxed))
+                .sum();
+            let communities = state.store.communities.read().await.len();
+            let shares = state.shares.lock().await.shares.len();
+            let rl = state.rl.lock().await;
+            let banned_ips = rl.banned_count();
+            let total_bans = rl.total_bans;
+            let total_rate_limited = rl.total_rate_limited;
+            drop(rl);
+            let conn_available = state.conn_semaphore.available_permits();
+            let conn_accepted = state.connections_accepted.load(Ordering::Relaxed);
+            let conn_rejected = state.connections_rejected.load(Ordering::Relaxed);
+
+            let json = serde_json::json!({
+                "status": "ok",
+                "uptime_secs": uptime,
+                "rooms": rooms,
+                "clients": clients,
+                "communities": communities,
+                "shares": shares,
+                "banned_ips": banned_ips,
+                "total_bans": total_bans,
+                "total_rate_limited": total_rate_limited,
+                "dropped_messages_total": dropped,
+                "conn_semaphore_available": conn_available,
+                "connections_accepted": conn_accepted,
+                "connections_rejected": conn_rejected,
+            }).to_string();
+            let resp = http_response("200 OK", "application/json", json.as_bytes(), allowed_origin, req_origin);
             let _ = stream.write_all(&resp).await;
         }
         ("GET", p) if p.starts_with("share/") => {

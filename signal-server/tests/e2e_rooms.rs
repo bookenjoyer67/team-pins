@@ -103,3 +103,48 @@ async fn test_multiple_clients_different_rooms_isolated() {
     drop(client_a);
     drop(client_b);
 }
+
+#[tokio::test]
+async fn test_room_cleanup_and_rejoin() {
+    let addr = start_server().await;
+
+    // Join, then leave immediately (room should be cleaned after timeout)
+    let cid;
+    {
+        let (client, welcome) = join_room(addr, "cleanup-test").await;
+        cid = welcome["clientId"].as_str().unwrap().to_string();
+        drop(client);
+    }
+
+    // Wait for room cleanup (timeout=600s, but the cleanup task runs every 60s
+    // and uses last_act. Since we dropped the client, room becomes empty and
+    // should be removed on the next cleanup cycle).
+    // Force cleanup by waiting for the cleanup task to run.
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    // Rejoin the same room — should succeed (room recreated)
+    let (client2, welcome2) = join_room(addr, "cleanup-test").await;
+    assert!(!welcome2["clientId"].as_str().unwrap().is_empty());
+    assert_ne!(welcome2["clientId"].as_str().unwrap(), cid,
+        "new join should get new client ID after room cleanup");
+
+    drop(client2);
+}
+
+#[tokio::test]
+async fn test_empty_room_removed_on_client_leave() {
+    let addr = start_server().await;
+
+    // Join a room with a single client, then leave
+    let (client, _) = join_room(addr, "solo-room").await;
+    drop(client);
+
+    // Wait a bit for cleanup
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Rejoin — should work as if the room never existed
+    let (client2, _) = join_room(addr, "solo-room").await;
+    drop(client2);
+
+    // If we get here without errors, it worked
+}

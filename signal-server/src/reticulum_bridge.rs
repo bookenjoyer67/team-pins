@@ -1,6 +1,4 @@
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex as StdMutex;
 
 use rns_transport::iface::{Interface, InterfaceContext};
 use rns_transport::identity::PrivateIdentity;
@@ -39,13 +37,9 @@ pub async fn start_bridge(state: Arc<AppState>) {
 
     // Create the WS room
     {
-        let mut rooms = state.rooms.write().await;
-        rooms.entry(bridge_room.clone()).or_insert_with(|| Room {
-            clients: HashMap::new(),
-            pw_hash: None,
-            last_act: StdMutex::new(tokio::time::Instant::now()),
-            challenges: StdMutex::new(HashMap::new()),
-        });
+        if !state.rooms.contains_key(&bridge_room) {
+            state.rooms.insert(bridge_room.clone(), Room::new());
+        }
     }
 
     // Register WsBridge — transport packets → WS room
@@ -67,9 +61,8 @@ pub async fn start_bridge(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
             sleep(std::time::Duration::from_secs(120)).await;
-            let mut rooms = state_keep.rooms.write().await;
-            if let Some(room) = rooms.get_mut(&room_keep) {
-                *room.last_act.lock().unwrap() = tokio::time::Instant::now();
+            if let Some(room) = state_keep.rooms.get(&room_keep) {
+                room.touch();
             }
         }
     });
@@ -111,8 +104,7 @@ impl WsBridge {
                         "type": "rns_packet",
                         "data": hex_data,
                     }).to_string();
-                    let rooms = tx_state.rooms.read().await;
-                    if let Some(room) = rooms.get(&tx_room) {
+                    if let Some(room) = tx_state.rooms.get(&tx_room) {
                         room.broadcast(&json, "");
                     }
                 }

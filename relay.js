@@ -670,12 +670,14 @@ export async function sendPinVote(communityId, pinId, dir) {
   }));
 }
 
-export async function queryCommunities(bbox) {
+export async function queryCommunities(bbox, search) {
   const conn = getConn();
   if (!conn || !isAlive(conn)) return [];
   return new Promise(resolve => {
     const requestId = crypto.randomUUID();
-    conn.ws.send(JSON.stringify({ type: "query_communities", bbox, request_id: requestId }));
+    const msg = { type: "query_communities", bbox, request_id: requestId };
+    if (search) msg.search = search;
+    conn.ws.send(JSON.stringify(msg));
     const handler = (e) => {
       try {
         const m = JSON.parse(e.data);

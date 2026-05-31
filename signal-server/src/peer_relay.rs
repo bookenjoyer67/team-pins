@@ -116,7 +116,7 @@ let _write_url = url.clone();
         }
 
         sleep(backoff).await;
-        backoff = std::cmp::min(backoff * 2, Duration::from_secs(300));
+        backoff = std::cmp::min(backoff * 2, Duration::from_secs(state.config.peer_relays.max_reconnect_delay_secs));
     }
 }
 

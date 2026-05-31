@@ -211,6 +211,7 @@ export async function showDiscoverModal() {
     try {
       const mapBounds = state.map?.getBounds();
       const bboxArr = mapBounds ? [mapBounds.getSouth(), mapBounds.getWest(), mapBounds.getNorth(), mapBounds.getEast()] : null;
+      const searchTerm = document.getElementById("disc-search")?.value?.trim()?.toLowerCase() || null;
 
       const relayConfigured = !!(localStorage.getItem("pins-relay-urls") || localStorage.getItem("pins-relay-url"));
       const relayConnected = window._relayIsConnected?.() || false;
@@ -233,7 +234,7 @@ export async function showDiscoverModal() {
 
       // Source 3: Relay as gossip peer
       let relayGossipResults = [];
-      try { if (bboxArr && relayConnected) relayGossipResults = await window._relayQueryCommunities?.(bboxArr) || []; } catch (_) {}
+      try { if (bboxArr && relayConnected) relayGossipResults = await window._relayQueryCommunities?.(bboxArr, searchTerm) || []; } catch (_) {}
 
       // Merge by community_id, preferring richer relay data
       const merged = new Map();
@@ -274,12 +275,22 @@ export async function showDiscoverModal() {
     }
 
     const communities = [...merged.values()];
+
+    // Text search filter (client-side, instant)
+    let searchFiltered = communities;
+    if (searchTerm) {
+      searchFiltered = communities.filter(c =>
+        (c.name || "").toLowerCase().includes(searchTerm) ||
+        (c.description || "").toLowerCase().includes(searchTerm)
+      );
+    }
+
     let nearby = 0, elsewhere = 0;
 
     // Relay configured but no communities found
-    if (communities.length === 0) {
+    if (searchFiltered.length === 0) {
       listEl.innerHTML = `<div style="padding:16px;color:var(--text-dim);text-align:center;">
-        No communities published yet.
+        ${searchTerm ? "No communities match your search." : "No communities published yet."}
       </div>`;
       const filterLabel = document.getElementById("disc-filter-label");
       if (filterLabel) filterLabel.textContent = relayConnected ? "No communities found" : "Relay not connected";
@@ -287,7 +298,7 @@ export async function showDiscoverModal() {
     }
 
     // Communities found — render filtered list
-    const filtered = communities.filter(c => {
+    const filtered = searchFiltered.filter(c => {
           if (!geoFilter || !mapBounds) return true;
           const bnds = c.bounds;
           if (!bnds || !Array.isArray(bnds) || bnds.length !== 4) { elsewhere++; return false; }
@@ -452,8 +463,9 @@ export async function showDiscoverModal() {
       <button id="disc-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:#9ca3af;line-height:1;">×</button>
     </div>
     <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px;">Browse published communities on the relay and subscribe to ones you want to contribute to.</p>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
       <button id="disc-geo-filter" style="padding:3px 8px;border:1px solid #059669;background:rgba(5,150,105,0.1);color:#059669;border-radius:3px;cursor:pointer;font-size:11px;font-weight:500;">📍 Near map view</button>
+      <input id="disc-search" type="text" placeholder="Filter by name..." style="flex:1;min-width:140px;padding:3px 8px;border:1px solid var(--border);border-radius:3px;background:var(--bg);color:var(--text);font-size:11px;">
       <span id="disc-filter-label" style="font-size:10px;color:var(--text-muted);"></span>
     </div>
     <div id="disc-list" style="flex:1;overflow-y:auto;border:1px solid var(--border-light);border-radius:4px;min-height:40px;margin-bottom:8px;">Loading...</div>
@@ -477,6 +489,15 @@ export async function showDiscoverModal() {
       geoFilterBtn.style.color = geoFilter ? "#059669" : "var(--text-dim)";
       listEl.innerHTML = "Loading...";
       renderList();
+    };
+  }
+
+  const searchInput = document.getElementById("disc-search");
+  if (searchInput) {
+    let searchTimer = null;
+    searchInput.oninput = () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { listEl.innerHTML = "Loading..."; renderList(); }, 300);
     };
   }
 

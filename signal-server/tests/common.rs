@@ -1,9 +1,12 @@
 // E2E test helpers for the piggPin signal server.
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
+use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, RwLock};
@@ -11,6 +14,7 @@ use tokio::time::{sleep, timeout, Duration};
 
 use piggpin_signal::config::Config;
 use piggpin_signal::detect;
+use piggpin_signal::manager::ServiceManager;
 use piggpin_signal::rate::RateLimiter;
 use piggpin_signal::share_http;
 use piggpin_signal::state::AppState;
@@ -55,11 +59,16 @@ impl TestClient {
 /// Start a signal server on random ports with in-memory storage.
 /// Spawns background tasks and accept loops. Returns the WS address.
 pub async fn start_server() -> SocketAddr {
+    start_server_with_max_conn(100).await
+}
+
+/// Start a server with a specific connection limit.
+pub async fn start_server_with_max_conn(max_conn: usize) -> SocketAddr {
     let _ = tracing_subscriber::fmt().try_init();
 
     let config = Config::default();
     let state = Arc::new(AppState {
-        rooms: RwLock::new(HashMap::new()),
+        rooms: DashMap::new(),
         shares: Mutex::new(piggpin_signal::share::ShareStore::new(
             config.share.max_shares,
             config.share.share_ttl_secs,
@@ -67,15 +76,24 @@ pub async fn start_server() -> SocketAddr {
         rl: Mutex::new(RateLimiter::new(config.rate_limit.clone())),
         config: config.clone(),
         store: PersistentStore::new(None, config.storage.max_pins_per_community),
+        #[cfg(feature = "mqtt-bridge")]
         mesh_uplink: RwLock::new(None),
+        #[cfg(feature = "reticulum-bridge")]
         reticulum_inject: RwLock::new(None),
+        #[cfg(feature = "mqtt-bridge")]
         mqtt_client: RwLock::new(None),
+        #[cfg(feature = "peer-relay")]
         peer_relay_txs: RwLock::new(HashMap::new()),
-        conn_semaphore: Arc::new(tokio::sync::Semaphore::new(100)),
+        conn_semaphore: Arc::new(tokio::sync::Semaphore::new(max_conn.max(1))),
+        start_time: Instant::now(),
+        connections_accepted: AtomicU64::new(0),
+        connections_rejected: AtomicU64::new(0),
+        last_snapshot_time: std::sync::RwLock::new(None),
     });
 
     let shutdown = Arc::new(AtomicBool::new(false));
-    spawn_background_tasks(state.clone());
+    let manager = ServiceManager::new();
+    spawn_background_tasks(state.clone(), &manager).await;
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -117,58 +135,92 @@ pub async fn join_room(addr: SocketAddr, room: &str) -> (TestClient, serde_json:
 
 // ---- Internal server helpers (duplicated from main.rs for test access) ----
 
-fn spawn_background_tasks(state: Arc<AppState>) {
+async fn spawn_background_tasks(state: Arc<AppState>, manager: &ServiceManager) {
     let st = state.clone();
-    tokio::spawn(async move {
-        let timeout = Duration::from_secs(st.config.rooms.room_timeout_secs);
-        loop {
-            sleep(Duration::from_secs(60)).await;
-            let mut rooms = st.rooms.write().await;
-            rooms.retain(|name, r| {
-                let keep = !r.clients.is_empty()
-                    || r.last_act.lock().unwrap().elapsed() < timeout;
-                if !keep {
-                    tracing::info!("Cleaned room {}", name);
+    manager.spawn_restartable("room_cleanup", move |mut rx| {
+        let s = st.clone();
+        let timeout = Duration::from_secs(s.config.rooms.room_timeout_secs);
+        async move {
+            loop {
+                tokio::select! {
+                    _ = rx.recv() => break,
+                    _ = sleep(Duration::from_secs(60)) => {
+                        s.rooms.retain(|name, r| {
+                            let keep = !r.clients.is_empty()
+                                || r.elapsed_ms() < timeout.as_millis() as u64;
+                            if !keep { tracing::info!("Cleaned room {}", name); }
+                            keep
+                        });
+                    }
                 }
-                keep
-            });
+            }
         }
-    });
+    }).await;
+
     let st = state.clone();
-    tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_secs(300)).await;
-            st.shares.lock().await.cleanup();
+    manager.spawn_restartable("share_cleanup", move |mut rx| {
+        let s = st.clone();
+        async move {
+            loop {
+                tokio::select! {
+                    _ = rx.recv() => break,
+                    _ = sleep(Duration::from_secs(300)) => { s.shares.lock().await.cleanup(); }
+                }
+            }
         }
-    });
+    }).await;
+
     let st = state.clone();
-    tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_secs(300)).await;
-            st.rl.lock().await.clean();
+    manager.spawn_restartable("rate_cleanup", move |mut rx| {
+        let s = st.clone();
+        async move {
+            loop {
+                tokio::select! {
+                    _ = rx.recv() => break,
+                    _ = sleep(Duration::from_secs(300)) => { s.rl.lock().await.clean(); }
+                }
+            }
         }
-    });
+    }).await;
+
     let st = state.clone();
-    tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_secs(60)).await;
-            st.store.cleanup_expired_ttls().await;
+    manager.spawn_restartable("ttl_cleanup", move |mut rx| {
+        let s = st.clone();
+        async move {
+            loop {
+                tokio::select! {
+                    _ = rx.recv() => break,
+                    _ = sleep(Duration::from_secs(60)) => { s.store.cleanup_expired_ttls().await; }
+                }
+            }
         }
-    });
+    }).await;
+
     let st = state.clone();
-    tokio::spawn(async move {
-        loop {
-            sleep(Duration::from_secs(300)).await;
-            st.store.cleanup_expired_tokens().await;
+    manager.spawn_restartable("token_cleanup", move |mut rx| {
+        let s = st.clone();
+        async move {
+            loop {
+                tokio::select! {
+                    _ = rx.recv() => break,
+                    _ = sleep(Duration::from_secs(300)) => { s.store.cleanup_expired_tokens().await; }
+                }
+            }
         }
-    });
+    }).await;
+
     let st = state.clone();
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-            st.store.flush_if_dirty().await;
+    manager.spawn_restartable("flush_dirty", move |mut rx| {
+        let s = st.clone();
+        async move {
+            loop {
+                tokio::select! {
+                    _ = rx.recv() => break,
+                    _ = sleep(Duration::from_secs(5)) => { s.store.flush_if_dirty().await; }
+                }
+            }
         }
-    });
+    }).await;
 }
 
 async fn run_accept_loop(

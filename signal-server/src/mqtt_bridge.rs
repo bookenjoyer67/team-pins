@@ -1,6 +1,4 @@
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 
 use prost::Message;
@@ -235,13 +233,9 @@ pub async fn start_bridge(state: Arc<AppState>) {
     );
 
     {
-        let mut rooms = state.rooms.write().await;
-        rooms.entry(room_name.clone()).or_insert_with(|| Room {
-            clients: HashMap::new(),
-            pw_hash: None,
-            last_act: StdMutex::new(tokio::time::Instant::now()),
-            challenges: StdMutex::new(HashMap::new()),
-        });
+        if !state.rooms.contains_key(&room_name) {
+            state.rooms.insert(room_name.clone(), Room::new());
+        }
     }
 
     let state_room = state.clone();
@@ -249,9 +243,8 @@ pub async fn start_bridge(state: Arc<AppState>) {
     tokio::spawn(async move {
         loop {
             sleep(Duration::from_secs(120)).await;
-            let mut rooms = state_room.rooms.write().await;
-            if let Some(room) = rooms.get_mut(&room_keepalive) {
-                *room.last_act.lock().unwrap() = tokio::time::Instant::now();
+            if let Some(room) = state_room.rooms.get(&room_keepalive) {
+                room.touch();
             }
         }
     });
@@ -509,13 +502,13 @@ async fn handle_mqtt_message(
 }
 
 async fn relay_to_room(state: &AppState, room_name: &str, data: &serde_json::Value) {
-    let mut rooms = state.rooms.write().await;
-    let room = rooms.entry(room_name.to_string()).or_insert_with(|| Room {
-        clients: HashMap::new(),
-        pw_hash: None,
-        last_act: StdMutex::new(tokio::time::Instant::now()),
-        challenges: StdMutex::new(HashMap::new()),
-    });
+    if !state.rooms.contains_key(room_name) {
+        state.rooms.insert(room_name.to_string(), Room::new());
+    }
+    let room = match state.rooms.get(room_name) {
+        Some(r) => r,
+        None => { warn!("[mqtt] failed to create room {}", room_name); return; }
+    };
     let txt = data.to_string();
     if txt.len() > state.config.security.max_message_size {
         warn!(

@@ -153,7 +153,7 @@ async function checkStorageQuota(neededBytes, label) {
   } catch (_) {}
 }
 
-async function compressMedia(file) {
+async function compressMedia(file, onProgress) {
   if (
     !file.type.startsWith("image/") ||
     file.type.includes("gif") ||
@@ -170,7 +170,7 @@ async function compressMedia(file) {
       }
       try {
         const buf = new Uint8Array(await file.arrayBuffer());
-        const result = await compressVideoBytes(buf, file.type, file.name);
+        const result = await compressVideoBytes(buf, file.type, file.name, onProgress);
         if (result) return {
           buffer: result.buffer.buffer,
           type: result.type,
@@ -197,7 +197,7 @@ async function compressMedia(file) {
   }
 }
 
-export async function compressVideoBytes(bytes, mimeType, fileName) {
+export async function compressVideoBytes(bytes, mimeType, fileName, onProgress) {
   const MAX_DIM = 1280;
   const BITRATE = 1_500_000;
   const blobUrl = URL.createObjectURL(new Blob([bytes], { type: mimeType }));
@@ -243,7 +243,7 @@ export async function compressVideoBytes(bytes, mimeType, fileName) {
     canvas.width = w;
     canvas.height = h;
     const ctx = canvas.getContext("2d");
-    const canvasStream = canvas.captureStream(30);
+    const canvasStream = canvas.captureStream(60);
     let audioTracks = [];
     try {
       const vs = video.captureStream();
@@ -272,7 +272,13 @@ export async function compressVideoBytes(bytes, mimeType, fileName) {
     video.currentTime = 0;
     video.muted = true;
     video.volume = 0;
+    video.playbackRate = 2.0;
     await video.play();
+    if (onProgress && video.duration > 0) {
+      video.addEventListener("timeupdate", () => {
+        onProgress(Math.min(95, Math.round(video.currentTime / video.duration * 100)));
+      });
+    }
     const draw = () => {
       if (!video.paused && !video.ended) {
         ctx.drawImage(video, 0, 0, w, h);
@@ -284,7 +290,7 @@ export async function compressVideoBytes(bytes, mimeType, fileName) {
       new Promise((r) => {
         video.addEventListener("ended", r, { once: true });
       }),
-      new Promise((r) => setTimeout(r, (video.duration || 60) * 1000 + 5000)),
+      new Promise((r) => setTimeout(r, ((video.duration || 60) / 2) * 1000 + 5000)),
     ]);
     recorder.stop();
     await stopped;
@@ -2782,16 +2788,28 @@ export function showEditPinForm(pid) {
         const file = document.getElementById("edit-pin-media").files[0];
         let media = undefined;
     if (file) {
-      await checkStorageQuota(file.size, "attachment");
-      const c = await compressMedia(file);
-      const enc = encrypt_raw_bytes(new Uint8Array(c.buffer), state.dek);
-      media = {
+      const prog = showProgressDialog("Processing media...");
+      try {
+        await checkStorageQuota(file.size, "attachment");
+        prog.update(5, "Compressing media...");
+        const c = await compressMedia(file,
+          (pct) => prog.update(5 + Math.round(pct * 0.75), "Compressing media..."));
+        prog.update(80, "Encrypting...");
+        const enc = encrypt_raw_bytes(new Uint8Array(c.buffer), state.dek);
+        prog.update(90, "Saving...");
+        media = {
             type: c.type,
             name: c.name,
             ciphertext: enc.ciphertext,
             nonce: enc.nonce,
           };
-        }
+        prog.update(100, "Done");
+        prog.done();
+      } catch(e) {
+        prog.done();
+        throw e;
+      }
+    }
         clean();
         await updatePin(pid, t || "Untitled", n, color, media, emoji, layerId, schemaId, schemaData, validFrom, validUntil);
         state.map.closePopup();
@@ -2863,15 +2881,27 @@ export function showDrawingForm(g) {
     const file = document.getElementById("drawing-media").files[0];
     let media = null;
     if (file) {
-      await checkStorageQuota(file.size, "attachment");
-      const c = await compressMedia(file);
-      const enc = encrypt_raw_bytes(new Uint8Array(c.buffer), state.dek);
-      media = {
-        type: c.type,
-        name: c.name,
-        ciphertext: enc.ciphertext,
-        nonce: enc.nonce,
-      };
+      const prog = showProgressDialog("Processing media...");
+      try {
+        await checkStorageQuota(file.size, "attachment");
+        prog.update(5, "Compressing media...");
+        const c = await compressMedia(file,
+          (pct) => prog.update(5 + Math.round(pct * 0.75), "Compressing media..."));
+        prog.update(80, "Encrypting...");
+        const enc = encrypt_raw_bytes(new Uint8Array(c.buffer), state.dek);
+        prog.update(90, "Saving...");
+        media = {
+          type: c.type,
+          name: c.name,
+          ciphertext: enc.ciphertext,
+          nonce: enc.nonce,
+        };
+        prog.update(100, "Done");
+        prog.done();
+      } catch(e) {
+        prog.done();
+        throw e;
+      }
     }
     clean();
     await saveDrawing(g, media, layerId);
@@ -3129,15 +3159,27 @@ export function showPinForm(lat, lng) {
     let media = null;
     const sourceFile = file || (recordBlob ? new File([recordBlob], `recording-${Date.now()}.webm`, { type: recordBlob.type }) : null);
     if (sourceFile) {
-      await checkStorageQuota(sourceFile.size, "attachment");
-      const c = await compressMedia(sourceFile);
-      const enc = encrypt_raw_bytes(new Uint8Array(c.buffer), state.dek);
-      media = {
-        type: c.type,
-        name: c.name,
-        ciphertext: enc.ciphertext,
-        nonce: enc.nonce,
-      };
+      const prog = showProgressDialog("Processing media...");
+      try {
+        await checkStorageQuota(sourceFile.size, "attachment");
+        prog.update(5, "Compressing media...");
+        const c = await compressMedia(sourceFile,
+          (pct) => prog.update(5 + Math.round(pct * 0.75), "Compressing media..."));
+        prog.update(80, "Encrypting...");
+        const enc = encrypt_raw_bytes(new Uint8Array(c.buffer), state.dek);
+        prog.update(90, "Saving pin...");
+        media = {
+          type: c.type,
+          name: c.name,
+          ciphertext: enc.ciphertext,
+          nonce: enc.nonce,
+        };
+        prog.update(100, "Done");
+        prog.done();
+      } catch(e) {
+        prog.done();
+        throw e;
+      }
     }
     // Clean up recorder
     if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
