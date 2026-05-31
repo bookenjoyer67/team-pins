@@ -1030,6 +1030,8 @@ document.addEventListener("click", async e => { try {
   if (!b) {
     const a = e.target.closest(".dwg-attachment");
     if (a) { e.preventDefault(); Map.downloadDrawingAttachment(a.dataset.did); }
+    const dlBtn = e.target.closest(".download-media-btn");
+    if (dlBtn) { e.preventDefault(); Map.downloadPinMedia(dlBtn.dataset.pid); }
     return;
   }
   if (b.matches(".edit-pin-btn")) { e.stopPropagation(); Map.showEditPinForm(b.dataset.pid); return; }

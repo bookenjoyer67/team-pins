@@ -1502,6 +1502,7 @@ export function startSlideshow(pinIds, opts = {}) {
           </div>
           ${note ? `<div style="color:var(--text);font-size:14px;line-height:1.5;white-space:pre-wrap;margin-bottom:8px;">${escapeHtml(note)}</div>` : ""}
           ${mediaHtml}
+          ${r && r.ciphertext ? `<br><button class="download-media-btn" data-pid="${escapeHtml(pid)}" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;background:transparent;color:#2563eb;border-radius:3px;cursor:pointer;margin-top:4px;">⬇ Download</button>` : ""}
           <div style="display:flex;gap:6px;align-items:center;margin-top:8px;font-size:11px;color:var(--text-dim);">
             <span>✅ ${up}</span><span>⚠️ ${down}</span>
             ${marker._authorPubkey ? `<span style="color:var(--text-muted);">by ${escapeHtml(String(marker._authorPubkey).slice(0, 8))}</span>` : ""}
@@ -2214,7 +2215,7 @@ export async function loadPins() {
             : "";
           const isTutorial = window._tutorialPids?.includes(rowData.pin_id);
           const editBtns = (isTutorial || !isOwner) ? "" : `${canEdit ? `<button class="edit-pin-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="margin-top:6px;padding:4px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:12px;">${t("edit")}</button>` : ""}${canDelete ? `<button class="delete-pin-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="margin-top:6px;padding:4px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:12px;">${t("delete")}</button>` : ""}`;
-           return `<div style="position:relative;"><button class="pin-expand-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="position:absolute;top:2px;right:2px;padding:1px 6px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:14px;line-height:1.3;color:var(--text-dim);" title="${t("expand") || "Expand"}">↗</button><b>${escapeHtml(pinData.title)}</b>${marker._pinEmoji ? " " + marker._pinEmoji : ""}${anonBadge}${trustBadge}<br>${escapeHtml(pinData.note)}${customHtml}${mh}<br><small style="color:var(--text-dim)">${rt}</small>${ttlHtml}${layerBadge}${attestBtns}${editBtns ? "<br>" + editBtns : ""}<hr style="margin:8px 0 4px;border-color:var(--border);"><div class="annotation-thread" data-pin-id="${escapeHtml(rowData.pin_id)}" style="max-height:240px;overflow-y:auto;font-size:12px;">Loading...</div></div>`;
+           return `<div style="position:relative;"><button class="pin-expand-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="position:absolute;top:2px;right:2px;padding:1px 6px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:14px;line-height:1.3;color:var(--text-dim);" title="${t("expand") || "Expand"}">↗</button><b>${escapeHtml(pinData.title)}</b>${marker._pinEmoji ? " " + marker._pinEmoji : ""}${anonBadge}${trustBadge}<br>${escapeHtml(pinData.note)}${customHtml}${mh}${r && r.ciphertext ? `<br><button class="download-media-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;background:transparent;color:#2563eb;border-radius:3px;cursor:pointer;margin-top:4px;">⬇ Download</button>` : ""}<br><small style="color:var(--text-dim)">${rt}</small>${ttlHtml}${layerBadge}${attestBtns}${editBtns ? "<br>" + editBtns : ""}<hr style="margin:8px 0 4px;border-color:var(--border);"><div class="annotation-thread" data-pin-id="${escapeHtml(rowData.pin_id)}" style="max-height:240px;overflow-y:auto;font-size:12px;">Loading...</div></div>`;
         });
       })(m, pin, row);
       state.markers.push(m);
@@ -2315,7 +2316,7 @@ export function refreshPinMarkerPopup(marker) {
   const attestBtns = hasAttestBtns
     ? `<br><button class="attest-confirm-btn" data-pid="${escapeHtml(marker._pinId)}" style="padding:2px 8px;border:1px solid #16a34a;background:var(--bg-card);color:#16a34a;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">✅</button><button class="attest-dispute-btn" data-pid="${escapeHtml(marker._pinId)}" style="padding:2px 8px;border:1px solid #f97316;background:var(--bg-card);color:#f97316;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">⚠️</button><button class="attest-flag-btn" data-pid="${escapeHtml(marker._pinId)}" style="padding:2px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">🚩</button>`
     : "";
-  const html = `<div style="position:relative;"><button class="pin-expand-btn" data-pid="${escapeHtml(marker._pinId)}" style="position:absolute;top:2px;right:2px;padding:1px 6px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:14px;line-height:1.3;color:var(--text-dim);" title="${t("expand") || "Expand"}">↗</button><b>${escapeHtml(pinData.title || "")}</b>${marker._pinEmoji ? " " + marker._pinEmoji : ""}${anonBadge}${trustBadge}<br>${escapeHtml(pinData.note || "")}${customHtml}${mediaHtml}<br><small style="color:var(--text-dim)">${rt}</small>${ttlHtml}${layerBadge}${attestBtns}${editBtns ? "<br>" + editBtns : ""}<hr style="margin:8px 0 4px;border-color:var(--border);"><div class="annotation-thread" data-pin-id="${escapeHtml(marker._pinId)}" style="max-height:240px;overflow-y:auto;font-size:12px;">Loading...</div></div>`;
+  const html = `<div style="position:relative;"><button class="pin-expand-btn" data-pid="${escapeHtml(marker._pinId)}" style="position:absolute;top:2px;right:2px;padding:1px 6px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:14px;line-height:1.3;color:var(--text-dim);" title="${t("expand") || "Expand"}">↗</button><b>${escapeHtml(pinData.title || "")}</b>${marker._pinEmoji ? " " + marker._pinEmoji : ""}${anonBadge}${trustBadge}<br>${escapeHtml(pinData.note || "")}${customHtml}${mediaHtml}${r && r.ciphertext ? `<br><button class="download-media-btn" data-pid="${escapeHtml(marker._pinId)}" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;background:transparent;color:#2563eb;border-radius:3px;cursor:pointer;margin-top:4px;">⬇ Download</button>` : ""}<br><small style="color:var(--text-dim)">${rt}</small>${ttlHtml}${layerBadge}${attestBtns}${editBtns ? "<br>" + editBtns : ""}<hr style="margin:8px 0 4px;border-color:var(--border);"><div class="annotation-thread" data-pin-id="${escapeHtml(marker._pinId)}" style="max-height:240px;overflow-y:auto;font-size:12px;">Loading...</div></div>`;
   marker.unbindPopup();
   marker.bindPopup(html);
   marker.openPopup();
@@ -2412,6 +2413,7 @@ export function showPinDetailModal(pinId) {
       <div style="font-size:14px;color:var(--text);white-space:pre-wrap;word-break:break-word;margin-bottom:8px;">${escapeHtml(pinData.note || "")}</div>
       ${customHtml}
       ${mediaHtml}
+      ${r && r.ciphertext ? `<br><button class="download-media-btn" data-pid="${escapeHtml(pinId)}" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;background:transparent;color:#2563eb;border-radius:3px;cursor:pointer;margin-top:4px;">⬇ Download</button>` : ""}
       <div style="font-size:11px;color:var(--text-dim);margin-top:8px;">${rt}</div>
       ${ttlHtml}
       ${layerBadge}
@@ -3770,6 +3772,26 @@ export async function downloadDrawingAttachment(did) {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   } catch (_) {}
+}
+
+export function downloadPinMedia(pinId) {
+  const m = state.markers.find(mk => mk._pinId === pinId);
+  if (!m) return;
+  if (!m._media) { window._toast?.("No attachment"); return; }
+  if (!state.dek) { window._toast?.("Cannot decrypt — no key available"); return; }
+  try {
+    const r = m._media;
+    const dec = decrypt_raw_bytes(r.ciphertext, r.nonce, state.dek);
+    const blob = new Blob([dec], { type: r.type || "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = r.name || "attachment";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (_) { window._toast?.("Download failed"); }
 }
 
 export function addPinButton() {
