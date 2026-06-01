@@ -60,6 +60,20 @@ export function renderSchemaFieldsById(schemaId, containerId, existingCustomData
         return `<div style="margin-bottom:4px;"><span style="font-size:11px;color:var(--text-dim);">${escapeHtml(f.label)}</span>
           <input type="time" name="sf_${f.key}" value="${valAttr}" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div>`;
       }
+      if (f.type === "array_time") {
+        const times = Array.isArray(val) ? val : (val ? [val] : []);
+        const key = f.key;
+        return `<div style="margin-bottom:4px;">
+          <span style="font-size:11px;color:var(--text-dim);">${escapeHtml(f.label)}</span>
+          <div class="sf-array" data-key="${escapeHtml(key)}">
+            ${times.map((t, i) => `<div class="sf-array-row" style="display:flex;gap:4px;margin-top:2px;">
+              <input type="time" name="sf_${escapeHtml(key)}[]" value="${escapeHtml(String(t))}" style="flex:1;padding:4px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" />
+              <button type="button" class="sf-array-rm" style="padding:2px 6px;border:1px solid #dc2626;background:transparent;color:#dc2626;border-radius:3px;cursor:pointer;font-size:14px;line-height:1;flex-shrink:0;">×</button>
+            </div>`).join("")}
+            <button type="button" class="sf-array-add" style="margin-top:3px;padding:2px 8px;border:1px dashed var(--border);background:transparent;color:var(--text-dim);border-radius:3px;cursor:pointer;font-size:11px;width:100%;">+ Add</button>
+          </div>
+        </div>`;
+      }
       if (f.type === "number") {
         return `<div style="margin-bottom:4px;"><span style="font-size:11px;color:var(--text-dim);">${escapeHtml(f.label)}</span>
           <input type="number" name="sf_${f.key}" value="${valAttr}" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div>`;
@@ -68,19 +82,42 @@ export function renderSchemaFieldsById(schemaId, containerId, existingCustomData
         <input type="text" name="sf_${f.key}" value="${valAttr}" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div>`;
     }).join("")}
   </div>`;
+
+  container.querySelectorAll(".sf-array-add").forEach(btn => {
+    btn.onclick = () => {
+      const ct = btn.closest(".sf-array");
+      const key = ct.dataset.key;
+      const row = document.createElement("div");
+      row.className = "sf-array-row";
+      row.style.cssText = "display:flex;gap:4px;margin-top:2px;";
+      row.innerHTML = `<input type="time" name="sf_${escapeHtml(key)}[]" style="flex:1;padding:4px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" />`
+        + `<button type="button" class="sf-array-rm" style="padding:2px 6px;border:1px solid #dc2626;background:transparent;color:#dc2626;border-radius:3px;cursor:pointer;font-size:14px;line-height:1;flex-shrink:0;">×</button>`;
+      ct.insertBefore(row, btn);
+      row.querySelector(".sf-array-rm").onclick = () => row.remove();
+    };
+  });
+  container.querySelectorAll(".sf-array-rm").forEach(btn => {
+    btn.onclick = () => btn.closest(".sf-array-row").remove();
+  });
 }
 
 export function collectSchemaData(containerId) {
   const container = document.getElementById(containerId);
   if (!container || container.children.length === 0) return null;
   const data = {};
-  const inputs = container.querySelectorAll("[name^='sf_']");
+  const inputs = container.querySelectorAll("[name^='sf_']:not([name$='[]'])");
   let hasAny = false;
   inputs.forEach(el => {
     const key = el.name.slice(3);
     const val = el.value;
     if (val !== "" && val !== null && val !== undefined) hasAny = true;
     data[key] = val;
+  });
+  container.querySelectorAll(".sf-array").forEach(ct => {
+    const key = ct.dataset.key;
+    const vals = Array.from(ct.querySelectorAll("input"))
+      .map(el => el.value.trim()).filter(Boolean);
+    if (vals.length > 0) { data[key] = vals; hasAny = true; }
   });
   return hasAny ? data : null;
 }
@@ -96,8 +133,13 @@ export function buildCustomDataHTML(pinData, customDataEnc, layerId, layerName, 
     const rows = Object.entries(data).map(([key, val]) => {
       const field = fields ? fields.find(f => f.key === key) : null;
       const label = field ? field.label : key;
-      const displayVal = field?.type === "boolean" ? (val === "true" || val === true ? "✓" : "✗") : String(val);
-      return `<div style="font-size:11px;color:var(--text-dim);"><b>${escapeHtml(label)}:</b> ${escapeHtml(displayVal)}</div>`;
+      const displayVal = field?.type === "boolean" ? (val === "true" || val === true ? "✓" : "✗")
+        : field?.type === "array_time" ? (Array.isArray(val)
+          ? `<span style="font-size:11px;">${val.map(v => `<span style="background:var(--bg-card);color:var(--text);padding:1px 5px;border-radius:2px;margin:1px;display:inline-block;border:1px solid var(--border-light);">${escapeHtml(String(v))}</span>`).join("")}</span>`
+          : String(val))
+        : String(val);
+      const isArrayHtml = field?.type === "array_time" && Array.isArray(val);
+      return `<div style="font-size:11px;color:var(--text-dim);"><b>${escapeHtml(label)}:</b> ${isArrayHtml ? displayVal : escapeHtml(displayVal)}</div>`;
     }).join("");
     return `<div style="margin:4px 0;padding:4px 6px;background:var(--bg-input);border-radius:3px;border:1px solid var(--border-light);">${rows}</div>`;
   } catch (_) { return ""; }
@@ -194,6 +236,7 @@ export function showSchemaEditorModal(schemaId) {
           <option value="date" ${f.type === "date" ? "selected" : ""}>date</option>
           <option value="time" ${f.type === "time" ? "selected" : ""}>time</option>
           <option value="boolean" ${f.type === "boolean" ? "selected" : ""}>boolean</option>
+          <option value="array_time" ${f.type === "array_time" ? "selected" : ""}>array (time)</option>
           <option value="cross_reference" ${f.type === "cross_reference" ? "selected" : ""}>cross-reference</option>
         </select>
         <button class="sch-fup" data-i="${i}" style="padding:1px 4px;border:none;background:none;color:var(--text-dim);cursor:pointer;font-size:12px;${i === 0 ? "visibility:hidden;" : ""}">▲</button>

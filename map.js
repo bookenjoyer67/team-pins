@@ -376,7 +376,8 @@ export function initMap() {
   }
   state.clusterGroup = L.markerClusterGroup({
     maxClusterRadius: 50,
-    disableClusteringAtZoom: 15,
+    disableClusteringAtZoom: 18,
+    chunkedLoading: true,
   }).addTo(map);
 
   const peerMarkerGroup = L.layerGroup().addTo(map);
@@ -1369,7 +1370,7 @@ export function startSlideshow(pinIds, opts = {}) {
   const map = state.map;
   if (!map || !pinIds || pinIds.length === 0) return;
 
-  const { autoPlay = false, speed = 5000, loop = false, startAt = 0 } = opts;
+  const { autoPlay = false, speed = 5000, loop = false, startAt = 0, cardRenderer = null, onExit = null } = opts;
   let current = 0;
   const total = pinIds.length;
   let currentOrder = pinIds;
@@ -1455,12 +1456,15 @@ export function startSlideshow(pinIds, opts = {}) {
     window._slideshowTogglePlay = null;
     window._slideshowExit = null;
     bar.remove();
+    if (onExit) onExit();
   }
 
   function renderCard() {
     const pid = currentOrder[current];
     const marker = state._markerMap?.get(pid);
     if (!marker) { card.innerHTML = `<div style="color:var(--text-dim);text-align:center;padding:20px;">Slide ${current + 1} unavailable</div>`; return; }
+
+    if (cardRenderer) { card.innerHTML = cardRenderer(current, pid, marker); return; }
 
     const pinData = marker._pinData || {};
     const title = pinData.title || marker._pinTitle || `Pin ${current + 1}`;
@@ -1563,7 +1567,7 @@ export function startSlideshow(pinIds, opts = {}) {
       <button id="tour-speed" style="padding:4px 6px;border:1px solid var(--border);background:var(--bg-input);border-radius:4px;cursor:pointer;font-size:10px;color:var(--text-dim);" title="Speed: ${speedLabel}">${speedLabel}</button>
       <button id="tour-loop" style="padding:4px 6px;border:1px solid var(--border);background:${loop ? "#2563eb" : "var(--bg-input)"};color:${loop ? "white" : "var(--text-dim)"};border-radius:4px;cursor:pointer;font-size:12px;" title="${loop ? "Looping" : "Loop off"}">🔁</button>
       <button id="tour-fullscreen" style="padding:4px 6px;border:1px solid var(--border);background:var(--bg-input);border-radius:4px;cursor:pointer;font-size:12px;color:var(--text-dim);" title="Fullscreen">${fullscreen ? "⛶" : "⛶"}</button>
-      <button id="tour-edit" style="padding:4px 8px;border:1px solid var(--border);background:var(--bg-input);border-radius:4px;cursor:pointer;font-size:11px;color:var(--text-dim);">${t("edit") || "Edit"}</button>
+      ${cardRenderer ? "" : `<button id="tour-edit" style="padding:4px 8px;border:1px solid var(--border);background:var(--bg-input);border-radius:4px;cursor:pointer;font-size:11px;color:var(--text-dim);">${t("edit") || "Edit"}</button>`}
       <button id="tour-exit" style="padding:4px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:4px;cursor:pointer;font-size:11px;">✕</button>
     `;
 
@@ -1585,7 +1589,8 @@ export function startSlideshow(pinIds, opts = {}) {
       return;
     };
     ctrlRow.querySelector("#tour-fullscreen").onclick = () => toggleFullscreen();
-    ctrlRow.querySelector("#tour-edit").onclick = () => editSlideOrder(currentOrder, current, onReorder);
+    const editBtn = ctrlRow.querySelector("#tour-edit");
+    if (editBtn) editBtn.onclick = () => editSlideOrder(currentOrder, current, onReorder);
     ctrlRow.querySelector("#tour-exit").onclick = cleanup;
 
     ctrlRow.querySelectorAll("#slideshow-dots [data-slide]").forEach(dot => {
@@ -2030,6 +2035,7 @@ export async function loadPins() {
   const layerMap = new Map(state.layers.map(l => [l.layer_id, l]));
   const defaultLayer = state.layers[0];
 
+  const newMarkers = [];
   for (const row of await DB.getPins(state.currentSet)) {
     try {
       state._decryptedPinCache = state._decryptedPinCache || new Map();
@@ -2115,7 +2121,7 @@ export async function loadPins() {
           }
         });
         markerMap.set(row.pin_id, m);
-        state.clusterGroup?.addLayer(m);
+        newMarkers.push(m);
         requestAnimationFrame(() => {
           const icon = m._icon;
           if (icon) {
@@ -2230,6 +2236,7 @@ export async function loadPins() {
       indexMarker(m);
     } catch (err) { console.warn("[loadPins] failed to load pin:", row.pin_id, err); window._toast?.("Some pins failed to load", "#f97316"); }
   }
+  if (newMarkers.length > 0) state.clusterGroup?.addLayers(newMarkers);
   for (const [id, marker] of markerMap) {
     if (!keepIds.has(id)) {
       state.clusterGroup?.removeLayer(marker);
@@ -2671,6 +2678,8 @@ export async function deletePin(pid) {
     const pins = await DB.getPins(state.currentSet);
     const row = pins.find((p) => p.pin_id === pid);
     if (row) pushUndo({ kind: "pin", type: "delete", pin: row, pid });
+    const anns = await DB.getAnnotationsByPin(pid, 0, 10000);
+    for (const a of (anns || [])) await DB.deleteAnnotation(a.annotation_id);
     await DB.deletePin(pid);
     if (state._decryptedPinCache) state._decryptedPinCache.delete(pid);
     window._broadcast?.("delete_pin", { pin_id: pid });
@@ -3554,32 +3563,76 @@ export async function loadChains() {
         if (m) coords.push(m.getLatLng());
       }
       if (coords.length < 2) continue;
-      const poly = L.polyline(coords, {
-        color: "#2563eb",
-        weight: 3,
-        dashArray: "8 4",
-        interactive: true,
-      }).addTo(state.map);
-      poly._chainId = c.chain_id;
-      poly._chainName = c.name;
-      poly._chainPinIds = c.pin_ids;
-      poly.bindPopup(`<b>${escapeHtml(c.name)}</b><br><span style="font-size:11px;color:var(--text-dim);">${coords.length} pins</span>
+
+      const entries = c.pin_entries || [];
+      const pc = {};
+      for (const pid of c.pin_ids) {
+        const m = state.markers.find(mk => mk._pinId === pid);
+        if (m) pc[pid] = m.getLatLng();
+      }
+
+      const group = L.featureGroup().addTo(state.map);
+      group._chainId = c.chain_id;
+      group._chainName = c.name;
+      group._chainPinIds = c.pin_ids;
+
+      // Build blue segments: only consecutive pairs where source has NO branches
+      let segCoords = [];
+      for (let i = 0; i < c.pin_ids.length; i++) {
+        const pid = c.pin_ids[i];
+        if (!pc[pid]) continue;
+        if (i > 0) {
+          const prevEntry = entries.find(e => e.pin_id === c.pin_ids[i - 1]);
+          if (prevEntry?.branches?.length > 0 && segCoords.length > 0) {
+            // Previous was a fork — end segment, start new
+            if (segCoords.length >= 2) {
+              L.polyline(segCoords, { color: "#2563eb", weight: 3, dashArray: "8 4", interactive: false }).addTo(group);
+            }
+            segCoords = [];
+          }
+        }
+        segCoords.push(pc[pid]);
+      }
+      if (segCoords.length >= 2) {
+        L.polyline(segCoords, { color: "#2563eb", weight: 3, dashArray: "8 4", interactive: false }).addTo(group);
+      }
+
+      // Build purple segments: all connections FROM branching waypoints
+      for (const entry of entries) {
+        if (!entry.branches?.length) continue;
+        const from = pc[entry.pin_id];
+        if (!from) continue;
+        // Explicit branches
+        for (const b of entry.branches) {
+          const to = pc[b.next_pin_id];
+          if (to) {
+            L.polyline([from, to], { color: "#7c3aed", weight: 2, dashArray: "4 4", interactive: false }).addTo(group);
+          }
+        }
+      }
+
+      const isAuthor = c.author_pubkey && c.author_pubkey === state.signingPublicKey;
+      group.bindPopup(`<b>${escapeHtml(c.name)}</b><br><span style="font-size:11px;color:var(--text-dim);">${coords.length} pins</span>
         <br><button class="chain-popup-walk" data-cid="${escapeHtml(c.chain_id)}" style="margin-top:4px;padding:3px 10px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:11px;">▶ Walk</button>
-        <button class="chain-popup-delete" data-cid="${escapeHtml(c.chain_id)}" style="margin-top:4px;margin-left:4px;padding:3px 10px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">× Delete</button>`);
-      poly.on("popupopen", () => {
-        const el = poly.getPopup()?.getElement();
+        ${isAuthor ? `<button class="chain-popup-edit" data-cid="${escapeHtml(c.chain_id)}" style="margin-top:4px;margin-left:4px;padding:3px 10px;border:1px solid var(--border);background:var(--bg-card);color:var(--text);border-radius:3px;cursor:pointer;font-size:11px;">✏ Edit</button>
+        <button class="chain-popup-delete" data-cid="${escapeHtml(c.chain_id)}" style="margin-top:4px;margin-left:4px;padding:3px 10px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">× Delete</button>` : ""}`);
+      group.on("popupopen", () => {
+        const el = group.getPopup()?.getElement();
+        const editBtn = el?.querySelector(".chain-popup-edit");
         const walkBtn = el?.querySelector(".chain-popup-walk");
         const delBtn = el?.querySelector(".chain-popup-delete");
-        if (walkBtn) walkBtn.onclick = () => { renderChain(c.chain_id); };
+        if (editBtn) editBtn.onclick = () => { showNarrativeChainBuilder(c.chain_id); };
+        if (walkBtn) walkBtn.onclick = () => { renderChainStory(c.chain_id); };
         if (delBtn) delBtn.onclick = async () => {
           if (!await confirmDialog("Delete this chain?")) return;
           await DB.deleteChain(c.chain_id);
-          poly.remove();
+          state.map.removeLayer(group);
           state.chainLayers = state.chainLayers.filter(cl => cl._chainId !== c.chain_id);
+          window._broadcast?.("delete_chain", { chain_id: c.chain_id });
           toast("Chain deleted", "#f97316");
         };
       });
-      state.chainLayers.push(poly);
+      state.chainLayers.push(group);
     } catch (_) {}
   }
 }
@@ -4267,12 +4320,14 @@ export async function showChainsModal() {
           const cl = state.chainLayers.find(cl => cl._chainId === c.chain_id);
           const visible = cl ? cl._visible !== false : true;
           const eyeIcon = visible ? "👁" : "–";
+          const isAuthor = c.author_pubkey && c.author_pubkey === state.signingPublicKey;
           return `<div style="padding:8px;border-bottom:1px solid var(--border-light);display:flex;justify-content:space-between;align-items:center;">
           <span style="font-size:13px;">${escapeHtml(c.name)} <span style="font-size:10px;color:var(--text-dim);">${(c.pin_ids || []).length} pins</span></span>
           <div style="display:flex;align-items:center;gap:6px;">
+            ${isAuthor ? `<button class="chain-edit-btn" data-cid="${escapeHtml(c.chain_id)}" style="padding:3px 6px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:12px;" title="Edit">✏</button>` : ""}
             <button class="chain-eye-btn" data-cid="${escapeHtml(c.chain_id)}" style="padding:3px 7px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:12px;${visible ? "color:#16a34a;" : "color:var(--text-dim);"}">${eyeIcon}</button>
             <button class="chain-walk-btn" data-cid="${escapeHtml(c.chain_id)}" style="padding:3px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:11px;">▶ Walk</button>
-            <button class="chain-del-btn" data-cid="${escapeHtml(c.chain_id)}" style="padding:3px 6px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:13px;line-height:1;">×</button>
+            ${isAuthor ? `<button class="chain-del-btn" data-cid="${escapeHtml(c.chain_id)}" style="padding:3px 6px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:13px;line-height:1;">×</button>` : ""}
           </div>
         </div>`;
         }).join("")
@@ -4301,8 +4356,12 @@ export async function showChainsModal() {
     };
   });
 
+  document.querySelectorAll(".chain-edit-btn").forEach(b => {
+    b.onclick = async (e) => { e.stopPropagation(); ov.remove(); showNarrativeChainBuilder(b.dataset.cid); };
+  });
+
   document.querySelectorAll(".chain-walk-btn").forEach(b => {
-    b.onclick = async (e) => { e.stopPropagation(); ov.remove(); renderChain(b.dataset.cid); };
+    b.onclick = async (e) => { e.stopPropagation(); ov.remove(); renderChainStory(b.dataset.cid); };
   });
 
   document.querySelectorAll(".chain-del-btn").forEach(b => {
@@ -4310,6 +4369,7 @@ export async function showChainsModal() {
       e.stopPropagation();
       if (!(await confirmDialog("Delete this chain? Pins are not affected."))) return;
       await DB.deleteChain(b.dataset.cid);
+      window._broadcast?.("delete_chain", { chain_id: b.dataset.cid });
       const cl = state.chainLayers.find(cl => cl._chainId === b.dataset.cid);
       if (cl) { state.map.removeLayer(cl); state.chainLayers = state.chainLayers.filter(cl2 => cl2._chainId !== b.dataset.cid); }
       ov.remove();
@@ -4319,87 +4379,686 @@ export async function showChainsModal() {
   });
 
   document.getElementById("chain-new-btn").onclick = async () => {
-    const name = prompt("Chain name:");
-    if (!name) return;
     ov.remove();
-    startChainSelection(name);
+    showNarrativeChainBuilder();
   };
 }
 
-let _chainPins = [], _chainName = "";
+export function showNotificationsModal() {
+  const notifications = state.notifications || [];
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2100;display:flex;align-items:center;justify-content:center;";
+  ov.innerHTML = `<div style="background:var(--bg-card);padding:16px;border-radius:8px;min-width:340px;max-width:440px;width:90%;box-shadow:0 4px 20px rgba(0,0,0,0.3);max-height:75vh;display:flex;flex-direction:column;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h3 style="margin:0;">🔔 Notifications</h3>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button id="notif-clear" style="padding:4px 10px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:11px;">Clear</button>
+        <button id="notif-close" style="background:none;border:none;font-size:18px;cursor:pointer;color:#9ca3af;line-height:1;">×</button>
+      </div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-light);margin-bottom:8px;font-size:12px;color:var(--text-dim);cursor:pointer;">
+      <input type="checkbox" id="notif-push-toggle" style="accent-color:#2563eb;cursor:pointer;">
+      Push notifications (kept intentionally vague)
+    </label>
+    <div id="notif-list" style="flex:1;overflow-y:auto;border:1px solid var(--border-light);border-radius:4px;min-height:40px;">${
 
-function startChainSelection(name) {
-  _chainPins = [];
-  _chainName = name;
-  const selMarkers = [];
-  const clickBindings = [];
-  const bar = document.createElement("div");
-  bar.id = "chain-sel-bar";
-  bar.style.cssText = "position:absolute;bottom:80px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:8px 16px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;box-shadow:0 2px 14px rgba(0,0,0,0.18);z-index:1000;font-size:13px;white-space:nowrap;";
-  bar.innerHTML = `<span style="color:var(--text-dim);font-weight:500;">🔗 ${escapeHtml(name)}: <span id="chain-count">0</span> pins</span><button id="chain-done" style="padding:4px 12px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;font-size:12px;">Save</button><button id="chain-cancel" style="padding:4px 8px;border:1px solid var(--border);background:var(--bg-input);border-radius:4px;cursor:pointer;font-size:11px;color:var(--text-dim);">Cancel</button>`;
-  document.getElementById("map-container").appendChild(bar);
+      notifications.length > 0
+        ? notifications.map(n => {
+          const icons = { comment: "💬", reply: "↩", vote: "▲", pin_added: "📌" };
+          const icon = icons[n.type] || "💬";
+          const actions = { comment: "commented on", reply: "replied to your comment on", vote: "voted on your comment on", pin_added: "new pin" };
+          const action = actions[n.type] || "updated";
+          const unreadClass = n.read ? "" : "class='notif-row' style='border-left:3px solid #2563eb;'";
+          const readClass = n.read ? "class='notif-row'" : "class='notif-row' style='border-left:3px solid #2563eb;'";
+          return `<div ${readClass} data-nid="${escapeHtml(n.id)}" data-pid="${escapeHtml(n.pin_id)}">
+            <div style="display:flex;gap:8px;align-items:flex-start;">
+              <span style="font-size:16px;flex-shrink:0;">${icon}</span>
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:12px;"><b>${escapeHtml(n.by_name)}</b> ${action} ${escapeHtml(n.pin_title)}</div>
+                ${n.text_preview ? `<div style="font-size:11px;color:var(--text-dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">"${escapeHtml(n.text_preview)}"</div>` : ""}
+                <div style="font-size:10px;color:var(--text-muted);margin-top:2px;">${relativeTime(n.created_at)}</div>
+              </div>
+            </div>
+          </div>`;
+        }).join("")
+        : '<div style="padding:16px;color:var(--text-dim);text-align:center;">No notifications</div>'
 
-  const addMarker = (m) => {
-    if (!m._pinId || _chainPins.includes(m._pinId)) return;
-    _chainPins.push(m._pinId);
-    const countEl = document.getElementById("chain-count");
-    if (countEl) countEl.textContent = _chainPins.length;
-    const ring = L.circleMarker(m.getLatLng(), {
-      radius: 16,
-      color: "#2563eb",
-      fillColor: "transparent",
-      weight: 3,
-      interactive: false,
-    }).addTo(state.map);
-    selMarkers.push(ring);
+    }</div>
+  </div>`;
+  document.body.appendChild(ov);
+  document.getElementById("notif-close").onclick = () => ov.remove();
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+
+  document.getElementById("notif-clear").onclick = () => {
+    state.notifications = [];
+    ov.remove();
+    showNotificationsModal();
   };
 
-  // Wire per-marker click handlers to suppress popup
+  const pushToggle = document.getElementById("notif-push-toggle");
+  if (pushToggle) {
+    pushToggle.checked = window._isPushEnabled?.() || false;
+    pushToggle.onchange = async () => {
+      await window._togglePush?.();
+      pushToggle.checked = window._isPushEnabled?.() || false;
+    };
+  }
+
+  // Mark all as read on open
+  for (const n of state.notifications) n.read = true;
+  window._renderUI?.();
+
+  // Wire click handlers
+  ov.querySelectorAll("[data-nid]").forEach(row => {
+    row.onclick = async () => {
+      const pid = row.dataset.pid;
+      if (pid && state.map) {
+        const m = state.markers.find(mk => mk._pinId === pid);
+        if (m) {
+          state.map.flyTo(m.getLatLng(), 15, { duration: 1 });
+          setTimeout(() => showPinDetailModal(pid), 800);
+        }
+      }
+      ov.remove();
+    };
+  });
+}
+
+// --- Narrative Chain Builder ---
+
+let _cbPins = [], _cbNarratives = {};
+let _cbBranches = {};
+let _cbSelMarkers = [], _cbClickBindings = [];
+let _cbPreviewPoly = null;
+let _cbBranchPreviewPolys = [];
+let _cbPanel = null;
+let _cbMinimized = false;
+let _cbEditChainId = null;
+let _cbConnectFrom = null;
+
+export function showNarrativeChainBuilder(chainId) {
+  if (!state.map || !state.currentSet) return;
+
+  _cbEditChainId = chainId || null;
+  _cbPins = [];
+  _cbNarratives = {};
+  _cbBranches = {};
+  _cbSelMarkers = [];
+  _cbClickBindings = [];
+  _cbPreviewPoly = null;
+  _cbBranchPreviewPolys = [];
+  _cbMinimized = false;
+  _cbConnectFrom = null;
+
+  const isEditing = !!chainId;
+  const title = isEditing ? "🔗 Edit Chain" : "🔗 New Chain";
+  const saveLabel = isEditing ? "Update Chain" : "Save Chain";
+
+  const panel = document.createElement("div");
+  panel.id = "chain-builder-panel";
+  panel.innerHTML = `<div class="cb-header">
+    <h3 style="margin:0;font-size:14px;">${title}</h3>
+    <div style="display:flex;align-items:center;gap:4px;">
+      <button id="cb-minimize" style="background:none;border:none;font-size:18px;cursor:pointer;color:#9ca3af;line-height:1;padding:0 4px;" title="Minimize">⊟</button>
+      <button id="cb-close" style="background:none;border:none;font-size:20px;cursor:pointer;color:#9ca3af;line-height:1;">×</button>
+    </div>
+  </div>
+  <div id="cb-mini-bar">
+    <span>🔗 <span id="cb-mini-name">${title}</span> · <span id="cb-mini-count">0</span> pins</span>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <button id="cb-expand" style="padding:4px 10px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:4px;cursor:pointer;font-size:12px;">⊞ Expand</button>
+      <button id="cb-mini-cancel" style="padding:4px 10px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:12px;">Cancel</button>
+    </div>
+  </div>
+  <div class="cb-body">
+    <input id="cb-name" placeholder="Chain name" autocomplete="off" />
+    <textarea id="cb-desc" placeholder="Describe the story this chain tells…" rows="3"></textarea>
+    <input id="cb-tags" placeholder="Tags (comma-separated)" autocomplete="off" />
+    <div class="cb-section-title">Waypoints</div>
+    <div id="cb-waypoints"></div>
+    <div id="cb-empty-msg" style="padding:12px;color:var(--text-dim);text-align:center;font-size:11px;">Click any pin on the map to add it to the chain</div>
+  </div>
+  <div class="cb-footer">
+    <button id="cb-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:12px;">Cancel</button>
+    <button id="cb-save" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;font-size:12px;">${saveLabel}</button>
+  </div>`;
+  document.body.appendChild(panel);
+  _cbPanel = panel;
+
+  enterChainPinSelect();
+  renderChainWaypoints();
+
+  // Pre-populate when editing
+  if (isEditing) {
+    DB.getChain(chainId).then(chain => {
+      if (!chain || !_cbPanel) return;
+      document.getElementById("cb-name").value = chain.name || "";
+      document.getElementById("cb-desc").value = chain.description || "";
+      document.getElementById("cb-tags").value = (chain.tags || []).join(", ");
+      if (chain.pin_entries) {
+        _cbPins = [];
+        for (const entry of chain.pin_entries) {
+          if (!_cbPins.includes(entry.pin_id)) _cbPins.push(entry.pin_id);
+          _cbNarratives[entry.pin_id] = entry.narrative || "";
+          _cbBranches[entry.pin_id] = (entry.branches || []).map(b => ({
+            label: b.label || "",
+            next_pin_id: b.next_pin_id || "",
+          }));
+        }
+        // Add rings for pre-loaded pins
+        for (const pid of _cbPins) {
+          const m = state.markers.find(mk => mk._pinId === pid);
+          if (m) {
+            const ring = L.circleMarker(m.getLatLng(), {
+              radius: 16, color: "#2563eb", fillColor: "transparent",
+              weight: 3, interactive: false,
+            }).addTo(state.map);
+            _cbSelMarkers.push(ring);
+          }
+        }
+        renderChainWaypoints();
+      }
+    });
+  }
+
+  // Close handlers
+  const closeBuilder = () => { exitChainPinSelect(); panel.remove(); _cbPanel = null; };
+
+  document.getElementById("cb-close").onclick = closeBuilder;
+  document.getElementById("cb-cancel").onclick = closeBuilder;
+  document.getElementById("cb-mini-cancel").onclick = closeBuilder;
+  document.addEventListener("keydown", function onEsc(e) {
+    if (e.key === "Escape") { if (_cbConnectFrom) { cancelConnectMode(); return; } closeBuilder(); document.removeEventListener("keydown", onEsc); }
+  });
+
+  document.getElementById("cb-minimize").onclick = () => toggleChainBuilderMinimize();
+  document.getElementById("cb-expand").onclick = () => toggleChainBuilderMinimize();
+
+  document.getElementById("cb-save").onclick = async () => {
+    const name = document.getElementById("cb-name").value.trim();
+    const desc = document.getElementById("cb-desc").value.trim();
+    const tagsRaw = document.getElementById("cb-tags").value.trim();
+
+    if (!name) { toast("Enter a chain name", "#f97316"); return; }
+    if (_cbPins.length < 2) { toast("Select at least 2 pins", "#f97316"); return; }
+
+    const now = Date.now();
+    const chain = {
+      chain_id: _cbEditChainId || generate_uuid(),
+      community_id: state.currentSet,
+      name,
+      description: desc,
+      cover_pin_id: null,
+      author_pubkey: state.signingPublicKey || "",
+      author_display_name: state.displayName || "Me",
+      tags: tagsRaw ? tagsRaw.split(",").map(s => s.trim()).filter(Boolean) : [],
+      pin_entries: _cbPins.map(pid => {
+        const raw = _cbBranches[pid] || [];
+        const filtered = raw.filter(b => b && b.label && b.label.trim() && b.next_pin_id);
+        return {
+          pin_id: pid,
+          narrative: _cbNarratives[pid] || "",
+          audio_ciphertext: null, audio_nonce: null, audio_type: null,
+          branches: filtered,
+        };
+      }),
+      pin_ids: [..._cbPins],
+      created_at: _cbEditChainId ? undefined : now,
+      updated_at: now,
+    };
+    if (_cbEditChainId) {
+      const existing = await DB.getChain(_cbEditChainId);
+      if (existing && existing.author_pubkey && existing.author_pubkey !== state.signingPublicKey) {
+        toast("Only the chain author can edit", "#dc2626"); return;
+      }
+      if (existing) chain.created_at = existing.created_at;
+    }
+    await DB.saveChain(chain);
+    window._broadcast?.("new_chain", chain);
+    exitChainPinSelect(); panel.remove(); _cbPanel = null;
+    await loadChains();
+    toast(_cbEditChainId ? "Chain updated: " + name : "Chain saved: " + name, "#16a34a");
+  };
+}
+
+function toggleChainBuilderMinimize() {
+  if (!_cbPanel) return;
+  _cbMinimized = !_cbMinimized;
+  _cbPanel.classList.toggle("cb-minimized", _cbMinimized);
+  if (_cbMinimized) {
+    const name = document.getElementById("cb-name")?.value?.trim() || "New Chain";
+    document.getElementById("cb-mini-name").textContent = name;
+    document.getElementById("cb-mini-count").textContent = _cbPins.length;
+  }
+}
+
+function enterChainPinSelect() {
   for (const mk of state.markers) {
     const handler = (e) => {
       L.DomEvent.stop(e);
-      addMarker(mk);
+      if (!mk._pinId) return;
+
+      // Connect mode: create a branch from source to this target
+      if (_cbConnectFrom) {
+        if (mk._pinId === _cbConnectFrom) { cancelConnectMode(); return; }
+        if (!_cbPins.includes(mk._pinId)) return;
+        if (!_cbBranches[_cbConnectFrom]) _cbBranches[_cbConnectFrom] = [];
+        // Avoid duplicate branch to same target
+        if (!_cbBranches[_cbConnectFrom].some(b => b.next_pin_id === mk._pinId)) {
+          _cbBranches[_cbConnectFrom].push({ label: "", next_pin_id: mk._pinId });
+        }
+        cancelConnectMode();
+        renderChainWaypoints();
+        return;
+      }
+
+      // Normal mode: add pin to chain
+      if (_cbPins.includes(mk._pinId)) return;
+      _cbPins.push(mk._pinId);
+      _cbNarratives[mk._pinId] = _cbNarratives[mk._pinId] || "";
+      _cbBranches[mk._pinId] = _cbBranches[mk._pinId] || [];
+      const ring = L.circleMarker(mk.getLatLng(), {
+        radius: 16, color: "#2563eb", fillColor: "transparent",
+        weight: 3, interactive: false,
+      }).addTo(state.map);
+      _cbSelMarkers.push(ring);
+      renderChainWaypoints();
     };
     mk.on("click", handler);
-    clickBindings.push({ mk, handler });
+    _cbClickBindings.push({ mk, handler });
   }
-
   state.map.getContainer().style.cursor = "crosshair";
-
-  const cleanup = () => {
-    state.map.getContainer().style.cursor = "";
-    document.getElementById("chain-sel-bar")?.remove();
-    for (const { mk, handler } of clickBindings) mk.off("click", handler);
-    clickBindings.length = 0;
-    selMarkers.forEach(r => state.map.removeLayer(r));
-    selMarkers.length = 0;
-  };
-
-  document.getElementById("chain-done").onclick = async () => {
-    if (_chainPins.length < 2) { toast("Select at least 2 pins", "#f97316"); return; }
-    await DB.saveChain({ chain_id: generate_uuid(), community_id: state.currentSet, name: _chainName, pin_ids: [..._chainPins], created_at: Date.now() });
-    cleanup();
-    await loadChains();
-    toast("Chain saved: " + _chainName, "#16a34a");
-  };
-  document.getElementById("chain-cancel").onclick = () => { _chainPins = []; _chainName = ""; cleanup(); };
 }
 
-export async function renderChain(chainId) {
-  const chain = await DB.getChain(chainId);
-  if (!chain || !chain.pin_ids?.length) return;
-  const coords = [];
-  for (const pid of chain.pin_ids) {
+function enterConnectMode(sourcePid) {
+  _cbConnectFrom = sourcePid;
+  renderChainWaypoints();
+}
+
+function cancelConnectMode() {
+  _cbConnectFrom = null;
+  renderChainWaypoints();
+}
+
+function exitChainPinSelect() {
+  state.map.getContainer().style.cursor = "";
+  for (const { mk, handler } of _cbClickBindings) mk.off("click", handler);
+  _cbClickBindings.length = 0;
+  for (const r of _cbSelMarkers) state.map.removeLayer(r);
+  _cbSelMarkers.length = 0;
+  if (_cbPreviewPoly) { state.map.removeLayer(_cbPreviewPoly); _cbPreviewPoly = null; }
+  for (const bp of _cbBranchPreviewPolys) state.map.removeLayer(bp);
+  _cbBranchPreviewPolys.length = 0;
+}
+
+function updateChainPreview() {
+  if (_cbPreviewPoly) { state.map.removeLayer(_cbPreviewPoly); _cbPreviewPoly = null; }
+  for (const bp of _cbBranchPreviewPolys) state.map.removeLayer(bp);
+  _cbBranchPreviewPolys.length = 0;
+  if (_cbPins.length < 2) return;
+
+  const pc = {};
+  for (const pid of _cbPins) {
     const m = state.markers.find(mk => mk._pinId === pid);
-    if (m) coords.push(m.getLatLng());
+    if (m) pc[pid] = m.getLatLng();
+  }
+
+  // Blue segments: consecutive pairs where source has no branches
+  let segCoords = [];
+  for (let i = 0; i < _cbPins.length; i++) {
+    if (!pc[_cbPins[i]]) continue;
+    if (i > 0) {
+      const prevBranches = _cbBranches[_cbPins[i - 1]];
+      if (prevBranches?.length > 0 && segCoords.length > 0) {
+        if (segCoords.length >= 2) {
+          const bp = L.polyline(segCoords, { color: "#2563eb", weight: 3, dashArray: "8 4", interactive: false }).addTo(state.map);
+          _cbBranchPreviewPolys.push(bp);
+        }
+        segCoords = [];
+      }
+    }
+    segCoords.push(pc[_cbPins[i]]);
+  }
+  if (segCoords.length >= 2) {
+    const bp = L.polyline(segCoords, { color: "#2563eb", weight: 3, dashArray: "8 4", interactive: false }).addTo(state.map);
+    _cbBranchPreviewPolys.push(bp);
+    _cbPreviewPoly = bp; // keep last as "main" for cleanup
+  }
+
+  // Purple fork segments
+  for (const pid of _cbPins) {
+    const branches = _cbBranches[pid];
+    if (!branches?.length) continue;
+    const from = pc[pid];
+    if (!from) continue;
+    // Explicit branches
+    for (const b of branches) {
+      if (!b.next_pin_id) continue;
+      const to = pc[b.next_pin_id];
+      if (!to) continue;
+      const bp = L.polyline([from, to], { color: "#7c3aed", weight: 2, dashArray: "4 4", interactive: false }).addTo(state.map);
+      _cbBranchPreviewPolys.push(bp);
+    }
+  }
+}
+
+function renderChainWaypoints() {
+  if (!_cbPanel) return;
+  const list = _cbPanel.querySelector("#cb-waypoints");
+  const empty = _cbPanel.querySelector("#cb-empty-msg");
+  if (!list) return;
+  if (_cbPins.length === 0) {
+    list.innerHTML = "";
+    if (empty) empty.style.display = "block";
+    updateChainPreview();
+    return;
+  }
+  if (empty) empty.style.display = "none";
+
+  list.innerHTML = _cbPins.map((pid, i) => {
+    const m = state.markers.find(mk => mk._pinId === pid);
+    const title = m ? (m._pinTitle || m._pinData?.title || "Untitled") : "[deleted]";
+    const narrative = _cbNarratives[pid] || "";
+    const first = i === 0, last = i === _cbPins.length - 1;
+    const branches = _cbBranches[pid] || [];
+    const isConnectSource = _cbConnectFrom === pid;
+    const otherPids = _cbPins.filter(p => p !== pid);
+
+    // Build simplified branch display rows
+    const branchRows = branches.map((b, bi) => {
+      const targetPid = b.next_pin_id;
+      const targetIdx = _cbPins.indexOf(targetPid);
+      const tm = state.markers.find(mk => mk._pinId === targetPid);
+      const tTitle = tm ? (tm._pinTitle || tm._pinData?.title || "Untitled") : "[deleted]";
+      const targetLabel = targetIdx >= 0 ? `#${targetIdx + 1} ${escapeHtml(tTitle.slice(0, 20))}` : "[deleted]";
+      const orphan = targetIdx < 0;
+      return `<div class="cb-branch-row" style="display:flex;align-items:center;gap:4px;margin-top:3px;">
+        <span style="font-size:11px;color:#7c3aed;flex-shrink:0;">→</span>
+        <span style="font-size:11px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${orphan ? 'color:#dc2626;' : ''}">${targetLabel}</span>
+        <button data-br-rm="${pid}" data-br-idx="${bi}" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:13px;padding:0 2px;line-height:1;flex-shrink:0;" title="Remove branch">×</button>
+      </div>`;
+    }).join("");
+
+    // Connect mode highlight for this waypoint
+    const connectHighlight = isConnectSource ? "border-color:#7c3aed;box-shadow:0 0 0 1px #7c3aed;" : "";
+    const connectLabel = isConnectSource ? " <span style=\"font-size:10px;color:#7c3aed;font-weight:600;\">(click target)</span>" : "";
+
+    return `<div class="cb-waypoint" style="${connectHighlight}">
+      <div class="wp-header">
+        <span class="wp-pin-title">${i + 1}. ${escapeHtml(title)}${connectLabel}</span>
+        <div class="wp-actions">
+          <button data-wp-up="${pid}" ${first ? "disabled style='visibility:hidden;'" : ""}>▲</button>
+          <button data-wp-down="${pid}" ${last ? "disabled style='visibility:hidden;'" : ""}>▼</button>
+          <button data-wp-rm="${pid}" class="wp-remove">×</button>
+        </div>
+      </div>
+      <textarea data-wp-narr="${pid}" placeholder="Narrative for this waypoint…" rows="2">${escapeHtml(narrative)}</textarea>
+      <div class="cb-branches" style="margin-top:6px;border-top:1px solid var(--border-light);padding-top:4px;">
+        ${branchRows || `<div style="font-size:10px;color:var(--text-muted);">no destinations</div>`}
+        ${otherPids.length > 0 ? `<button data-br-connect="${pid}" style="margin-top:4px;padding:3px 8px;border:1px solid #7c3aed;background:transparent;color:#7c3aed;border-radius:3px;cursor:pointer;font-size:11px;${isConnectSource ? 'background:#7c3aed;color:white;' : ''}">${isConnectSource ? '✓ Done / Cancel' : '⊕ Connect to pin'}</button>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+
+  // Wire reorder buttons
+  list.querySelectorAll("[data-wp-up]").forEach(btn => {
+    btn.onclick = () => {
+      const pid = btn.dataset.wpUp;
+      const idx = _cbPins.indexOf(pid);
+      if (idx > 0) {
+        [_cbPins[idx], _cbPins[idx - 1]] = [_cbPins[idx - 1], _cbPins[idx]];
+        renderChainWaypoints();
+      }
+    };
+  });
+  list.querySelectorAll("[data-wp-down]").forEach(btn => {
+    btn.onclick = () => {
+      const pid = btn.dataset.wpDown;
+      const idx = _cbPins.indexOf(pid);
+      if (idx >= 0 && idx < _cbPins.length - 1) {
+        [_cbPins[idx], _cbPins[idx + 1]] = [_cbPins[idx + 1], _cbPins[idx]];
+        renderChainWaypoints();
+      }
+    };
+  });
+  // Wire remove buttons (with orphan branch cleanup)
+  list.querySelectorAll("[data-wp-rm]").forEach(btn => {
+    btn.onclick = () => {
+      const pid = btn.dataset.wpRm;
+      _cbPins = _cbPins.filter(p => p !== pid);
+      delete _cbNarratives[pid];
+      delete _cbBranches[pid];
+      for (const otherPid of _cbPins) {
+        if (_cbBranches[otherPid]) {
+          _cbBranches[otherPid] = _cbBranches[otherPid].filter(b => b.next_pin_id !== pid);
+        }
+      }
+      const ringIdx = _cbSelMarkers.findIndex(r => {
+        const m = state.markers.find(mk => mk._pinId === pid);
+        return m && r.getLatLng().equals(m.getLatLng());
+      });
+      if (ringIdx >= 0) { state.map.removeLayer(_cbSelMarkers[ringIdx]); _cbSelMarkers.splice(ringIdx, 1); }
+      renderChainWaypoints();
+    };
+  });
+  // Wire narrative textareas
+  list.querySelectorAll("[data-wp-narr]").forEach(ta => {
+    const pid = ta.dataset.wpNarr;
+    ta.oninput = () => { _cbNarratives[pid] = ta.value; };
+  });
+  // Wire connect buttons
+  list.querySelectorAll("[data-br-connect]").forEach(btn => {
+    btn.onclick = () => {
+      const pid = btn.dataset.brConnect;
+      if (_cbConnectFrom === pid) { cancelConnectMode(); }
+      else { enterConnectMode(pid); }
+    };
+  });
+  // Wire branch remove buttons
+  list.querySelectorAll("[data-br-rm]").forEach(btn => {
+    btn.onclick = () => {
+      const pid = btn.dataset.brRm;
+      const idx = parseInt(btn.dataset.brIdx, 10);
+      if (_cbBranches[pid]) {
+        _cbBranches[pid].splice(idx, 1);
+        renderChainWaypoints();
+      }
+    };
+  });
+
+  // Connect mode instruction banner
+  if (_cbConnectFrom) {
+    const srcIdx = _cbPins.indexOf(_cbConnectFrom);
+    const srcM = state.markers.find(mk => mk._pinId === _cbConnectFrom);
+    const srcTitle = srcM ? (srcM._pinTitle || "Untitled") : "source";
+    const banner = document.createElement("div");
+    banner.id = "cb-connect-banner";
+    banner.style.cssText = "padding:6px 8px;margin-bottom:6px;background:rgba(124,58,237,0.1);border:1px solid #7c3aed;border-radius:4px;font-size:11px;color:#7c3aed;text-align:center;";
+    banner.textContent = `⊕ Connecting from #${srcIdx + 1} ${escapeHtml(srcTitle)} — click a target pin on the map`;
+    list.insertBefore(banner, list.firstChild);
+  }
+
+  // Sync minimized bar count
+  if (_cbMinimized && _cbPanel) {
+    const countEl = _cbPanel.querySelector("#cb-mini-count");
+    if (countEl) countEl.textContent = _cbPins.length;
+  }
+  updateChainPreview();
+}
+
+export async function renderChainStory(chainId) {
+  const chain = await DB.getChain(chainId);
+  if (!chain || !chain.pin_entries?.length) return;
+
+  // Resolve valid pins to coordinates
+  const validEntries = [];
+  const coords = [];
+  for (const entry of chain.pin_entries) {
+    const m = state.markers.find(mk => mk._pinId === entry.pin_id);
+    if (m) { validEntries.push(entry); coords.push(m.getLatLng()); }
   }
   if (coords.length < 2) return;
-  const poly = L.polyline(coords, { color: "#2563eb", weight: 3, dashArray: "8 4" }).addTo(state.map);
-  state.map.fitBounds(poly.getBounds().pad(0.2));
-  // Fire slideshow — keep polyline visible so the chain is traceable during the fly-through
-  startSlideshow(chain.pin_ids);
-  // Remove polyline when slideshow popup closes (rough: after 30s timeout or on user interaction)
-  setTimeout(() => { if (state.map.hasLayer(poly)) state.map.removeLayer(poly); }, 60000);
+
+  // Draw story path: blue for non-branch segments, purple for fork connections
+  const pinCoordMap = {};
+  validEntries.forEach(e => {
+    const m = state.markers.find(mk => mk._pinId === e.pin_id);
+    if (m) pinCoordMap[e.pin_id] = m.getLatLng();
+  });
+
+  const storyGroup = L.featureGroup().addTo(state.map);
+
+  // Blue segments: consecutive where source has no branches
+  let segCoords = [];
+  for (let i = 0; i < validEntries.length; i++) {
+    const coord = pinCoordMap[validEntries[i].pin_id];
+    if (!coord) continue;
+    if (i > 0) {
+      const prevBranches = validEntries[i - 1].branches;
+      if (prevBranches?.length > 0 && segCoords.length > 0) {
+        if (segCoords.length >= 2) {
+          L.polyline(segCoords, { color: "#2563eb", weight: 3, dashArray: "8 4", interactive: false }).addTo(storyGroup);
+        }
+        segCoords = [];
+      }
+    }
+    segCoords.push(coord);
+  }
+  if (segCoords.length >= 2) {
+    L.polyline(segCoords, { color: "#2563eb", weight: 3, dashArray: "8 4", interactive: false }).addTo(storyGroup);
+  }
+
+  // Purple fork segments
+  for (const entry of validEntries) {
+    if (!entry.branches?.length) continue;
+    const from = pinCoordMap[entry.pin_id];
+    if (!from) continue;
+    // Explicit branches
+    for (const b of entry.branches) {
+      const to = pinCoordMap[b.next_pin_id];
+      if (to) {
+        L.polyline([from, to], { color: "#7c3aed", weight: 2, dashArray: "4 4", interactive: false }).addTo(storyGroup);
+      }
+    }
+  }
+
+  // Add numbered circle markers at each waypoint
+  const waypointMarkers = [];
+  validEntries.forEach((entry, i) => {
+    const m = state.markers.find(mk => mk._pinId === entry.pin_id);
+    if (!m) return;
+    const numIcon = L.divIcon({
+      className: "chain-waypoint-marker",
+      html: `<span>${i + 1}</span>`,
+      iconSize: [24, 24],
+      iconAnchor: [12, 12],
+    });
+    const wm = L.marker(m.getLatLng(), { icon: numIcon, interactive: false }).addTo(state.map);
+    waypointMarkers.push(wm);
+  });
+
+  // Highlight current waypoint marker
+  const highlightWaypoint = (idx) => {
+    waypointMarkers.forEach((wm, i) => {
+      const el = wm.getElement();
+      if (!el) return;
+      const span = el.querySelector("span");
+      if (!span) return;
+      span.style.background = i === idx ? "#2563eb" : "#6b7280";
+      span.style.transform = i === idx ? "scale(1.3)" : "scale(1)";
+      span.style.transition = "transform 0.15s, background 0.15s";
+    });
+  };
+
+  state.map.fitBounds(storyGroup.getBounds().pad(0.1));
+
+  // Build pin_id → index map for branch jumps
+  const pinIndexMap = {};
+  validEntries.forEach((e, i) => { pinIndexMap[e.pin_id] = i; });
+
+  // Build the story card renderer
+  const renderCard = (index, pid, marker) => {
+    highlightWaypoint(index);
+    const entry = validEntries.find(e => e.pin_id === pid);
+    const narrative = entry?.narrative || "";
+    const pinData = marker._pinData || {};
+    const pinTitle = marker._pinTitle || pinData.title || "Untitled";
+    const pinNote = pinData.note || "";
+    const tags = chain.tags || [];
+    const branches = entry?.branches || [];
+
+    // Build media HTML from pin attachments
+    let mediaHtml = "";
+    const r = marker._media;
+    if (r && state.dek) {
+      try {
+        const dec = decrypt_raw_bytes(r.ciphertext, r.nonce, state.dek);
+        const mt = r.type || "";
+        const blob = new Blob([dec], { type: mt });
+        const url = URL.createObjectURL(blob);
+        if (mt.startsWith("image/")) mediaHtml = `<img src="${url}" style="max-width:100%;max-height:25vh;border-radius:6px;margin-top:8px;">`;
+        else if (mt.startsWith("video/")) mediaHtml = `<video src="${url}" controls style="max-width:100%;max-height:25vh;border-radius:6px;margin-top:8px;"></video>`;
+        else if (mt.startsWith("audio/")) mediaHtml = `<audio src="${url}" controls style="width:100%;margin-top:8px;"></audio>`;
+      } catch (_) {}
+    }
+
+    // Build branch buttons for valid branches
+    let branchHtml = "";
+    const validBranches = branches.filter(b => b.label && b.next_pin_id && pinIndexMap[b.next_pin_id] !== undefined);
+    if (validBranches.length > 0) {
+      branchHtml = `<div style="border-top:1px solid var(--border-light);padding-top:8px;margin-top:8px;">
+        <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">Choose your path:</div>
+        ${validBranches.map(b => `<button class="chain-branch-btn" data-jump="${pinIndexMap[b.next_pin_id]}" style="display:block;width:100%;padding:6px 10px;margin-bottom:4px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:4px;cursor:pointer;font-size:12px;text-align:left;">▶ ${escapeHtml(b.label)}</button>`).join("")}
+      </div>`;
+    }
+
+    const tagLine = tags.length ? ` · ${escapeHtml(tags.join(", "))}` : "";
+    const narrativeBlock = narrative
+      ? `<div style="font-size:14px;line-height:1.5;margin-bottom:10px;white-space:pre-wrap;">${escapeHtml(narrative)}</div>`
+      : "";
+    const hasSecondary = pinTitle || pinNote || mediaHtml;
+
+    const html = `<div style="padding:4px 0;">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px;">
+        Stop ${index + 1} of ${validEntries.length}${tagLine}
+      </div>
+      ${narrativeBlock}
+      ${hasSecondary ? `<div style="border-top:1px solid var(--border-light);padding-top:8px;margin-top:8px;">
+        ${pinTitle ? `<div style="font-size:12px;font-weight:600;">${"📌"} ${escapeHtml(pinTitle)}</div>` : ""}
+        ${pinNote ? `<div style="font-size:11px;color:var(--text-dim);margin-top:2px;">${escapeHtml(pinNote)}</div>` : ""}
+        ${mediaHtml}
+      </div>` : ""}
+      ${branchHtml}
+    </div>`;
+
+    // Wire branch buttons after render (they live in slideshow-card which persists)
+    setTimeout(() => {
+      const card = document.getElementById("slideshow-card");
+      if (!card) return;
+      card.querySelectorAll(".chain-branch-btn").forEach(btn => {
+        btn.onclick = () => {
+          const jumpIdx = parseInt(btn.dataset.jump, 10);
+          if (window._slideshowGoTo) window._slideshowGoTo(jumpIdx);
+        };
+      });
+    }, 0);
+
+    return html;
+  };
+
+  // Cleanup on story exit
+  const onExit = () => {
+    state.map.removeLayer(storyGroup);
+    waypointMarkers.forEach(wm => state.map.removeLayer(wm));
+  };
+
+  startSlideshow(validEntries.map(e => e.pin_id), {
+    cardRenderer: renderCard,
+    onExit,
+    autoPlay: false,
+    speed: 7000,
+    loop: false,
+  });
 }
 
 export function addSelectionTool() {
@@ -4488,11 +5147,7 @@ export async function renderAnnotationThread(pinId, threadEl) {
   if (threads.length === 0) return;
 
   const annotations = await DB.getAnnotationsByPin(pinId, 0, 100);
-  const tombstones = new Set();
-  for (const a of annotations) {
-    const ts = await DB.getTombstonesForTarget(a.annotation_id);
-    for (const t of ts) tombstones.add(a.annotation_id);
-  }
+  const tombstones = await DB.getTombstoneTargetIds(annotations.map(a => a.annotation_id));
 
   const visible = annotations.filter(a => !tombstones.has(a.annotation_id));
 
@@ -4501,7 +5156,19 @@ export async function renderAnnotationThread(pinId, threadEl) {
     html += '<div style="color:var(--text-dim);font-size:11px;padding:4px 0;">No comments yet</div>';
   }
 
-  for (const ann of visible) {
+  // Build flat map for lookup
+  const annMap = {};
+  for (const a of visible) annMap[a.annotation_id] = a;
+  const topLevel = visible.filter(a => !a.parent_id);
+  const replies = {};
+  for (const a of visible) {
+    if (a.parent_id) {
+      replies[a.parent_id] = replies[a.parent_id] || [];
+      replies[a.parent_id].push(a);
+    }
+  }
+
+  function renderAnn(ann, depth) {
     try {
       const dec = decrypt_annotation(ann.ciphertext, ann.nonce, state.dek);
       const text = dec.text || "";
@@ -4519,8 +5186,22 @@ export async function renderAnnotationThread(pinId, threadEl) {
       const typeIcon = typeIcons[annType] || "💬";
       const typeClass = annType === "death_mark" ? "ann-death" : annType === "dispute" ? "ann-dispute" : "";
       const ttlLabel = ttl ? ` · expires ${relativeTime(Date.now() - (ttl * 1000))}` : "";
+      const indent = depth > 0 ? `margin-left:${Math.min(depth * 16, 64)}px;border-left:2px solid var(--border-light);padding-left:8px;` : "";
 
-      html += `<div class="ann-item ${typeClass}" data-ann-id="${escapeHtml(ann.annotation_id)}">
+      let mediaHtml = "";
+      if (ann.media && state.dek) {
+        try {
+          const decMedia = decrypt_raw_bytes(ann.media.ciphertext, ann.media.nonce, state.dek);
+          const mt = ann.media.type || "";
+          const blob = new Blob([decMedia], { type: mt });
+          const url = URL.createObjectURL(blob);
+          if (mt.startsWith("image/")) mediaHtml = `<img src="${url}" class="ann-media-img">`;
+          else if (mt.startsWith("video/")) mediaHtml = `<video src="${url}" controls class="ann-media-vid"></video>`;
+          else if (mt.startsWith("audio/")) mediaHtml = `<audio src="${url}" controls class="ann-media-aud"></audio>`;
+        } catch (_) {}
+      }
+
+      let h = `<div class="ann-item ${typeClass}" data-ann-id="${escapeHtml(ann.annotation_id)}" style="${indent}">
         <div class="ann-meta">
           <span class="ann-author">${escapeHtml(authorName)}</span>
           <span class="ann-type-icon">${typeIcon}</span>
@@ -4528,21 +5209,37 @@ export async function renderAnnotationThread(pinId, threadEl) {
           ${ttlLabel ? `<span class="ann-ttl">${ttlLabel}</span>` : ""}
         </div>
         <div class="ann-text">${escapeHtml(text)}</div>
+        ${mediaHtml}
         <div class="ann-actions">
           <button class="ann-vote-btn ann-up" data-ann-id="${escapeHtml(ann.annotation_id)}">▲ <span class="ann-up-count">${upvotesRaw}</span></button>
           <span class="ann-score" style="font-size:11px;color:${scoreColor};font-weight:600;min-width:28px;text-align:center;">${upvotesRaw - downvotesRaw > 0 ? "+" : ""}${upvotesRaw - downvotesRaw}</span>
           <button class="ann-vote-btn ann-down" data-ann-id="${escapeHtml(ann.annotation_id)}">▼ <span class="ann-down-count">${downvotesRaw}</span></button>
+          <button class="ann-reply-btn" data-ann-id="${escapeHtml(ann.annotation_id)}" style="padding:1px 6px;border:1px solid var(--border);background:var(--bg-input);border-radius:3px;cursor:pointer;font-size:11px;color:var(--text-dim);">↩ Reply</button>
           ${ann.author_pubkey === state.signingPublicKey ? `<button class="ann-delete-btn" data-ann-id="${escapeHtml(ann.annotation_id)}">×</button>` : ""}
         </div>
       </div>`;
+
+      // Render child replies
+      const childReplies = replies[ann.annotation_id] || [];
+      for (const child of childReplies) {
+        h += renderAnn(child, depth + 1);
+      }
+      return h;
     } catch (_) {
-      html += '<div class="ann-item ann-encrypted" style="opacity:0.4;font-size:11px;color:var(--text-dim);">🔒 encrypted annotation</div>';
+      return '<div class="ann-item ann-encrypted" style="opacity:0.4;font-size:11px;color:var(--text-dim);">🔒 encrypted annotation</div>';
     }
+  }
+
+  for (const ann of topLevel) {
+    html += renderAnn(ann, 0);
   }
 
   html += `<div class="ann-form">
     <textarea class="ann-input" placeholder="Add a comment..." rows="2"></textarea>
     <button class="ann-submit-btn">Post</button>
+    <input type="file" class="ann-file-input" accept="image/*,video/*,audio/*" style="display:none;" />
+    <button class="ann-attach-btn" title="Attach media" style="padding:4px 8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:12px;flex-shrink:0;">📎</button>
+    <span class="ann-file-name" style="display:none;font-size:10px;color:var(--text-dim);align-self:center;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
   </div>`;
 
   for (const el of threads) {

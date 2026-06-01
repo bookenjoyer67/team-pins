@@ -79,6 +79,8 @@ pub struct CommunityConfig {
     pub wrapped_dek: String,
     pub key_derivation: String,
     pub published: bool,
+    #[serde(default = "default_visibility")]
+    pub visibility: String,
     pub description: String,
     pub owner_pubkey: String,
     pub members: Vec<MemberRecord>,
@@ -88,6 +90,8 @@ pub struct CommunityConfig {
     pub join_wrapped_dek: Option<String>,
     pub used_token_nonces: Vec<String>,
 }
+
+fn default_visibility() -> String { "public".to_string() }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InviteToken {

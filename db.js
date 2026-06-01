@@ -246,6 +246,8 @@ export async function deleteTeam(teamId) {
   txn.objectStore("settings").delete(teamId);
   txn.objectStore("layers").delete(teamId);
   txn.objectStore("communities").delete(teamId);
+ const chainKeys = await promisify(txn.objectStore("chains").index("community_id").getAllKeys(teamId));
+  for (const key of chainKeys) txn.objectStore("chains").delete(key);
   if (txn.objectStoreNames.contains("schemas")) {
     try {
       const schemaKeys = await promisify(txn.objectStore("schemas").index("team_id").getAllKeys(teamId));
@@ -334,6 +336,18 @@ export async function saveTombstone(tombstone) {
 export async function getTombstone(tombstoneId) {
   await openDB();
   return promisify(tx("tombstones").get(tombstoneId));
+}
+
+export async function getTombstoneTargetIds(annotationIds) {
+  if (!annotationIds || !annotationIds.length) return new Set();
+  await openDB();
+  const all = await promisify(tx("tombstones").getAll());
+  const idSet = new Set(annotationIds);
+  const tombstoned = new Set();
+  for (const t of all) {
+    if (idSet.has(t.target_id)) tombstoned.add(t.target_id);
+  }
+  return tombstoned;
 }
 
 // --- layers ---
@@ -480,17 +494,50 @@ export async function getAllLayerDeks() {
 }
 
 // --- chains ---
+
+function upgradeChain(chain) {
+  if (!chain) return chain;
+  if (chain.pin_entries && Array.isArray(chain.pin_entries) && chain.pin_entries.length > 0) {
+    chain.pin_ids = chain.pin_entries.map(e => e.pin_id);
+  } else if (chain.pin_ids && Array.isArray(chain.pin_ids)) {
+    chain.pin_entries = chain.pin_ids.map(pid => ({
+      pin_id: pid,
+      narrative: "",
+      audio_ciphertext: null,
+      audio_nonce: null,
+      audio_type: null,
+    }));
+  } else {
+    chain.pin_entries = [];
+    chain.pin_ids = [];
+  }
+  for (const entry of chain.pin_entries) {
+    if (!entry.branches) entry.branches = [];
+  }
+  if (!chain.description && chain.description !== "") chain.description = "";
+  if (!chain.cover_pin_id && chain.cover_pin_id !== null) chain.cover_pin_id = null;
+  if (!chain.author_pubkey && chain.author_pubkey !== "") chain.author_pubkey = "";
+  if (!chain.author_display_name && chain.author_display_name !== "") chain.author_display_name = "";
+  if (!chain.tags) chain.tags = [];
+  if (!chain.updated_at) chain.updated_at = chain.created_at || Date.now();
+  return chain;
+}
+
 export async function saveChain(chain) {
   await openDB();
-  return promisify(tx("chains", "readwrite").put(chain));
+  const normalized = upgradeChain(chain);
+  normalized.updated_at = Date.now();
+  return promisify(tx("chains", "readwrite").put(normalized));
 }
 export async function getChain(chainId) {
   await openDB();
-  return promisify(tx("chains").get(chainId));
+  const result = await promisify(tx("chains").get(chainId));
+  return upgradeChain(result);
 }
 export async function getChainsByCommunity(communityId) {
   await openDB();
-  return promisify(tx("chains").index("community_id").getAll(communityId));
+  const results = await promisify(tx("chains").index("community_id").getAll(communityId));
+  return results.map(upgradeChain);
 }
 export async function deleteChain(chainId) {
   await openDB();
@@ -527,7 +574,7 @@ export async function saveTombstones(tombstones) {
   if (!tombstones.length) return;
   await openDB();
   const store = tx("tombstones", "readwrite");
-  const ops = tombstone.map(t => promisify(store.put(t)));
+  const ops = tombstones.map(t => promisify(store.put(t)));
   return Promise.all(ops);
 }
 

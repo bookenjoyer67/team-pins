@@ -38,3 +38,6 @@ android/app/release/
 # Android
 android/local.properties
 android/.gradle/
+
+# piggpin exports
+*.piggpin

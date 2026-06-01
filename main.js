@@ -4,6 +4,7 @@ import init, {
   generate_qr_svg, generate_uuid,
   generate_signing_keypair, sign, verify,
   encrypt_annotation,
+  encrypt_raw_bytes,
 } from "./core/pkg/e2e_core.js";
 import * as DB from "./db.js";
 import * as Peer from "./peer.js";
@@ -813,7 +814,7 @@ async function joinCommunityFromInvite({
   const existing = await DB.getTeam(sid);
   if (!existing) {
     await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "", community_wrapped_dek: result.wrapped_dek || "" });
-    await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "", visibility: "private", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [], relay_url: relayUrl || null });
+    await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "",           visibility: result.visibility || "public", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [], relay_url: relayUrl || null });
     await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: "Default", color: "#2563eb", visible: true, opacity: 1.0 }]);
     window._names[sid] = (result.name || name) + " (← joined)";
   }
@@ -871,6 +872,7 @@ function wireGlobals() {
   window._isPushEnabled = isPushEnabled;
   window._loadPins = Map.loadPins;
   window._loadDrawings = Map.loadDrawings;
+  window._loadChains = Map.loadChains;
   window._loadSetList = Map.loadSetList;
   window._switchSet = Map.switchSet;
   window._createSet = Map.createSet;
@@ -978,24 +980,35 @@ async function handleAnnotationSubmit(b) {
   const thread = b.closest(".annotation-thread");
   if (!thread) return;
   const pinId = thread.dataset.pinId;
-  const input = thread.querySelector(".ann-input");
+  const parentId = b.dataset.parentId || null;
+  const input = thread.querySelector(b.dataset.parentId ? `.ann-reply-input[data-reply="${b.dataset.parentId}"]` : ".ann-input");
+  const fileInput = thread.querySelector(".ann-file-input");
   const text = input?.value?.trim();
-  if (!text || !state.currentSet || !state.dek) return;
+  if (!text && !fileInput?.files?.length) return;
+  if (!state.currentSet || !state.dek) return;
   b.disabled = true;
   b.textContent = "...";
   const annId = generate_uuid();
   try {
-    const enc = encrypt_annotation(text, state.displayName, "comment", null, state.dek);
+    const enc = encrypt_annotation(text || "", state.displayName, "comment", null, state.dek);
     const annotation = {
       annotation_id: annId, pin_id: pinId, community_id: state.currentSet,
       ciphertext: enc.ciphertext, nonce: enc.nonce,
       author_pubkey: state.signingPublicKey, created_at: Date.now(), votes: [],
+      parent_id: parentId,
     };
+    if (fileInput?.files?.length) {
+      const file = fileInput.files[0];
+      const buf = new Uint8Array(await file.arrayBuffer());
+      const menc = encrypt_raw_bytes(buf, state.dek);
+      annotation.media = { ciphertext: menc.ciphertext, nonce: menc.nonce, type: file.type, name: file.name };
+      fileInput.value = "";
+    }
     await DB.saveAnnotation(annotation);
     Sync.broadcastAnnotation(annotation);
     if (input) input.value = "";
     Map.renderAnnotationThread(pinId);
-    addHistory("Comment added", text.slice(0, 30));
+    addHistory("Comment added", (text || "[media]").slice(0, 30));
   } catch (e) { console.warn("Comment post failed:", e); toast("Failed to post comment", "#dc2626"); }
   b.disabled = false;
   b.textContent = "Post";
@@ -1081,14 +1094,57 @@ document.addEventListener("click", async e => { try {
     await handleAnnotationSubmit(b);
     return;
   }
+  if (b.matches(".ann-attach-btn")) {
+    e.stopPropagation();
+    const thread = b.closest(".annotation-thread");
+    if (thread) thread.querySelector(".ann-file-input")?.click();
+    return;
+  }
+  if (b.matches(".ann-file-input")) {
+    // Show filename when a file is selected
+    const thread = b.closest(".annotation-thread");
+    const nameEl = thread?.querySelector(".ann-file-name");
+    if (nameEl && b.files?.length) {
+      nameEl.textContent = b.files[0].name;
+      nameEl.style.display = "inline";
+    } else if (nameEl) {
+      nameEl.style.display = "none";
+    }
+    return;
+  }
   if (b.matches(".ann-vote-btn")) {
     e.stopPropagation();
-    handleAnnotationVote(b);
+    await handleAnnotationVote(b);
     return;
   }
   if (b.matches(".ann-delete-btn")) {
     e.stopPropagation();
     await handleAnnotationDelete(b);
+    return;
+  }
+  if (b.matches(".ann-reply-btn")) {
+    e.stopPropagation();
+    const annId = b.dataset.annId;
+    const thread = b.closest(".annotation-thread");
+    // Show or toggle reply form for this comment
+    const existingForm = thread?.querySelector(`.ann-reply-form[data-reply="${annId}"]`);
+    if (existingForm) {
+      existingForm.style.display = existingForm.style.display === "none" ? "flex" : "none";
+    } else {
+      const form = document.createElement("div");
+      form.className = "ann-reply-form";
+      form.dataset.reply = annId;
+      form.style.cssText = "margin:4px 0 0 20px;display:flex;gap:4px;align-items:center;flex-wrap:wrap;";
+      form.innerHTML = `<textarea class="ann-reply-input" data-reply="${annId}" placeholder="Write a reply..." rows="1" style="flex:1;min-width:120px;padding:3px 6px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:11px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+        <button class="ann-reply-submit" data-parent-id="${annId}" style="padding:2px 8px;border:none;background:#7c3aed;color:white;border-radius:3px;cursor:pointer;font-size:11px;">Reply</button>`;
+      const item = b.closest(".ann-item");
+      if (item) item.after(form);
+    }
+    return;
+  }
+  if (b.matches(".ann-reply-submit")) {
+    e.stopPropagation();
+    await handleAnnotationSubmit(b);
     return;
   }
 } catch(err) { console.error("[click handler]", err); } });
@@ -1106,6 +1162,8 @@ export function renderUI() {
   const meshOn = Mesh?.isMeshConnected?.() || false;
   const meshCount = Mesh?.meshPeerCount?.() || 0;
 
+  const unread = state.unreadNotificationCount || 0;
+
   // Thin top bar
   const peerLabel = count > 0 ? `<span style="font-size:11px;color:#16a34a;">● ${count}</span>` : `<span style="font-size:11px;color:#9ca3af;">0</span>`;
   const meshLabel = meshOn ? `<span style="font-size:11px;color:#16a34a;margin-left:4px;">📡 ${meshCount || ""}</span>` : "";
@@ -1119,6 +1177,7 @@ export function renderUI() {
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
       ${peerLabel}${meshLabel}
+      <button id="topbar-notif-btn" style="width:26px;height:26px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;font-size:14px;padding:0;border-radius:4px;position:relative;" title="Notifications">🔔${unread > 0 ? `<span style="position:absolute;top:-2px;right:-2px;background:#dc2626;color:white;border-radius:50%;min-width:14px;height:14px;font-size:9px;font-weight:600;display:flex;align-items:center;justify-content:center;padding:0 2px;">${unread > 99 ? "99+" : unread}</span>` : ""}</button>
       <button id="topbar-slideshow-btn" style="width:26px;height:26px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;font-size:14px;padding:0;border-radius:4px;" title="${t("slideshow") || "Slideshow"}">▶</button>
       <button id="drawer-toggle-btn" style="width:28px;height:28px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;font-size:18px;padding:0;border-radius:4px;">≡</button>
     </div>
@@ -1161,6 +1220,9 @@ export function renderUI() {
     const topbarSearchBtn = document.getElementById("topbar-search-btn");
     if (topbarSearchBtn) topbarSearchBtn.onclick = () => doGeocode();
   }
+
+  const notifBtn = document.getElementById("topbar-notif-btn");
+  if (notifBtn) notifBtn.onclick = (e) => { e.stopPropagation(); Map.showNotificationsModal(); };
 
   document.getElementById("drawer-toggle-btn").onclick = (e) => {
     e.stopPropagation();
@@ -1484,8 +1546,9 @@ async function pushAllLocalData() {
       author_pubkey: d.author_pubkey || "",
       created_at: d.created_at,
     }));
-    if (pinData.length || annData.length || drawingData.length) {
-      await Relay.pushDelta(c.community_id, pinData, annData, drawingData, [], [], []);
+    const chains = await DB.getChainsByCommunity(c.community_id);
+    if (pinData.length || annData.length || drawingData.length || (chains && chains.length)) {
+      await Relay.pushDelta(c.community_id, pinData, annData, drawingData, [], [], [], chains || []);
     }
   }
 }

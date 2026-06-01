@@ -74,6 +74,7 @@ pub async fn handle_register_community(ctx: &HandlerContext<'_>, v: &serde_json:
     if members.len() > 1000 { return; }
     let cid_owned = cid_val.to_string();
     let published = v.get("published").and_then(|p| p.as_bool()).unwrap_or(false);
+    let visibility = v.get("visibility").and_then(|p| p.as_str()).unwrap_or("public").to_string();
     let public_key = v.get("public_key").and_then(|p| p.as_str()).unwrap_or("").to_string();
     let wrapped_dek = v.get("wrapped_dek").and_then(|w| w.as_str()).unwrap_or("").to_string();
     let key_derivation = v.get("key_derivation").and_then(|k| k.as_str()).unwrap_or("random").to_string();
@@ -90,7 +91,8 @@ pub async fn handle_register_community(ctx: &HandlerContext<'_>, v: &serde_json:
         community_id: cid_owned.clone(), name: name.clone(),
         genesis_public_key: genesis,
         public_key, secret_key: String::new(), wrapped_dek, key_derivation,
-        published, description,
+        published, visibility,
+        description,
         owner_pubkey: owner_pubkey.clone(),
         members,
         governance: v.get("governance").cloned().unwrap_or(serde_json::Value::Null),
@@ -190,6 +192,7 @@ pub async fn handle_join_community(ctx: &HandlerContext<'_>, v: &serde_json::Val
                 "request_id": request_id,
                 "name": c.name,
                 "description": c.description,
+                "visibility": c.visibility,
                 "public_key": c.public_key,
                 "wrapped_dek": c.wrapped_dek,
                 "key_derivation": c.key_derivation,

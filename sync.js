@@ -20,6 +20,28 @@ import { compressImageBuffer } from "./workers/media-compress.js";
 import { toast, showQRHostDialog, showQRJoinDialog, showQRAnswerDialog, showPeerPaste, showQRScanDialog, showPasswordDialog, showProgressDialog, escapeHtml, promptRoomPassword, confirmDialog, alertDialog } from "./dialogs.js";
 import { DeferredBoundedMap, DeferredChunkStore } from "./store-helpers.js";
 
+function recordNotification(opts) {
+  if (!state.currentSet) return;
+  const n = {
+    id: generate_uuid(),
+    community_id: opts.community_id || state.currentSet,
+    type: opts.type,
+    pin_id: opts.pin_id,
+    pin_title: opts.pin_title || "Untitled",
+    annotation_id: opts.annotation_id || null,
+    by_name: opts.by_name || "Someone",
+    by_pubkey: opts.by_pubkey || "",
+    text_preview: opts.text_preview || null,
+    created_at: Date.now(),
+    read: false,
+  };
+  const notifications = state.notifications;
+  notifications.unshift(n);
+  if (notifications.length > 100) notifications.pop();
+  state.notifications = notifications;
+  window._renderUI?.();
+}
+
 // --- Message chunking (WASM-backed, size-capped + TTL-auto-eviction) ---
 const MAX_CHUNKS = 500;
 const MAX_BATCH_CHUNKS = 200;
@@ -351,7 +373,14 @@ export async function handleMessage(msg, connId) {
       if (!pinData.author_pubkey) delete pinData.author_pubkey;
       const sid = pinData.team_id || window._pendingSet;
       if (sid) await DB.importPin({ ...pinData, team_id: sid });
-      if (sid === state.currentSet) { await window._loadPins(); window._addHistory?.("Pin added (peer)", d.pin_id.slice(0, 8)); }
+      if (sid === state.currentSet) await window._loadPins();
+      if (!msg._relay && d.author_pubkey && d.author_pubkey !== state.signingPublicKey && sid === state.currentSet) {
+        try {
+          const dec = decrypt_pin_data(d.ciphertext, d.nonce, state.dek);
+          recordNotification({ type: "pin_added", pin_id: d.pin_id, pin_title: dec?.title || "Untitled", by_pubkey: d.author_pubkey });
+        } catch (_) {}
+      }
+      window._addHistory?.(sid === state.currentSet ? "Pin added (peer)" : "", d.pin_id.slice(0, 8));
       if (!msg._relay) relayToOthers(msg, connId);
       break;
     }
@@ -498,14 +527,40 @@ export async function handleMessage(msg, connId) {
         annotation_id: d.annotation_id, pin_id: d.pin_id, community_id: cid,
         ciphertext: d.ciphertext, nonce: d.nonce,
         author_pubkey: d.author_pubkey || "", created_at: d.created_at || d.ts || Date.now(),
+        media: d.media || null,
+        parent_id: d.parent_id || null,
       });
       if (!msg._relay) relayToOthers(msg, connId);
       window._refreshPinPopup?.(d.pin_id);
       window._addHistory?.("Annotation added (peer)", d.annotation_id.slice(0, 8));
+      // Notifications: notify if this comment involves the current user
+      if (!msg._relay && d.author_pubkey !== state.signingPublicKey) {
+        if (d.parent_id) {
+          const parent = await DB.getAnnotation(d.parent_id).catch(() => null);
+          if (parent && parent.author_pubkey === state.signingPublicKey) {
+            const pin = await DB.getPin(d.pin_id).catch(() => null);
+            recordNotification({ type: "reply", pin_id: d.pin_id, pin_title: pin?.pin_id ? "Pin" : "Untitled", annotation_id: d.annotation_id, by_pubkey: d.author_pubkey, text_preview: (d.text_preview || "").slice(0, 60) });
+          }
+        } else {
+          const pin = await DB.getPin(d.pin_id).catch(() => null);
+          if (pin && pin.author_pubkey === state.signingPublicKey) {
+            recordNotification({ type: "comment", pin_id: d.pin_id, pin_title: "Pin", annotation_id: d.annotation_id, by_pubkey: d.author_pubkey, text_preview: (d.text_preview || "").slice(0, 60) });
+          } else {
+            const anns = await DB.getAnnotationsByPin(d.pin_id, 0, 1);
+            const iParticipated = anns.some(a => a.author_pubkey === state.signingPublicKey);
+            if (iParticipated) {
+              recordNotification({ type: "comment", pin_id: d.pin_id, pin_title: "Pin", annotation_id: d.annotation_id, by_pubkey: d.author_pubkey, text_preview: (d.text_preview || "").slice(0, 60) });
+            }
+          }
+        }
+      }
       break;
     }
     case "annotation_vote": {
       if (!d || typeof d.annotation_id !== "string" || typeof d.pubkey !== "string" || typeof d.signature !== "string") return;
+      const rawPayload = d.annotation_id + "|" + (d.direction || "") + "|" + (d.timestamp || "");
+      const payloadHex = encode_hex(new TextEncoder().encode(rawPayload));
+      if (!verify(payloadHex, d.signature, d.pubkey)) return;
       const ann = await DB.getAnnotation(d.annotation_id);
       if (!ann) break;
       ann.votes = ann.votes || [];
@@ -515,6 +570,9 @@ export async function handleMessage(msg, connId) {
       await DB.saveAnnotation(ann);
       if (!msg._relay) relayToOthers(msg, connId);
       window._refreshPinPopup?.(ann.pin_id);
+      if (!msg._relay && d.pubkey !== state.signingPublicKey && ann.author_pubkey === state.signingPublicKey) {
+        recordNotification({ type: "vote", pin_id: ann.pin_id, pin_title: "Pin", annotation_id: d.annotation_id, by_pubkey: d.pubkey });
+      }
       break;
     }
     case "new_tombstone": {
@@ -606,6 +664,30 @@ export async function handleMessage(msg, connId) {
       if (state.schemas) await window._loadSchemas?.(state.currentSet);
       break;
     }
+    case "new_chain": {
+      if (!d || !d.chain_id) return;
+      await DB.saveChain(d);
+      window._loadChains?.();
+      break;
+    }
+    case "delete_chain": {
+      if (!d || !d.chain_id) return;
+      await DB.deleteChain(d.chain_id);
+      window._loadChains?.();
+      break;
+    }
+    case "sync_chains": {
+      if (!d || typeof d.set_id !== "string" || !Array.isArray(d.data)) return;
+      await processSyncChains(d.set_id, d.data);
+      break;
+    }
+    case "sync_chains_batch": {
+      if (!d || typeof d.set_id !== "string" || !Array.isArray(d.data) || typeof d.batchIndex !== "number" || typeof d.totalBatches !== "number") return;
+      const batchKey = `chains:${d.set_id}`;
+      const merged = accumulateBatch(batchKey, d.batchIndex, d.totalBatches, d.data);
+      if (merged) processSyncChains(d.set_id, merged);
+      break;
+    }
   }
 }
 
@@ -637,6 +719,13 @@ async function processSyncDrawings(setId, data) {
 async function processSyncAnnotations(setId, data) {
   await DB.saveAnnotations((data || []).map(a => ({ ...a, community_id: setId })));
   window._refreshAllPinPopups?.();
+}
+
+async function processSyncChains(setId, data) {
+  for (const c of (data || [])) {
+    await DB.saveChain({ ...c, community_id: setId || c.community_id });
+  }
+  window._loadChains?.();
 }
 
 export async function sendAll(sid, connId) {
@@ -706,6 +795,20 @@ export async function sendAll(sid, connId) {
     }
   }
 
+  const chains = await DB.getChainsByCommunity(set);
+  if (chains && chains.length > 0) {
+    for (let i = 0; i < chains.length; i += BATCH_SIZE) {
+      broadcast("sync_chains_batch", {
+        set_id: set,
+        batchIndex: Math.floor(i / BATCH_SIZE),
+        totalBatches: Math.ceil(chains.length / BATCH_SIZE),
+        data: chains.slice(i, i + BATCH_SIZE),
+      }, connId);
+    }
+  } else {
+    broadcast("sync_chains", { set_id: set, data: [] }, connId);
+  }
+
   const schemas = await DB.getSchemas();
   if (schemas && schemas.length) broadcast("sync_schemas", { set_id: set, data: schemas }, connId);
 
@@ -748,6 +851,10 @@ export function broadcast(type, data, connId) {
     window._relayPushDelta?.(state.currentSet, [], [], [], [], [data.pin_id], []);
   } else if (type === "delete_drawing") {
     window._relayPushDelta?.(state.currentSet, [], [], [], [], [], [data.drawing_id]);
+  } else if (type === "new_chain") {
+    window._relayPushDelta?.(state.currentSet, [], [], [], [], [], [], [data], []);
+  } else if (type === "delete_chain") {
+    window._relayPushDelta?.(state.currentSet, [], [], [], [], [], [], [], [data.chain_id]);
   }
 
   const payload = packHexFields({ ...data, team_id: state.currentSet, ts: Date.now() });
@@ -982,6 +1089,7 @@ export async function exportSet() {
       const c = await DB.getCommunity(state.currentSet);
       const pins = await DB.getAllPins(state.currentSet);
       const drawings = await DB.getAllDrawings(state.currentSet);
+      const chains = await DB.getChainsByCommunity(state.currentSet);
       const data = await compactStoredMedia({
         name: window._names[state.currentSet] || state.currentSet,
         keys: t ? { public_key: t.public_key, secret_key: t.secret_key, wrapped_dek: t.wrapped_dek, key_derivation: t.key_derivation || "random" } : null,
@@ -992,6 +1100,7 @@ export async function exportSet() {
         community: c ? { name: c.name, description: c.description, governance: c.governance, bounds: c.bounds, relay_nodes: c.relay_nodes } : null,
         pins,
         drawings,
+        chains,
       }, (done, total) => {
         prog.update(10 + Math.round(done / Math.max(total, 1) * 60), `Compressing media (${done}/${total})`);
       }, compressVideos);
@@ -1450,6 +1559,11 @@ async function doImport(data) {
   } else {
     await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: "Default", color: state.defaultLayerColor, visible: true, opacity: 1.0 }]);
   }
+  if (data.chains && Array.isArray(data.chains)) {
+    for (const c of data.chains) {
+      await DB.saveChain({ ...c, community_id: sid, chain_id: generate_uuid() });
+    }
+  }
   window._names[sid] = data.name || "Imported";
   if (data.map_center) await DB.saveSettings(sid, { map_center: data.map_center, map_zoom: data.map_zoom });
   await window._loadSetList();
@@ -1522,8 +1636,10 @@ export function broadcastAnnotation(annotation) {
     nonce: annotation.nonce,
     author_pubkey: annotation.author_pubkey,
     created_at: annotation.created_at,
+    media: annotation.media || null,
+    parent_id: annotation.parent_id || null,
   });
-  if (state.currentSet) _meshBroadcast?.("new_annotation", { annotation_id: annotation.annotation_id, pin_id: annotation.pin_id, ciphertext: annotation.ciphertext, nonce: annotation.nonce, author_pubkey: annotation.author_pubkey, created_at: annotation.created_at });
+  if (state.currentSet) _meshBroadcast?.("new_annotation", { annotation_id: annotation.annotation_id, pin_id: annotation.pin_id, ciphertext: annotation.ciphertext, nonce: annotation.nonce, author_pubkey: annotation.author_pubkey, created_at: annotation.created_at, media: annotation.media || null, parent_id: annotation.parent_id || null });
 }
 
 export function broadcastAnnotationVote(annotationId, vote) {

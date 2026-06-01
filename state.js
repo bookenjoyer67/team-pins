@@ -13,6 +13,7 @@ const _chainLayers = [];
 const _subscribedDEKs = new Map();     // "communityId:layerId" → Uint8Array
 const _subscribedMarkers = [];         // L.Marker[] from subscribed layers
 const _subscribedDrawingLayers = [];   // L.Layer[] from subscribed layers
+const _notifications = [];
 const _pinSearchText = [];
 let _placingPin = false;
 let _streetViewing = false;
@@ -122,4 +123,7 @@ export const state = {
   get subscribedDEKs() { return _subscribedDEKs; },
   get subscribedMarkers() { return _subscribedMarkers; },
   get subscribedDrawingLayers() { return _subscribedDrawingLayers; },
+  get notifications() { return _notifications; },
+  set notifications(v) { _notifications.splice(0, _notifications.length, ...(v || [])); },
+  get unreadNotificationCount() { return _notifications.filter(n => !n.read).length; },
 };

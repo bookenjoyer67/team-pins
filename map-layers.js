@@ -416,7 +416,7 @@ export async function showDiscoverModal() {
               await DB.saveCommunity({
                 community_id: sid, name: result.name, description: result.description || "",
                 genesis_public_key: result.genesis_public_key || "",
-                visibility: "private",
+                visibility: result.visibility || "public",
                 members: result.members || [],
                 governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" },
                 bounds: (result.bounds && Array.isArray(result.bounds) && result.bounds.length === 4) ? result.bounds : null,
@@ -429,16 +429,16 @@ export async function showDiscoverModal() {
             clean();
             const { switchSet, loadSetList } = await import("./map.js");
             await loadSetList();
+            await switchSet(sid);
             if (result.needs_key_exchange && !isPasswordDerived && !myWrappedDek) {
               toast("Joined " + result.name + " — awaiting key exchange", "#f97316");
             } else {
-              await switchSet(sid);
               if (window._relayIsConnected?.()) await window._relaySyncDelta?.(sid);
-              const { loadPins, loadDrawings } = await import("./map.js");
-              await loadPins();
-              await loadDrawings();
               toast("Joined " + result.name, "#16a34a");
             }
+            const { loadPins, loadDrawings } = await import("./map.js");
+            await loadPins();
+            await loadDrawings();
           } else {
             btn.textContent = "Join";
             btn.disabled = false;

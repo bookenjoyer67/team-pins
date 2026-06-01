@@ -143,7 +143,7 @@ export function connect(relayUrl) {
       DB.getCommunity(p.communityId).then(community => {
         const communityRelayUrl = community?.relay_url;
         if (!communityRelayUrl || communityRelayUrl === c.url || !c.url) {
-          pushDeltaOn(c, p.communityId, p.pins, p.annotations, p.drawings, p.tombstones, p.deletedPinIds, p.deletedDrawingIds);
+          pushDeltaOn(c, p.communityId, p.pins, p.annotations, p.drawings, p.tombstones, p.deletedPinIds, p.deletedDrawingIds, p.chains, p.deletedChainIds);
         } else {
           queuePush(p);
         }
@@ -378,7 +378,7 @@ async function handleDelta(msg, isSync = false) {
       for (const v of (ann.votes || [])) {
         if (!mergedVotes.some(ev => ev.pubkey === v.pubkey)) mergedVotes.push(v);
       }
-      await DB.saveAnnotation({ ...existing, ...ann, community_id: communityId, votes: mergedVotes });
+      await DB.saveAnnotation({ ...existing, ...ann, community_id: communityId, votes: mergedVotes, media: ann.media || existing.media || null });
     } else {
       await DB.saveAnnotation({ ...ann, community_id: communityId });
     }
@@ -398,6 +398,13 @@ async function handleDelta(msg, isSync = false) {
   await DB.deletePins(msg.deleted_pin_ids || []);
   await DB.deleteDrawings(msg.deleted_drawing_ids || []);
 
+  for (const c of (msg.chains || [])) {
+    await DB.saveChain({ ...c, community_id: communityId });
+  }
+  for (const id of (msg.deleted_chain_ids || [])) {
+    await DB.deleteChain(id);
+  }
+
   if (isSync) {
     const now = Date.now();
     lastSyncTimestamps.set(communityId, now);
@@ -414,11 +421,12 @@ async function handleDelta(msg, isSync = false) {
   if (communityId === state.currentSet) {
     await window._loadPins?.();
     await window._loadDrawings?.();
+    if (msg.chains?.length || msg.deleted_chain_ids?.length) window._loadChains?.();
   }
   window._renderUI?.();
 }
 
-async function pushDeltaOn(conn, communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds) {
+async function pushDeltaOn(conn, communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains, deletedChainIds) {
   if (!isAlive(conn)) return;
   try {
     conn.ws.send(JSON.stringify({
@@ -431,17 +439,19 @@ async function pushDeltaOn(conn, communityId, pins, annotations, drawings, tombs
       tombstones: tombstones || [],
       deleted_pin_ids: deletedPinIds || [],
       deleted_drawing_ids: deletedDrawingIds || [],
+      chains: chains || [],
+      deleted_chain_ids: deletedChainIds || [],
     }));
   } catch (e) {
-    queuePush({ communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds });
+    queuePush({ communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains, deletedChainIds });
   }
 }
 
-export async function pushDelta(communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds) {
-  const data = { communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds };
+export async function pushDelta(communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains = [], deletedChainIds = []) {
+  const data = { communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains, deletedChainIds };
   const conn = getCommunityConn(communityId);
   if (conn && isAlive(conn)) {
-    await pushDeltaOn(conn, communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds);
+    await pushDeltaOn(conn, communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains, deletedChainIds);
   } else {
     queuePush(data);
   }
@@ -506,6 +516,7 @@ async function registerCommunityOn(conn, communityId, published) {
     wrapped_dek: team.community_wrapped_dek || team.wrapped_dek || "",
     key_derivation: isPasswordDerived ? "pbkdf2" : "random",
     published,
+    visibility: c.visibility || "public",
     members: c.members || [],
     governance: c.governance || null,
     owner_pubkey: state.signingPublicKey || "",
