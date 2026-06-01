@@ -28,7 +28,7 @@ function queuePush(data) {
 }
 
 function isAlive(conn) {
-  return conn && conn.ws && (conn.ws.readyState === WebSocket.OPEN || conn.ws.readyState === WebSocket.CONNECTING);
+  return conn && conn.ws && conn.ws.readyState === WebSocket.OPEN;
 }
 
 function getConn(url) {
