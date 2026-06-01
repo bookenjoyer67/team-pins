@@ -2209,12 +2209,12 @@ export async function loadPins() {
             ? `<span style="font-size:9px;color:${marker._pinTrustColor || "#9ca3af"};margin-left:4px;">${marker._pinTrustLevel}</span>`
             : "";
           let ttlHtml = "";
-          if (gov.ttl_enabled) {
+          if (gov.ttl_enabled && marker._ttlExpiresAt) {
             const atts = marker._pinData?.attestations || [];
             const up = atts.filter(a => a.type === "confirmed").length;
             const down = atts.filter(a => a.type === "disputed").length + atts.filter(a => a.type === "flagged").length;
-            const expired = marker._ttlExpiresAt && marker._ttlExpiresAt < Date.now();
-            const remaining = marker._ttlExpiresAt ? marker._ttlExpiresAt - Date.now() : (gov.ttl_base_mins || 10080) * 60000;
+            const expired = marker._ttlExpiresAt < Date.now();
+            const remaining = marker._ttlExpiresAt - Date.now();
             if (expired) {
               ttlHtml = `<br><small style="color:#dc2626;">⏳ Expired · ✅ ${up} ⚠️🚩 ${down}</small>`;
             } else if (remaining > 0) {

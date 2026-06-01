@@ -367,7 +367,7 @@ async function handleDelta(msg, isSync = false) {
     if (!pin.author_pubkey) delete pin.author_pubkey;
     const existing = await DB.getPin(pin.pin_id).catch(() => null);
     const merged = existing
-      ? { ...pin, team_id: communityId, media: pin.media || existing.media, author_pubkey: pin.author_pubkey || existing.author_pubkey, ttl_expires_at: pin.ttl_expires_at ?? existing.ttl_expires_at, ttl_base_at: pin.ttl_base_at ?? existing.ttl_base_at, vote_count_up: pin.vote_count_up ?? existing.vote_count_up, vote_count_down: pin.vote_count_down ?? existing.vote_count_down, posted_anonymously: pin.posted_anonymously ?? existing.posted_anonymously }
+      ? { ...pin, team_id: communityId, media: pin.media || existing.media, author_pubkey: pin.author_pubkey || existing.author_pubkey, ttl_expires_at: existing.ttl_expires_at != null ? (pin.ttl_expires_at ?? existing.ttl_expires_at) : existing.ttl_expires_at, ttl_base_at: existing.ttl_base_at != null ? (pin.ttl_base_at ?? existing.ttl_base_at) : existing.ttl_base_at, vote_count_up: pin.vote_count_up ?? existing.vote_count_up, vote_count_down: pin.vote_count_down ?? existing.vote_count_down, posted_anonymously: pin.posted_anonymously ?? existing.posted_anonymously }
       : { ...pin, team_id: communityId };
     await DB.importPin(merged);
   }
@@ -597,7 +597,7 @@ async function handlePinVoteUpdate(msg) {
   if (pin) {
     pin.vote_count_up = vote_count_up ?? 0;
     pin.vote_count_down = vote_count_down ?? 0;
-    pin.ttl_expires_at = pin.ttl_expires_at != null || ttl_expires_at != null ? ttl_expires_at ?? null : null;
+    pin.ttl_expires_at = pin.ttl_expires_at != null ? ttl_expires_at ?? null : null;
     await DB.importPin(pin);
     if (community_id === state.currentSet) {
       const marker = state.markers?.find(m => m._pinId === pin_id);
