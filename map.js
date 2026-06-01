@@ -569,6 +569,7 @@ export async function switchSet(sid) {
         t.secret_key = encode_hex(memberKp.secret);
         t.public_key = encode_hex(memberKp.public);
         t.wrapped_dek = wrap_dek(dk, t.public_key);
+        t.community_wrapped_dek = wrap_dek(dk, t.community_public_key);
         await DB.saveTeam(t);
       }
     }

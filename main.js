@@ -1169,8 +1169,8 @@ export function renderUI() {
   const meshLabel = meshOn ? `<span style="font-size:11px;color:#16a34a;margin-left:4px;">📡 ${meshCount || ""}</span>` : "";
   tabsEl.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 8px;font-size:13px;background:var(--bg-glass);backdrop-filter:blur(4px);border-bottom:1px solid var(--border);">
     <div style="display:flex;align-items:center;gap:8px;overflow:hidden;flex:1;min-width:0;">
-      <span style="font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;">${escapeHtml(nm.slice(0, 30))}${dot}${activeLabel}</span>
-      <div style="display:flex;align-items:center;gap:4px;flex:1;max-width:240px;">
+      <span class="topbar-mapname">${escapeHtml(nm.slice(0, 30))}${dot}${activeLabel}</span>
+      <div class="topbar-search-wrap">
         <input id="topbar-search" type="text" placeholder="${t("searchPlaces") || "Search places..."}" style="flex:1;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:12px;min-width:0;">
         <button id="topbar-search-btn" style="width:24px;height:24px;border:none;background:transparent;color:var(--text-dim);cursor:pointer;font-size:13px;padding:0;border-radius:3px;flex-shrink:0;">🔍</button>
       </div>

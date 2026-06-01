@@ -1092,7 +1092,7 @@ export async function exportSet() {
       const chains = await DB.getChainsByCommunity(state.currentSet);
       const data = await compactStoredMedia({
         name: window._names[state.currentSet] || state.currentSet,
-        keys: t ? { public_key: t.public_key, secret_key: t.secret_key, wrapped_dek: t.wrapped_dek, key_derivation: t.key_derivation || "random" } : null,
+        keys: t ? { public_key: t.public_key, secret_key: t.secret_key, wrapped_dek: t.wrapped_dek, key_derivation: t.key_derivation || "random", community_public_key: t.community_public_key || "", community_secret_key: t.community_secret_key || "", community_wrapped_dek: t.community_wrapped_dek || "" } : null,
         map_center: s?.map_center || null,
         map_zoom: s?.map_zoom || null,
         layers: state.layers,
@@ -1155,7 +1155,7 @@ export async function shareMap() {
       const drawings = await DB.getAllDrawings(state.currentSet);
       const data = await compactStoredMedia({
         name: window._names[state.currentSet] || state.currentSet,
-        keys: t ? { public_key: t.public_key, secret_key: t.secret_key, wrapped_dek: t.wrapped_dek, key_derivation: t.key_derivation || "random" } : null,
+        keys: t ? { public_key: t.public_key, secret_key: t.secret_key, wrapped_dek: t.wrapped_dek, key_derivation: t.key_derivation || "random", community_public_key: t.community_public_key || "", community_secret_key: t.community_secret_key || "", community_wrapped_dek: t.community_wrapped_dek || "" } : null,
         map_center: s?.map_center || null,
         map_zoom: s?.map_zoom || null,
         layers: state.layers,
@@ -1523,8 +1523,8 @@ export async function importFromCompressed(compressed) {
 async function doImport(data) {
   const sid = generate_uuid();
   if (data.keys) {
-    const { public_key, secret_key, wrapped_dek, key_derivation } = data.keys || {};
-    await DB.saveTeam({ team_id: sid, name: data.name || "Imported", public_key, secret_key, wrapped_dek, key_derivation });
+    const { public_key, secret_key, wrapped_dek, key_derivation, community_public_key, community_secret_key, community_wrapped_dek } = data.keys || {};
+    await DB.saveTeam({ team_id: sid, name: data.name || "Imported", public_key, secret_key, wrapped_dek, key_derivation, community_public_key: community_public_key || "", community_secret_key: community_secret_key || "", community_wrapped_dek: community_wrapped_dek || "" });
   }
   await DB.saveCommunity({
     community_id: sid,

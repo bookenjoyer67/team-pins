@@ -492,14 +492,41 @@ async function registerCommunityOn(conn, communityId, published) {
   const team = await DB.getTeam(communityId);
   if (!c || !team) return;
   const isPasswordDerived = team.key_derivation === "pbkdf2";
+
+  // Repair missing community_wrapped_dek for imported/migrated communities
+  if (!isPasswordDerived && team.community_public_key && !team.community_wrapped_dek) {
+    try {
+      const { unwrap_dek, wrap_dek } = await import("./core/pkg/e2e_core.js");
+      let dk = null;
+      if (team.wrapped_dek && team.secret_key) {
+        dk = unwrap_dek(team.wrapped_dek, team.secret_key);
+      }
+      if (!dk && team.community_secret_key && team.wrapped_dek) {
+        dk = unwrap_dek(team.wrapped_dek, team.community_secret_key);
+      }
+      if (dk) {
+        team.community_wrapped_dek = wrap_dek(dk, team.community_public_key);
+        await DB.saveTeam(team);
+      }
+    } catch (_) {}
+  }
+
   // Compute join_wrapped_dek for open communities so new members can self-service the DEK
   let joinWrappedDek = "";
   if (!isPasswordDerived && (c.governance?.join_policy || "open") === "open") {
     try {
       const { unwrap_dek, encode_hex, encrypt_with_password } = await import("./core/pkg/e2e_core.js");
-      const communitySecret = team.community_secret_key || team.secret_key;
-      if (communitySecret) {
-        const dk = unwrap_dek(team.community_wrapped_dek || team.wrapped_dek, communitySecret);
+      let dk = null;
+      if (team.community_wrapped_dek && team.community_secret_key) {
+        dk = unwrap_dek(team.community_wrapped_dek, team.community_secret_key);
+      }
+      if (!dk && team.wrapped_dek && team.secret_key) {
+        dk = unwrap_dek(team.wrapped_dek, team.secret_key);
+      }
+      if (!dk && team.community_wrapped_dek && team.secret_key) {
+        dk = unwrap_dek(team.community_wrapped_dek, team.secret_key);
+      }
+      if (dk) {
         const dekHex = encode_hex(dk);
         const encrypted = encrypt_with_password(dekHex, communityId);
         joinWrappedDek = `${encrypted.ciphertext_hex}:${encrypted.nonce_hex}:${encrypted.salt_hex}`;
@@ -512,7 +539,7 @@ async function registerCommunityOn(conn, communityId, published) {
     name: c.name,
     description: c.description || "",
     genesis_public_key: c.genesis_public_key,
-    public_key: team.public_key || "",
+    public_key: team.community_public_key || team.public_key || "",
     wrapped_dek: team.community_wrapped_dek || team.wrapped_dek || "",
     key_derivation: isPasswordDerived ? "pbkdf2" : "random",
     published,
@@ -843,11 +870,17 @@ async function handleMemberDekRequested(msg) {
     console.warn("[relay] rejecting member_dek request from non-member:", member_pubkey);
     return;
   }
-  const communitySecret = team.community_secret_key || team.secret_key;
-  if (!communitySecret) return;
   try {
-    const communityDek = team.community_wrapped_dek || team.wrapped_dek;
-    const dk = unwrap_dek(communityDek, communitySecret);
+    let dk = null;
+    if (team.community_wrapped_dek && team.community_secret_key) {
+      dk = unwrap_dek(team.community_wrapped_dek, team.community_secret_key);
+    }
+    if (!dk && team.wrapped_dek && team.secret_key) {
+      dk = unwrap_dek(team.wrapped_dek, team.secret_key);
+    }
+    if (!dk && team.community_wrapped_dek && team.secret_key) {
+      dk = unwrap_dek(team.community_wrapped_dek, team.secret_key);
+    }
     if (!dk) return;
     const memberDek = wrap_dek(dk, member_pubkey);
     rewrapMemberDek(community_id, member_pubkey, memberDek);

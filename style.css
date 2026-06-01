@@ -266,6 +266,21 @@ body.dark input[type="text"][style*="position:absolute"]::placeholder {
 .ann-media-aud { width: 100%; max-width: 240px; margin-top: 4px; }
 .ann-attach-btn:hover { background: var(--border-light) !important; }
 
+/* ─── Tab row map name / search constraints ─── */
+.topbar-mapname {
+  font-weight: 600; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; font-size: 13px;
+  max-width: 200px;
+}
+.topbar-search-wrap {
+  display: flex; align-items: center; gap: 4px;
+  flex: 1; max-width: 240px;
+}
+@media (max-width: 600px) {
+  .topbar-mapname { max-width: 100px; font-size: 12px; }
+  .topbar-search-wrap { max-width: 120px; }
+}
+
 /* ─── Mobile responsive (< 481px) ─── */
 @media (max-width: 480px) {
   /* Tab row: compact with popout overflow */
