@@ -14,7 +14,8 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
     let conn_pubkey = get_conn_pubkey(ctx.room, ctx.cid);
 
     // Validate all field limits upfront — reject entire delta if any exceeds
-    let max_pins = ctx.state.config.storage.max_pins_per_push;
+    let s = &ctx.state.config.storage;
+    let max_pins = s.max_pins_per_push;
     if max_pins > 0 && v.get("pins").and_then(|p| p.as_array()).map_or(0, |a| a.len()) > max_pins {
         ctx.room.send_to(
             &serde_json::json!({"type":"error","reason":format!("too many pins (max {})", max_pins)}).to_string(),
@@ -22,27 +23,40 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
         );
         return;
     }
-    if v.get("annotations").and_then(|a| a.as_array()).map_or(0, |a| a.len()) > 100 {
+    let max_anns = s.max_annotations_per_push;
+    if max_anns > 0 && v.get("annotations").and_then(|a| a.as_array()).map_or(0, |a| a.len()) > max_anns {
         ctx.room.send_to(
-            &serde_json::json!({"type":"error","reason":"too many annotations (max 100)"}).to_string(),
+            &serde_json::json!({"type":"error","reason":format!("too many annotations (max {})", max_anns)}).to_string(),
             ctx.cid,
         );
         return;
     }
-    if v.get("drawings").and_then(|d| d.as_array()).map_or(0, |a| a.len()) > 100 {
+    let max_dwgs = s.max_drawings_per_push;
+    if max_dwgs > 0 && v.get("drawings").and_then(|d| d.as_array()).map_or(0, |a| a.len()) > max_dwgs {
         ctx.room.send_to(
-            &serde_json::json!({"type":"error","reason":"too many drawings (max 100)"}).to_string(),
+            &serde_json::json!({"type":"error","reason":format!("too many drawings (max {})", max_dwgs)}).to_string(),
             ctx.cid,
         );
         return;
     }
-    if v.get("tombstones").and_then(|t| t.as_array()).map_or(0, |a| a.len()) > 200 {
+    let max_tombs = s.max_tombstones_per_push;
+    if max_tombs > 0 && v.get("tombstones").and_then(|t| t.as_array()).map_or(0, |a| a.len()) > max_tombs {
         return;
     }
-    if v.get("deleted_pin_ids").and_then(|d| d.as_array()).map_or(0, |a| a.len()) > 500 {
+    let max_dpi = s.max_deleted_pin_ids_per_push;
+    if max_dpi > 0 && v.get("deleted_pin_ids").and_then(|d| d.as_array()).map_or(0, |a| a.len()) > max_dpi {
         return;
     }
-    if v.get("deleted_drawing_ids").and_then(|d| d.as_array()).map_or(0, |a| a.len()) > 500 {
+    let max_ddi = s.max_deleted_drawing_ids_per_push;
+    if max_ddi > 0 && v.get("deleted_drawing_ids").and_then(|d| d.as_array()).map_or(0, |a| a.len()) > max_ddi {
+        return;
+    }
+    let max_c = s.max_chains_per_push;
+    if max_c > 0 && v.get("chains").and_then(|c| c.as_array()).map_or(0, |a| a.len()) > max_c {
+        return;
+    }
+    let max_dci = s.max_deleted_chain_ids_per_push;
+    if max_dci > 0 && v.get("deleted_chain_ids").and_then(|d| d.as_array()).map_or(0, |a| a.len()) > max_dci {
         return;
     }
 

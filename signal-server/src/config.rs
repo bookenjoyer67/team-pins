@@ -181,10 +181,34 @@ pub struct StorageConfig {
     #[serde(default)] pub max_pins_per_community: usize,
     /// Maximum pins per push delta (0 = unlimited). Deltas exceeding this are rejected.
     #[serde(default = "d_pins_per_push")] pub max_pins_per_push: usize,
+    /// Maximum annotations per push delta (0 = unlimited).
+    #[serde(default = "d_200")] pub max_annotations_per_push: usize,
+    /// Maximum drawings per push delta (0 = unlimited).
+    #[serde(default = "d_200")] pub max_drawings_per_push: usize,
+    /// Maximum tombstones per push delta (0 = unlimited).
+    #[serde(default = "d_200")] pub max_tombstones_per_push: usize,
+    /// Maximum deleted pin IDs per push delta (0 = unlimited).
+    #[serde(default = "d_500")] pub max_deleted_pin_ids_per_push: usize,
+    /// Maximum deleted drawing IDs per push delta (0 = unlimited).
+    #[serde(default = "d_500")] pub max_deleted_drawing_ids_per_push: usize,
+    /// Maximum chains per push delta (0 = unlimited).
+    #[serde(default = "d_200")] pub max_chains_per_push: usize,
+    /// Maximum deleted chain IDs per push delta (0 = unlimited).
+    #[serde(default = "d_200")] pub max_deleted_chain_ids_per_push: usize,
 }
 fn d_pins_per_push() -> usize { 2000 }
+fn d_200() -> usize { 200 }
+fn d_500() -> usize { 500 }
 impl Default for StorageConfig {
-    fn default() -> Self { Self { max_pins_per_community: 0, max_pins_per_push: 2000 } }
+    fn default() -> Self {
+        Self {
+            max_pins_per_community: 0, max_pins_per_push: 2000,
+            max_annotations_per_push: 200, max_drawings_per_push: 200,
+            max_tombstones_per_push: 200, max_deleted_pin_ids_per_push: 500,
+            max_deleted_drawing_ids_per_push: 500, max_chains_per_push: 200,
+            max_deleted_chain_ids_per_push: 200,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]

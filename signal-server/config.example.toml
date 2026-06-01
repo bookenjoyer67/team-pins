@@ -33,6 +33,20 @@ allowed_origin = "https://app.piggpin.space"
 max_pins_per_community = 0
 # Maximum pins per push delta (0 = unlimited). Set to 2000+ for large transit maps.
 max_pins_per_push = 2000
+# Maximum annotations per push delta (0 = unlimited).
+max_annotations_per_push = 200
+# Maximum drawings per push delta (0 = unlimited).
+max_drawings_per_push = 200
+# Maximum tombstones per push delta (0 = unlimited).
+max_tombstones_per_push = 200
+# Maximum deleted pin IDs per push delta (0 = unlimited).
+max_deleted_pin_ids_per_push = 500
+# Maximum deleted drawing IDs per push delta (0 = unlimited).
+max_deleted_drawing_ids_per_push = 500
+# Maximum chains per push delta (0 = unlimited).
+max_chains_per_push = 200
+# Maximum deleted chain IDs per push delta (0 = unlimited).
+max_deleted_chain_ids_per_push = 200
 
 [mqtt]
 enabled = false
