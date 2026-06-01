@@ -72,6 +72,7 @@ const SECTIONS = [
         action: () => { const on = window._toggleSound?.(); toast(on ? "Sound ON" : "Sound MUTED", on ? "#16a34a" : "#9ca3af"); } },
       { id: "theme", icon: "🌓", label: "Theme", action: () => window._toggleTheme?.() },
       { id: "language", icon: "🌐", label: "Language", action: showLangChooser },
+      { id: "relay", icon: "⚡", label: "Relay", action: () => window._showIceDialog?.() },
       { id: "github", icon: "🐙", label: "GitHub", action: () => window.open("https://github.com/bookenjoyer67/team-pins", "_blank") },
       { id: "donate", icon: "💸", label: "Donate", action: showDonateModal },
       { id: "update", icon: "↻", label: "Check Updates", action: () => window._checkForUpdates?.() },

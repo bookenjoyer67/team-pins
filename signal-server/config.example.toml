@@ -28,6 +28,12 @@ max_share_ttl_secs = 86400
 max_share_bytes = 209715200
 allowed_origin = "https://app.piggpin.space"
 
+[storage]
+# Maximum pins per community (0 = unlimited). Oldest pins evicted when exceeded.
+max_pins_per_community = 0
+# Maximum pins per push delta (0 = unlimited). Set to 2000+ for large transit maps.
+max_pins_per_push = 2000
+
 [mqtt]
 enabled = false
 broker = "mqtt.meshtastic.org"

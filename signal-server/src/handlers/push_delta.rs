@@ -14,9 +14,10 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
     let conn_pubkey = get_conn_pubkey(ctx.room, ctx.cid);
 
     // Validate all field limits upfront — reject entire delta if any exceeds
-    if v.get("pins").and_then(|p| p.as_array()).map_or(0, |a| a.len()) > 200 {
+    let max_pins = ctx.state.config.storage.max_pins_per_push;
+    if max_pins > 0 && v.get("pins").and_then(|p| p.as_array()).map_or(0, |a| a.len()) > max_pins {
         ctx.room.send_to(
-            &serde_json::json!({"type":"error","reason":"too many pins (max 200)"}).to_string(),
+            &serde_json::json!({"type":"error","reason":format!("too many pins (max {})", max_pins)}).to_string(),
             ctx.cid,
         );
         return;

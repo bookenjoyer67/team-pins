@@ -179,9 +179,12 @@ impl Default for PeerRelayConfig {
 pub struct StorageConfig {
     /// Maximum pins per community (0 = unlimited). Oldest pins evicted when exceeded.
     #[serde(default)] pub max_pins_per_community: usize,
+    /// Maximum pins per push delta (0 = unlimited). Deltas exceeding this are rejected.
+    #[serde(default = "d_pins_per_push")] pub max_pins_per_push: usize,
 }
+fn d_pins_per_push() -> usize { 2000 }
 impl Default for StorageConfig {
-    fn default() -> Self { Self { max_pins_per_community: 0 } }
+    fn default() -> Self { Self { max_pins_per_community: 0, max_pins_per_push: 2000 } }
 }
 
 #[derive(Debug, Deserialize, Clone)]
