@@ -949,8 +949,7 @@ async function handleAttest(b) {
       row.attestations.push(att);
     }
     const gov = state.currentCommunity?.governance || {};
-    if (gov.ttl_enabled) {
-      if (!row.ttl_base_at) row.ttl_base_at = row.created_at || ts;
+    if (gov.ttl_enabled && row.ttl_base_at) {
       const atts = row.attestations;
       const up = atts.filter(a => a.type === "confirmed").length;
       const down = atts.filter(a => a.type === "disputed").length + atts.filter(a => a.type === "flagged").length;

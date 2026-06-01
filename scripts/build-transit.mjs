@@ -186,13 +186,16 @@ async function main() {
   const wasmPath = new URL("../core/pkg/e2e_core_bg.wasm", import.meta.url);
   wasmMod.initSync({ module: readFileSync(wasmPath) });
 
-  // Generate keys
+  // Generate keys — per-member model with community key context
   const dek = generate_dek();
   const communityKp = generate_user_keypair();
   const memberKp = generate_user_keypair();
   const publicKey = encode_hex(communityKp.public);
   const secretKey = encode_hex(memberKp.secret);
   const wrappedDek = wrap_dek(dek, encode_hex(memberKp.public));
+  const communityPublicKey = encode_hex(communityKp.public);
+  const communitySecretKey = encode_hex(communityKp.secret);
+  const communityWrappedDek = wrap_dek(dek, encode_hex(communityKp.public));
 
   // ─── Build indexes ───────────────────────────────────────
 
@@ -580,6 +583,9 @@ async function main() {
       secret_key: secretKey,
       wrapped_dek: wrappedDek,
       key_derivation: "random",
+      community_public_key: communityPublicKey,
+      community_secret_key: communitySecretKey,
+      community_wrapped_dek: communityWrappedDek,
     },
     map_center: MAP_CENTER,
     map_zoom: 13,

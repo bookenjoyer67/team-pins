@@ -68,19 +68,24 @@ pub async fn handle_pin_vote(ctx: &HandlerContext<'_>, v: &serde_json::Value) {
         let ttl_expires_at = if deleted {
             0u64
         } else if let Some(c) = ctx.state.store.get_community(&community_id).await {
-            let gov = c.governance;
-            let base = gov.get("ttl_base_mins").and_then(|v| v.as_u64()).unwrap_or(10080) as f64;
-            let vote_weight = gov.get("ttl_vote_mins").and_then(|v| v.as_u64()).unwrap_or(360) as f64;
-            let min_mins = gov.get("ttl_min_mins").and_then(|v| v.as_u64()).unwrap_or(60) as f64;
-            let max_mins = gov.get("ttl_max_mins").and_then(|v| v.as_u64()).unwrap_or(43200) as f64;
-            let mins = (base + (net_votes as f64 * vote_weight)).clamp(min_mins, max_mins);
-            let base_at = ctx.state.store.get_pin(&community_id, &pin_id).await
-                .and_then(|p| p.ttl_base_at)
-                .unwrap_or_else(|| std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or(std::time::Duration::from_millis(0))
-                    .as_millis() as u64);
-            base_at.saturating_add((mins.max(0.0).min(1_000_000_000.0) * 60_000.0) as u64)
+            let ttl_enabled = c.governance.get("ttl_enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            if ttl_enabled {
+                if let Some(base_at) = ctx.state.store.get_pin(&community_id, &pin_id).await
+                    .and_then(|p| p.ttl_base_at)
+                {
+                    let gov = c.governance;
+                    let base = gov.get("ttl_base_mins").and_then(|v| v.as_u64()).unwrap_or(10080) as f64;
+                    let vote_weight = gov.get("ttl_vote_mins").and_then(|v| v.as_u64()).unwrap_or(360) as f64;
+                    let min_mins = gov.get("ttl_min_mins").and_then(|v| v.as_u64()).unwrap_or(60) as f64;
+                    let max_mins = gov.get("ttl_max_mins").and_then(|v| v.as_u64()).unwrap_or(43200) as f64;
+                    let mins = (base + (net_votes as f64 * vote_weight)).clamp(min_mins, max_mins);
+                    base_at.saturating_add((mins.max(0.0).min(1_000_000_000.0) * 60_000.0) as u64)
+                } else {
+                    0
+                }
+            } else {
+                0
+            }
         } else {
             0
         };

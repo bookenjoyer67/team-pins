@@ -597,7 +597,7 @@ async function handlePinVoteUpdate(msg) {
   if (pin) {
     pin.vote_count_up = vote_count_up ?? 0;
     pin.vote_count_down = vote_count_down ?? 0;
-    pin.ttl_expires_at = ttl_expires_at ?? null;
+    pin.ttl_expires_at = pin.ttl_expires_at != null || ttl_expires_at != null ? ttl_expires_at ?? null : null;
     await DB.importPin(pin);
     if (community_id === state.currentSet) {
       const marker = state.markers?.find(m => m._pinId === pin_id);
