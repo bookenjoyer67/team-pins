@@ -12,6 +12,8 @@
     "tauri:build": "tauri build",
     "build:all": "cd core && wasm-pack build --target web && cd .. && npm run build",
     "build:wasm": "cd core && wasm-pack build --target web",
+    "build:wasm:spatial": "cd zig-core && zig build -Drelease=true && cp zig-out/bin/spatial.wasm pkg/spatial.wasm",
+    "build:wasm:all": "npm run build:wasm && npm run build:wasm:spatial",
     "test": "vitest run",
     "test:watch": "vitest",
     "icons": "node scripts/generate-icons.cjs"

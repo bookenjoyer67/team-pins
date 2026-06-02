@@ -1,0 +1,12 @@
+.{
+    .fingerprint = 0x7425f605f5ecc341,
+    .name = .spatial,
+    .version = "0.0.1",
+    .minimum_zig_version = "0.16.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "src/main.zig",
+    },
+}

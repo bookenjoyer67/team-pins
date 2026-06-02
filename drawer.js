@@ -198,7 +198,7 @@ function enableSelection() {
     delBtn.textContent = `Delete (${total})`;
     delBtn.style.cssText = "height:28px;border:none;border-radius:4px;background:#dc2626;color:white;cursor:pointer;font-size:12px;font-weight:600;padding:0 8px;white-space:nowrap;";
     delBtn.onclick = async () => {
-      for (const m of selMarkers) await Map.deletePin(m._pinId);
+      for (const m of selMarkers) if (Map.canDeletePin(m)) await Map.deletePin(m._pinId);
       for (const l of selDrawings) await Map.deleteDrawing(l._drawingId || l._row?.drawing_id);
       clearSelection(); _selecting = false;
     };

@@ -11,6 +11,7 @@ src-tauri/gen/
 *.dmg
 signal-server/config.toml
 signal-server/community_data.json
+community_data.json
 signal-server/vapid_keys.json
 signal-server/*.bak
 
@@ -34,6 +35,11 @@ android/app/release/
 .idea/
 *.swp
 *.swo
+
+# zig build artifacts
+zig-core/zig-out/
+zig-core/.zig-cache/
+!zig-core/pkg/*.wasm
 
 # Android
 android/local.properties

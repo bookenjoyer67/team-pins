@@ -6,6 +6,7 @@ import init, {
   encrypt_annotation,
   encrypt_raw_bytes,
 } from "./core/pkg/e2e_core.js";
+import initSpatial, { SpatialIndex } from "./zig-core/pkg/spatial.js";
 import * as DB from "./db.js";
 import * as Peer from "./peer.js";
 import { state } from "./state.js";
@@ -306,6 +307,14 @@ setInterval(() => {
 wasmReady.then(async () => {
   document.getElementById("app-loader")?.remove();
 
+  // Init spatial index (Zig WASM) — non-critical, degrades gracefully
+  try {
+    await initSpatial();
+    window._spatialIdx = new SpatialIndex(4096);
+  } catch (e) {
+    console.warn("[spatial] spatial index init failed, falling back to O(n) queries:", e.message);
+  }
+
 
   const savedIce = localStorage.getItem("pins-ice-servers");
   if (savedIce) Peer.setIceServers(JSON.parse(savedIce));
@@ -413,7 +422,7 @@ wasmReady.then(async () => {
         toast("Synced with relay", "#16a34a");
       }
       const pendingB64 = localStorage.getItem("pending-community");
-      if (pendingB64 && Relay.isRelayConnected()) {
+      if (pendingB64 && Relay.isRelayConnected() && !window._joiningCommunity) {
         try {
           let b64 = pendingB64.replace(/-/g, "+").replace(/_/g, "/");
           while (b64.length % 4) b64 += "=";
@@ -644,11 +653,15 @@ wasmReady.then(async () => {
         return;
       }
 
-      localStorage.setItem("pending-community", b64);
+      // Save pending as fallback, but also guard against race with pending-community handler
+      if (!linkRelayUrl) {
+        localStorage.setItem("pending-community", b64);
+      }
 
       if (linkRelayUrl) {
         const needConnect = !Relay.isRelayConnected?.();
         if (needConnect) {
+          window._joiningCommunity = true;
           Relay.connect(linkRelayUrl);
           saveRelayToList(linkRelayUrl);
         }
@@ -656,16 +669,22 @@ wasmReady.then(async () => {
       }
 
       if (!Relay.isRelayConnected?.()) {
+        window._joiningCommunity = false;
         toast("Cannot connect to relay", "#dc2626"); return;
       }
 
-      const joinResult = await joinCommunityFromInvite({
-        cidUuid, name, passwordProtected, relayUrl: linkRelayUrl,
-        inviteToken, embeddedCommunitySk,
-        focusLat, focusLng, focusZoom,
-        postJoinDelay: 500,
-        logTag: "[join-hash]",
-      });
+      let joinResult;
+      try {
+        joinResult = await joinCommunityFromInvite({
+          cidUuid, name, passwordProtected, relayUrl: linkRelayUrl,
+          inviteToken, embeddedCommunitySk,
+          focusLat, focusLng, focusZoom,
+          postJoinDelay: 500,
+          logTag: "[join-hash]",
+        });
+      } finally {
+        window._joiningCommunity = false;
+      }
       if (joinResult) {
         history.replaceState(null, "", window.location.pathname);
         await Map.loadSetList();
@@ -680,7 +699,7 @@ wasmReady.then(async () => {
           toast("Joined " + (joinResult.result.name || joinResult.name) + " via link", "#16a34a");
         }
       }
-    } catch (e) { console.error("community link error:", e); toast("Invalid community link: " + (e.message || e), "#dc2626"); }
+    } catch (e) { console.error("community link error:", e); window._joiningCommunity = false; toast("Invalid community link: " + (e.message || e), "#dc2626"); }
   } else if (window.location.hash.startsWith("#relay=")) {
     try {
       const params = new URLSearchParams(window.location.hash.slice(1).replace("relay=", "relay="));
@@ -799,7 +818,7 @@ async function joinCommunityFromInvite({
           myWrappedDek = wrap_dek(dkBytes, public_key);
           import("./relay.js").then(r => {
             r.rewrapMemberDek(sid, public_key, myWrappedDek);
-      }).catch(() => { toast(t("searchUnavailableOffline") || "Search unavailable", "#dc2626"); });
+      }).catch(e => { console.warn(logTag, "DEK rewrap import failed:", e.message); });
         }
       } catch (e) {
         console.warn(logTag, "bootstrap DEK unwrap failed:", e.message);
@@ -958,13 +977,6 @@ async function handleAttest(b) {
       row.ttl_expires_at = row.ttl_base_at + (mins * 60000);
       const dir = attType === "confirmed" ? 1 : -1;
       window._broadcastPinVote?.(pid, dir);
-      if (down >= 7 && down > up) {
-        await DB.deletePin(pid);
-        window._broadcast?.("delete_pin", { pin_id: pid });
-        Map.refreshPinMarkerPopup(state.markers?.find(m => m._pinId === pid));
-        toast("Pin auto-removed by community attestation consensus", "#f97316");
-        return;
-      }
     }
     await DB.savePin(row);
     window._broadcast?.("new_pin", { ...row, team_id: state.currentSet });

@@ -550,6 +550,7 @@ export async function switchSet(sid) {
   state.markers.forEach((m) => m.remove());
   state.markers.length = 0;
   clearMarkerGrid();
+  try { window._spatialIdx?.clear(); } catch (_) {}
   state.clusterGroup?.clearLayers();
   state._markerMap = null;
   state.drawingLayers.forEach((l) => state.map.removeLayer(l));
@@ -2235,6 +2236,7 @@ export async function loadPins() {
       })(m, pin, row);
       state.markers.push(m);
       indexMarker(m);
+      try { window._spatialIdx?.insert(row.pin_id, pin.lat, pin.lng); } catch (_) {}
     } catch (err) { console.warn("[loadPins] failed to load pin:", row.pin_id, err); window._toast?.("Some pins failed to load", "#f97316"); }
   }
   if (newMarkers.length > 0) state.clusterGroup?.addLayers(newMarkers);
@@ -2483,6 +2485,29 @@ export function clearSelection() {
   _selectedMarkers.clear();
 }
 
+export function canDeletePin(markerOrRow) {
+  const isEmbed = window._isEmbed || false;
+  if (isEmbed) return false;
+  const isAnon = markerOrRow?.posted_anonymously || markerOrRow?._postedAnonymously;
+  if (isAnon) return false;
+  const authorPubkey = markerOrRow?.author_pubkey || markerOrRow?._authorPubkey;
+  const isOwner = authorPubkey && authorPubkey === state.signingPublicKey;
+  const myRole = state.myRole;
+  const canModerate = myRole === "maintainer" || myRole === "founder";
+  return (isOwner || canModerate) && myRole !== "reader";
+}
+
+export function canModifyDrawing(row) {
+  const isEmbed = window._isEmbed || false;
+  if (isEmbed) return false;
+  const isAnon = row?.posted_anonymously;
+  if (isAnon) return false;
+  const isOwner = row?.author_pubkey && row.author_pubkey === state.signingPublicKey;
+  const myRole = state.myRole;
+  const canModerate = myRole === "maintainer" || myRole === "founder";
+  return (isOwner || canModerate) && myRole !== "reader";
+}
+
 export async function deleteSelected() {
   if (_selectedMarkers.size === 0) {
     // If nothing selected, delete currently open popup's pin
@@ -2504,13 +2529,8 @@ export async function deleteSelected() {
   for (const m of _selectedMarkers) {
     const pid = m._pinId;
     if (!pid) continue;
-    const pins = await DB.getPins(state.currentSet);
-    const row = pins.find((p) => p.pin_id === pid);
-    if (row) pushUndo({ kind: "pin", type: "delete", pin: row, pid });
-    await DB.deletePin(pid);
-    if (state._decryptedPinCache) state._decryptedPinCache.delete(pid);
-    window._broadcast?.("delete_pin", { pin_id: pid });
-    window._addHistory?.(t("pinDeleted"), pid.slice(0, 8));
+    if (!canDeletePin(m)) continue;
+    await deletePin(pid);
   }
   clearSelection();
   await loadPins();
@@ -2678,6 +2698,10 @@ export async function deletePin(pid) {
   try {
     const pins = await DB.getPins(state.currentSet);
     const row = pins.find((p) => p.pin_id === pid);
+    if (!canDeletePin(row)) {
+      window._toast?.("Not authorized to delete this pin", "#dc2626");
+      return;
+    }
     if (row) pushUndo({ kind: "pin", type: "delete", pin: row, pid });
     const anns = await DB.getAnnotationsByPin(pid, 0, 10000);
     for (const a of (anns || [])) await DB.deleteAnnotation(a.annotation_id);
@@ -2839,6 +2863,10 @@ export function showEditPinForm(pid) {
 }
 
 export function showDrawingForm(g) {
+  const gov = {
+    anonymous_posting: "forbidden",
+    ...(state.currentCommunity?.governance || {}),
+  };
   const ov = document.createElement("div");
   ov.style.cssText =
     "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
@@ -2867,7 +2895,10 @@ export function showDrawingForm(g) {
     const r = g.properties.radius;
     radiusHtml = `<div style="margin-bottom:10px;padding:6px 8px;background:#f0fdf4;border:1px solid #86efac;border-radius:4px;font-size:12px;color:#166534;"><b>${t("circumference")}:</b> ${fmtDist(2 * Math.PI * r)}<br><b>${t("diameter")}:</b> ${fmtDist(r * 2)}<br><b>${t("area")}:</b> ${fmtArea(Math.PI * r * r)}&nbsp;${toggleLink()}</div>`;
   }
-  ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:280px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${t("newDrawing")}</h3>${radiusHtml}<input id="drawing-title" placeholder="${t("title")}" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;" /><textarea id="drawing-note" placeholder="${t("description")}" rows="3" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;resize:vertical;"></textarea><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("color")}</div><div id="drawing-color-picker" style="display:flex;gap:2px;margin-bottom:8px;flex-wrap:wrap;">${colorCircles}</div><input type="hidden" id="drawing-color" value="#2563eb" /><label style="display:flex;align-items:center;gap:4px;font-size:12px;margin-bottom:8px;"><input type="checkbox" id="drawing-arrow" /> ${t("arrow")}</label><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("layer") || "Layer"}</div><select id="drawing-layer" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;">${layerOpts}</select><label style="font-size:12px;color:var(--text-dim);">${t("attachment")}</label><input type="file" id="drawing-media" style="font-size:12px;padding:4px;border:1px solid var(--border);border-radius:3px;width:100%;box-sizing:border-box;margin-bottom:12px;background:var(--bg-input);" /><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="drawing-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="drawing-save" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("save")}</button></div></div>`;
+  const anonOpt = (gov.anonymous_posting === "allowed" || gov.anonymous_posting === "members_only")
+    ? `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);margin-bottom:8px;cursor:pointer;"><input type="checkbox" id="drawing-anonymous" /> Post anonymously</label>`
+    : "";
+  ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:280px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${t("newDrawing")}</h3>${radiusHtml}<input id="drawing-title" placeholder="${t("title")}" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;" /><textarea id="drawing-note" placeholder="${t("description")}" rows="3" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;resize:vertical;"></textarea><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("color")}</div><div id="drawing-color-picker" style="display:flex;gap:2px;margin-bottom:8px;flex-wrap:wrap;">${colorCircles}</div><input type="hidden" id="drawing-color" value="#2563eb" /><label style="display:flex;align-items:center;gap:4px;font-size:12px;margin-bottom:8px;"><input type="checkbox" id="drawing-arrow" /> ${t("arrow")}</label><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("layer") || "Layer"}</div><select id="drawing-layer" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;">${layerOpts}</select>${anonOpt}<label style="font-size:12px;color:var(--text-dim);">${t("attachment")}</label><input type="file" id="drawing-media" style="font-size:12px;padding:4px;border:1px solid var(--border);border-radius:3px;width:100%;box-sizing:border-box;margin-bottom:12px;background:var(--bg-input);" /><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="drawing-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="drawing-save" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("save")}</button></div></div>`;
   document.body.appendChild(ov);
   document.getElementById("drawing-title").focus();
   const clean = () => ov.remove();
@@ -2924,7 +2955,8 @@ export function showDrawingForm(g) {
       }
     }
     clean();
-    await saveDrawing(g, media, layerId);
+    const anon = document.getElementById("drawing-anonymous")?.checked || false;
+    await saveDrawing(g, media, layerId, anon);
   };
 }
 
@@ -3445,8 +3477,14 @@ export function geomMetrics(g) {
     : "";
 }
 
-export async function saveDrawing(g, mediaObj, layerId) {
+export async function saveDrawing(g, mediaObj, layerId, postedAnonymously = false) {
   if (!state.dek || !state.currentSet) return;
+  const gov = {
+    anonymous_posting: "forbidden",
+    ...(state.currentCommunity?.governance || {}),
+  };
+  const canAnon = gov.anonymous_posting === "allowed" || gov.anonymous_posting === "members_only";
+  const isAnon = canAnon && postedAnonymously;
   const did = generate_uuid();
   g.id = did;
   const enc = encrypt_geojson(JSON.stringify(g), state.dek);
@@ -3456,8 +3494,13 @@ export async function saveDrawing(g, mediaObj, layerId) {
     layer_id: layerId || (state.layers[0] ? state.layers[0].layer_id : null),
     encrypted_geojson: enc.ciphertext,
     nonce: enc.nonce,
+    created_at: Date.now(),
   };
-  if (state.signingPublicKey) d.author_pubkey = state.signingPublicKey;
+  if (isAnon) {
+    d.posted_anonymously = true;
+  } else if (state.signingPublicKey) {
+    d.author_pubkey = state.signingPublicKey;
+  }
   if (mediaObj) d.media = mediaObj;
   await DB.saveDrawing(d);
   pushUndo({ kind: "drawing", type: "save", drawing: d, did });
@@ -3509,13 +3552,15 @@ export function buildDrawingPopup(g, row, layer, opacity) {
     ? `<span class="layer-badge" style="border-color:${layer.color};">📑 ${escapeHtml(layer.name)}</span><br>`
     : "";
   const isEmbed = window._isEmbed || false;
-  const isOwner = row?.author_pubkey && row.author_pubkey === state.signingPublicKey;
+  const isAnon = row?.posted_anonymously;
+  const isOwner = !isAnon && row?.author_pubkey && row.author_pubkey === state.signingPublicKey;
   const myRole = state.myRole;
   const canModerate = myRole === "maintainer" || myRole === "founder";
-  const canEdit = !isEmbed && (isOwner || canModerate) && myRole !== "reader";
-  const canDelete = !isEmbed && (isOwner || canModerate) && myRole !== "reader";
+  const canEdit = !isEmbed && !isAnon && (isOwner || canModerate) && myRole !== "reader";
+  const canDelete = !isEmbed && !isAnon && (isOwner || canModerate) && myRole !== "reader";
+  const anonBadge = isAnon ? `<br><span style="font-size:10px;color:var(--text-muted);">anonymous</span>` : "";
   const editBtns = (!canEdit && !canDelete) ? "" : `${canEdit ? `<button class="edit-dwg-btn" data-did="${did}" style="margin-top:6px;padding:4px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:12px;">${t("edit")}</button>` : ""}${canDelete ? `<button class="delete-dwg-btn" data-did="${did}" style="margin-top:6px;padding:4px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:12px;">${t("delete")}</button>` : ""}`;
-  return `<b>${title}</b><br>${n}${mins}${mh}<br>${layerBadge}${editBtns}`;
+  return `<b>${title}</b>${anonBadge}<br>${n}${mins}${mh}<br>${layerBadge}${editBtns}`;
 }
 
 export async function loadDrawings() {
@@ -3539,6 +3584,9 @@ export async function loadDrawings() {
 
       const drawLayer = geoJsonToLayer(g).addTo(state.map);
       drawLayer.setStyle({ opacity, fillOpacity: opacity * 0.15 });
+      if (row.posted_anonymously) {
+        drawLayer.setStyle({ opacity: Math.max(opacity * 0.7, 0.2), fillOpacity: Math.max(opacity * 0.15 * 0.7, 0.03) });
+      }
       state.drawingLayers.push(drawLayer);
       drawLayer._geojson = g;
       drawLayer._row = row;
@@ -3713,7 +3761,7 @@ export async function loadSubscribedPins() {
           const geo = decrypt_geojson(row.ciphertext, row.nonce, dek);
           if (!geo) continue;
           const drawLayer = L.geoJSON(geo, {
-            style: () => ({ color: "#7c3aed", opacity: 0.6, fillOpacity: 0.1 }),
+            style: () => ({ color: "#7c3aed", opacity: row.posted_anonymously ? 0.42 : 0.6, fillOpacity: row.posted_anonymously ? 0.07 : 0.1 }),
           });
           drawLayer._drawingId = row.drawing_id;
           drawLayer._sourceCommunityId = sub.source_community_id;
@@ -3729,6 +3777,10 @@ export async function loadSubscribedPins() {
 export async function deleteDrawing(did) {
   const drawings = await DB.getDrawings(state.currentSet);
   const row = drawings.find((d) => d.drawing_id === did);
+  if (!canModifyDrawing(row)) {
+    window._toast?.("Not authorized to delete this drawing", "#dc2626");
+    return;
+  }
   if (row) pushUndo({ kind: "drawing", type: "delete", drawing: row, did });
   await DB.deleteDrawing(did);
   window._broadcast?.("delete_drawing", { drawing_id: did });
@@ -3742,6 +3794,10 @@ export function showEditDrawingForm(did) {
     .then((drawings) => {
       const row = drawings.find((d) => d.drawing_id === did);
       if (!row) return;
+      if (!canModifyDrawing(row)) {
+        window._toast?.("Not authorized to edit this drawing", "#dc2626");
+        return;
+      }
       try {
         const g = JSON.parse(
           decrypt_geojson(row.encrypted_geojson, row.nonce, state.dek),
@@ -3792,6 +3848,10 @@ export function showEditDrawingForm(did) {
 
 async function updateDrawing(row, title, note, color, arrow) {
   if (!state.dek || !state.currentSet) return;
+  if (!canModifyDrawing(row)) {
+    window._toast?.("Not authorized to edit this drawing", "#dc2626");
+    return;
+  }
   try {
     const g = JSON.parse(
       decrypt_geojson(row.encrypted_geojson, row.nonce, state.dek),
@@ -5087,7 +5147,7 @@ export function addSelectionTool() {
     delBtn.textContent = `${t("delete")} (${total})`;
     delBtn.style.cssText = "height:28px;border:none;border-radius:4px;background:#dc2626;color:white;cursor:pointer;font-size:12px;font-weight:600;padding:0 8px;white-space:nowrap;";
     delBtn.onclick = async () => {
-      for (const m of selectedPins) await deletePin(m._pinId);
+      for (const m of selectedPins) if (canDeletePin(m)) await deletePin(m._pinId);
       for (const l of selectedDrawings) await deleteDrawing(l._drawingId || l._row?.drawing_id);
       clearSelection(); selecting = false; btn.style.background = "#6b7280"; state.map.getContainer().style.cursor = "";
     };
@@ -5095,16 +5155,53 @@ export function addSelectionTool() {
   }
   function selectionForBounds(bounds) {
     clearSelection();
-    state.markers.forEach((m) => { if (bounds.contains(m.getLatLng())) { selectedPins.push(m); const icon = m._icon; if (icon) icon.style.filter = "drop-shadow(0 0 4px #2563eb) brightness(1.2)"; } });
+    const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
+    _selectMarkers(sw.lat, sw.lng, ne.lat, ne.lng, (m) => bounds.contains(m.getLatLng()));
     state.drawingLayers.forEach((l) => { try { const lb = l.getBounds(); if (lb && bounds.intersects(lb)) { selectedDrawings.push(l); l._origColor = l.options?.color || l._origColor; l.setStyle({ color: "#2563eb", weight: (l.options?.weight || 2) + 1 }); } } catch (_) {} });
     if (selectedPins.length + selectedDrawings.length > 0) showSelBar();
   }
   function selectionForPoly(latlngs) {
     clearSelection();
     const polyArr = latlngs.map((ll) => [ll.lng, ll.lat]);
-    state.markers.forEach((m) => { const ll = m.getLatLng(); if (pointInPolygon([ll.lng, ll.lat], polyArr)) { selectedPins.push(m); const icon = m._icon; if (icon) icon.style.filter = "drop-shadow(0 0 4px #2563eb) brightness(1.2)"; } });
+    // Compute bbox of polygon for spatial index query
+    let sw_lat = Infinity, sw_lng = Infinity, ne_lat = -Infinity, ne_lng = -Infinity;
+    for (const [lng, lat] of polyArr) {
+      if (lat < sw_lat) sw_lat = lat;
+      if (lat > ne_lat) ne_lat = lat;
+      if (lng < sw_lng) sw_lng = lng;
+      if (lng > ne_lng) ne_lng = lng;
+    }
+    _selectMarkers(sw_lat, sw_lng, ne_lat, ne_lng, (m) => {
+      const ll = m.getLatLng();
+      return pointInPolygon([ll.lng, ll.lat], polyArr);
+    });
     state.drawingLayers.forEach((l) => { try { const lb = l.getBounds(); if (lb) { const c = lb.getCenter(); if (pointInPolygon([c.lng, c.lat], polyArr)) { selectedDrawings.push(l); l._origColor = l.options?.color || l._origColor; l.setStyle({ color: "#2563eb", weight: (l.options?.weight || 2) + 1 }); } } } catch (_) {} });
     if (selectedPins.length + selectedDrawings.length > 0) showSelBar();
+  }
+  function _selectMarkers(sw_lat, sw_lng, ne_lat, ne_lng, testFn) {
+    const idx = window._spatialIdx;
+    if (idx) {
+      try {
+        const pinIds = idx.queryBbox(sw_lat, sw_lng, ne_lat, ne_lng);
+        for (const pid of pinIds) {
+          const m = state._markerMap?.get(pid);
+          if (m && testFn(m)) {
+            selectedPins.push(m);
+            const icon = m._icon;
+            if (icon) icon.style.filter = "drop-shadow(0 0 4px #2563eb) brightness(1.2)";
+          }
+        }
+        return;
+      } catch (_) { /* fall through to O(n) */ }
+    }
+    // Fallback: brute force O(n)
+    state.markers.forEach((m) => {
+      if (testFn(m)) {
+        selectedPins.push(m);
+        const icon = m._icon;
+        if (icon) icon.style.filter = "drop-shadow(0 0 4px #2563eb) brightness(1.2)";
+      }
+    });
   }
   function pointInPolygon(point, polygon) {
     let inside = false;

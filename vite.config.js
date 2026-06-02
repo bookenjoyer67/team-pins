@@ -57,7 +57,7 @@ export default defineConfig({
   ],
   server: { open: false, host: "0.0.0.0" },
   optimizeDeps: {
-    exclude: ["./core/pkg/e2e_core.js"],
+    exclude: ["./core/pkg/e2e_core.js", "./zig-core/pkg/spatial.js"],
   },
   resolve: {
     alias: {
