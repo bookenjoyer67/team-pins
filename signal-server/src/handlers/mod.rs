@@ -260,6 +260,7 @@ mod tests {
             wrapped_dek: "".into(),
             key_derivation: "".into(),
             published: false,
+            visibility: "public".into(),
             description: "".into(),
             owner_pubkey: "".into(),
             members,

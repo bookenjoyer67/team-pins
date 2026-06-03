@@ -125,8 +125,14 @@ impl Room {
     pub async fn broadcast_guaranteed(&self, txt: &str, exclude: &str, timeout_ms: u64) -> u64 {
         let msg = Message::Text(txt.to_string());
         let mut dropped = 0u64;
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(5000); // hard cap
         for entry in self.clients.iter() {
             if entry.key() != exclude {
+                if tokio::time::Instant::now() >= deadline {
+                    // Total iteration exceeded cap — skip remaining clients
+                    dropped += 1;
+                    continue;
+                }
                 match tokio::time::timeout(
                     Duration::from_millis(timeout_ms),
                     entry.value().tx.send(msg.clone()),
@@ -177,8 +183,13 @@ impl Room {
     ) -> u64 {
         let msg = Message::Text(txt.to_string());
         let mut dropped = 0u64;
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(5000);
         for entry in self.clients.iter() {
             if entry.key() != exclude {
+                if tokio::time::Instant::now() >= deadline {
+                    dropped += 1;
+                    continue;
+                }
                 let is_member = match *entry.value().pubkey.read().unwrap() {
                     Some(ref pk) => community.members.iter().any(|m| m.pubkey == *pk),
                     None => false,
@@ -343,6 +354,7 @@ mod tests {
             community_id: "x".into(), name: "x".into(),
             genesis_public_key: "".into(), public_key: "".into(), secret_key: "".into(),
             wrapped_dek: "".into(), key_derivation: "".into(), published: false,
+            visibility: "public".into(),
             description: "".into(), owner_pubkey: "".into(),
             members: vec![crate::storage::MemberRecord {
                 pubkey: "member_pk".into(), display_name: "A".into(), role: "founder".into(),

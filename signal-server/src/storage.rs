@@ -170,6 +170,7 @@ pub struct PersistentStore {
     pub push_subscriptions: RwLock<HashMap<String, Vec<PushSubscription>>>,
     snapshot_path: Option<PathBuf>,
     dirty: std::sync::atomic::AtomicBool,
+    last_snapshot: tokio::sync::Mutex<std::time::Instant>,
     max_pins_per_community: usize,
 }
 
@@ -189,7 +190,7 @@ impl PersistentStore {
                             communities.insert(c.community_id.clone(), c);
                         }
                         tracing::info!("[relay] loaded snapshot: {} communities", communities.len());
-                        return Self {
+                         return Self {
                             communities: RwLock::new(communities),
                             pins: RwLock::new(snap.pins),
                             annotations: RwLock::new(snap.annotations),
@@ -204,6 +205,7 @@ impl PersistentStore {
                             push_subscriptions: RwLock::new(snap.push_subscriptions),
                             snapshot_path,
                             dirty: std::sync::atomic::AtomicBool::new(false),
+                            last_snapshot: tokio::sync::Mutex::new(std::time::Instant::now()),
                             max_pins_per_community,
                         };
                     }
@@ -214,16 +216,20 @@ impl PersistentStore {
                 }
             }
         }
-        Self { communities: RwLock::new(HashMap::new()), pins: RwLock::new(HashMap::new()), annotations: RwLock::new(HashMap::new()), drawings: RwLock::new(HashMap::new()), tombstones: RwLock::new(HashMap::new()), votes: RwLock::new(HashMap::new()), tokens: RwLock::new(HashMap::new()), public_layers: RwLock::new(HashMap::new()), layer_subscriptions: RwLock::new(HashMap::new()), member_deks: RwLock::new(HashMap::new()), pending_dek_requests: RwLock::new(HashMap::new()), push_subscriptions: RwLock::new(HashMap::new()), snapshot_path, dirty: std::sync::atomic::AtomicBool::new(false), max_pins_per_community }
+        Self { communities: RwLock::new(HashMap::new()), pins: RwLock::new(HashMap::new()), annotations: RwLock::new(HashMap::new()), drawings: RwLock::new(HashMap::new()), tombstones: RwLock::new(HashMap::new()), votes: RwLock::new(HashMap::new()), tokens: RwLock::new(HashMap::new()), public_layers: RwLock::new(HashMap::new()), layer_subscriptions: RwLock::new(HashMap::new()), member_deks: RwLock::new(HashMap::new()), pending_dek_requests: RwLock::new(HashMap::new()), push_subscriptions: RwLock::new(HashMap::new()), snapshot_path, dirty: std::sync::atomic::AtomicBool::new(false), last_snapshot: tokio::sync::Mutex::new(std::time::Instant::now()), max_pins_per_community }
     }
 
     pub async fn save_snapshot(&self) {
         if let Some(ref path) = self.snapshot_path {
-            let mut communities: Vec<CommunityConfig> = self.communities.read().await.values().cloned().collect();
-            for c in &mut communities {
-                c.secret_key = String::new();
-                c.wrapped_dek = String::new();
-            }
+            // Clone data under read locks only long enough to copy, then drop locks
+            let communities: Vec<CommunityConfig> = {
+                let mut list: Vec<CommunityConfig> = self.communities.read().await.values().cloned().collect();
+                for c in &mut list {
+                    c.secret_key = String::new();
+                    c.wrapped_dek = String::new();
+                }
+                list
+            };
             let pins = self.pins.read().await.clone();
             let annotations = self.annotations.read().await.clone();
             let drawings = self.drawings.read().await.clone();
@@ -235,6 +241,7 @@ impl PersistentStore {
             let member_deks = self.member_deks.read().await.clone();
             let pending_dek_requests = self.pending_dek_requests.read().await.clone();
             let push_subscriptions = self.push_subscriptions.read().await.clone();
+
             let snap = SnapshotData {
                 communities,
                 pins,
@@ -249,7 +256,11 @@ impl PersistentStore {
                 pending_dek_requests,
                 push_subscriptions,
             };
-            if let Ok(json) = serde_json::to_string_pretty(&snap) {
+
+            // Offload CPU-heavy serialization and file I/O to blocking thread pool
+            let path = path.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let json = serde_json::to_string_pretty(&snap).map_err(|e| e.to_string())?;
                 let tmp = path.with_file_name(
                     path.file_name().map(|n| {
                         let mut s = n.to_os_string();
@@ -257,11 +268,15 @@ impl PersistentStore {
                         s
                     }).unwrap_or_else(|| std::ffi::OsString::from("snapshot.json.tmp"))
                 );
-                if std::fs::write(&tmp, &json).is_err() {
-                    tracing::error!("[relay] failed to write snapshot to {}", tmp.display());
-                } else if std::fs::rename(&tmp, path).is_err() {
-                    tracing::error!("[relay] failed to rename snapshot from {} to {}", tmp.display(), path.display());
-                }
+                std::fs::write(&tmp, &json).map_err(|e| e.to_string())?;
+                std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+                Ok::<_, String>(())
+            }).await;
+
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::error!("[relay] snapshot failed: {}", e),
+                Err(e) => tracing::error!("[relay] snapshot spawn_blocking failed: {}", e),
             }
         }
     }
@@ -272,7 +287,14 @@ impl PersistentStore {
 
     pub async fn flush_if_dirty(&self) {
         if self.dirty.load(std::sync::atomic::Ordering::Acquire) {
+            let mut last = self.last_snapshot.lock().await;
+            let elapsed = last.elapsed();
+            // Minimum 30s between snapshots to prevent serialization storms
+            if elapsed.as_secs() < 30 {
+                return;
+            }
             self.save_snapshot().await;
+            *last = std::time::Instant::now();
             self.dirty.store(false, std::sync::atomic::Ordering::Release);
         }
     }
@@ -311,25 +333,20 @@ impl PersistentStore {
     }
 
     pub async fn delete_community(&self, community_id: &str) {
-        {
-            self.communities.write().await.remove(community_id);
-            self.pins.write().await.remove(community_id);
-            self.annotations.write().await.remove(community_id);
-            self.drawings.write().await.remove(community_id);
-            // Clean votes for this community
-            let prefix = format!("{}:", community_id);
-            self.votes.write().await.retain(|k, _| !k.starts_with(&prefix));
-            // Clean tombstones for this community (keyed by tombstone_id UUID)
-            self.tombstones.write().await.retain(|_, t| t.community_id != community_id);
-            // Clean tokens for this community (keyed by community_id directly)
-            self.tokens.write().await.remove(community_id);
-            // Clean public layers and subscriptions
-            self.public_layers.write().await.remove(community_id);
-            self.layer_subscriptions.write().await.retain(|k, _| !k.starts_with(&prefix));
-            // Clean member DEKs and pending requests (keyed by community_id directly)
-            self.member_deks.write().await.remove(community_id);
-            self.pending_dek_requests.write().await.remove(community_id);
-        }
+        self.communities.write().await.remove(community_id);
+        self.pins.write().await.remove(community_id);
+        self.annotations.write().await.remove(community_id);
+        self.drawings.write().await.remove(community_id);
+
+        let prefix = format!("{}:", community_id);
+        self.votes.write().await.retain(|k, _| !k.starts_with(&prefix));
+        self.tombstones.write().await.retain(|_, t| t.community_id != community_id);
+        self.tokens.write().await.remove(community_id);
+        self.public_layers.write().await.remove(community_id);
+        self.layer_subscriptions.write().await.retain(|k, _| !k.starts_with(&prefix));
+        self.member_deks.write().await.remove(community_id);
+        self.pending_dek_requests.write().await.remove(community_id);
+
         self.mark_dirty();
     }
 
@@ -339,17 +356,22 @@ impl PersistentStore {
             if let Some(list) = pins.get_mut(community_id) {
                 list.retain(|p| p.pin_id != pin_id);
             }
-            let vote_key = format!("{}:{}", community_id, pin_id);
-            self.votes.write().await.remove(&vote_key);
-            // Cascade-delete annotations linked to this pin
+        }
+        // Clean vote key outside pins lock
+        let vote_key = format!("{}:{}", community_id, pin_id);
+        self.votes.write().await.remove(&vote_key);
+
+        // Cascade-delete annotations linked to this pin
+        {
             if let Some(list) = self.annotations.write().await.get_mut(community_id) {
                 list.retain(|a| a.pin_id != pin_id);
             }
-            // Cascade-delete tombstones targeting this pin
-            // (tombstones are keyed by tombstone_id UUID, filter by community_id + target_id match)
-            let target_pin = pin_id.to_string();
-            self.tombstones.write().await.retain(|_, t| !(t.community_id == community_id && t.target_id == target_pin));
         }
+
+        // Cascade-delete tombstones targeting this pin
+        let target_pin = pin_id.to_string();
+        self.tombstones.write().await.retain(|_, t| !(t.community_id == community_id && t.target_id == target_pin));
+
         self.mark_dirty();
     }
 
@@ -541,33 +563,47 @@ impl PersistentStore {
 
     pub async fn cleanup_expired_ttls(&self) {
         let now = crate::messages::unix_millis();
-        let mut deleted = 0usize;
-        {
+
+        // Phase 1: expire pins — hold pins write lock alone
+        let deleted = {
             let mut pins = self.pins.write().await;
-            let mut anns = self.annotations.write().await;
+            let mut n = 0usize;
             for (_, pin_list) in pins.iter_mut() {
                 let before = pin_list.len();
                 pin_list.retain(|p| {
                     let keep = p.ttl_expires_at.map_or(true, |e| e > 0 && e > now);
                     keep
                 });
-                deleted += before - pin_list.len();
+                n += before - pin_list.len();
             }
-            // Clean orphaned annotations whose pins are gone
+            n
+        };
+
+        // Phase 2: clean orphaned annotations — hold anns lock alone
+        {
+            let pins = self.pins.read().await;
             let valid_pin_ids: std::collections::HashSet<String> = pins
                 .values()
                 .flat_map(|v| v.iter().map(|p| p.pin_id.clone()))
                 .collect();
+            drop(pins);
+            let mut anns = self.annotations.write().await;
             for (_, ann_list) in anns.iter_mut() {
                 ann_list.retain(|a| valid_pin_ids.contains(&a.pin_id));
             }
-            // Clean orphaned votes for deleted/non-existent pins
+        }
+
+        // Phase 3: clean orphaned votes — hold votes lock alone
+        {
+            let pins = self.pins.read().await;
             let valid_vote_keys: std::collections::HashSet<String> = pins
                 .iter()
                 .flat_map(|(cid, pin_list)| pin_list.iter().map(move |p| format!("{}:{}", cid, p.pin_id)))
                 .collect();
+            drop(pins);
             self.votes.write().await.retain(|k, _| valid_vote_keys.contains(k));
         }
+
         if deleted > 0 {
             tracing::info!("[relay] TTL cleanup: removed {} expired pins", deleted);
             self.mark_dirty();
@@ -981,6 +1017,7 @@ mod tests {
             push_subscriptions: RwLock::new(snap2.push_subscriptions),
             snapshot_path: None,
             dirty: std::sync::atomic::AtomicBool::new(false),
+            last_snapshot: tokio::sync::Mutex::new(std::time::Instant::now()),
             max_pins_per_community: 0,
         };
 
@@ -1000,6 +1037,7 @@ mod tests {
             wrapped_dek: "00".into(),
             key_derivation: "random".into(),
             published: false,
+            visibility: "public".into(),
             description: "".into(),
             owner_pubkey: "pk1".into(),
             members: vec![],
@@ -1030,6 +1068,7 @@ mod tests {
             wrapped_dek: "00".into(),
             key_derivation: "random".into(),
             published: false,
+            visibility: "public".into(),
             description: "".into(),
             owner_pubkey: "pk1".into(),
             members: vec![],
@@ -1066,6 +1105,7 @@ mod tests {
             wrapped_dek: "00".into(),
             key_derivation: "random".into(),
             published: false,
+            visibility: "public".into(),
             description: "".into(),
             owner_pubkey: "pk1".into(),
             members: vec![
