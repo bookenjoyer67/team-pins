@@ -78,12 +78,26 @@ export function getCommunityPeers(communityId) {
 }
 
 export function connect(relayUrl) {
-  const url = (relayUrl || localStorage.getItem("pins-relay-url") || "").trim().replace(/\/$/, "");
-  if (!url) return;
+  const rawUrl = (relayUrl || localStorage.getItem("pins-relay-url") || "").trim().replace(/\/$/, "");
+  if (!rawUrl) return Promise.resolve(null);
+  // Normalize HTTP schemes to WebSocket equivalents
+  let url = rawUrl;
+  if (url.startsWith("https://")) url = url.replace("https://", "wss://");
+  else if (url.startsWith("http://")) url = url.replace("http://", "ws://");
+
   let registeredCommunities = new Set();
+
+  // If a connection already exists and is OPEN, return it immediately
   if (connections.has(url)) {
     const existing = connections.get(url);
-    if (existing.ws && (existing.ws.readyState === WebSocket.OPEN || existing.ws.readyState === WebSocket.CONNECTING)) return;
+    if (existing.ws && existing.ws.readyState === WebSocket.OPEN) {
+      return Promise.resolve(existing);
+    }
+    // If CONNECTING, return its pending promise
+    if (existing._openPromise) {
+      return existing._openPromise;
+    }
+    // Stale connection — clean up
     if (existing.reconnectTimer) clearTimeout(existing.reconnectTimer);
     registeredCommunities = existing.registeredCommunities || new Set();
     try { existing.ws.close(); } catch (_) {}
@@ -92,9 +106,26 @@ export function connect(relayUrl) {
   const conn = { connected: false, ws: null, url, pendingLists: [], communityPeers: new Map(), reconnectTimer: null, authPubkey: null, registeredCommunities };
   connections.set(url, conn);
 
+  const openPromise = new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      conn._openResolve = null;
+      conn._openReject = null;
+      conn._openPromise = null;
+      reject(new Error("Connection timed out"));
+    }, 10000);
+
+    conn._openResolve = (c) => { clearTimeout(timeout); conn._openResolve = null; conn._openReject = null; conn._openPromise = null; resolve(c); };
+    conn._openReject = (err) => { clearTimeout(timeout); conn._openResolve = null; conn._openReject = null; conn._openPromise = null; reject(err); };
+  });
+  conn._openPromise = openPromise;
+
   try {
     conn.ws = new WebSocket(url);
-  } catch (_) { connections.delete(url); toast("Cannot connect to " + url, "#dc2626"); return; }
+  } catch (_) {
+    connections.delete(url);
+    conn._openReject(new Error("Cannot connect to " + url));
+    return openPromise;
+  }
 
   conn.ws.onopen = async () => {
     reconnectAttempts.delete(url);
@@ -133,6 +164,8 @@ export function connect(relayUrl) {
         await window._loadSubscribedPins?.();
       }
     }, 300);
+    // Signal that the connection is ready
+    conn._openResolve?.(conn);
   };
 
   function drainQueuedPushesOn(c) {
@@ -266,7 +299,24 @@ export function connect(relayUrl) {
 
   conn.ws.onerror = () => {
     console.warn("[relay] WebSocket error on", url);
+    conn._openReject?.(new Error("WebSocket error on " + url));
   };
+
+  conn.ws.onclose = () => {
+    conn._openReject?.(new Error("WebSocket closed before open on " + url));
+    conn.connected = false;
+    conn.ws = null;
+    window._renderUI?.();
+    if (conn.reconnectTimer) clearTimeout(conn.reconnectTimer);
+    const attempts = (reconnectAttempts.get(url) || 0) + 1;
+    reconnectAttempts.set(url, attempts);
+    if (attempts > 10) { console.error("[relay] max reconnect attempts reached for", url); return; }
+    const delay = Math.min(1000 * Math.pow(2, attempts), 60000);
+    const jitter = (crypto.getRandomValues(new Uint32Array(1))[0] / 0xFFFFFFFF) * delay * 0.3;
+    conn.reconnectTimer = setTimeout(() => connect(url), delay + jitter);
+  };
+
+  return openPromise;
 }
 
 export function disconnect(url) {

@@ -659,13 +659,14 @@ wasmReady.then(async () => {
       }
 
       if (linkRelayUrl) {
-        const needConnect = !Relay.isRelayConnected?.();
-        if (needConnect) {
-          window._joiningCommunity = true;
-          Relay.connect(linkRelayUrl);
-          saveRelayToList(linkRelayUrl);
+        saveRelayToList(linkRelayUrl);
+        window._joiningCommunity = true;
+        try {
+          await Relay.connect(linkRelayUrl);
+        } catch (e) {
+          window._joiningCommunity = false;
+          toast("Cannot connect to relay", "#dc2626"); return;
         }
-        await new Promise(r => setTimeout(r, needConnect ? 1200 : 500));
       }
 
       if (!Relay.isRelayConnected?.()) {
