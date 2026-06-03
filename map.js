@@ -333,15 +333,21 @@ export function initMap() {
     zoomDelta: 0.5,
     attributionControl: false,
   }).setView([51.505, -0.09], 5);
+
+  // Minimal 256x256 transparent placeholder for missing tiles
+  const blankTile = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAAQMAAABmvDolAAAABlBMVEUAAAD///+l2Z/dAAAAL0lEQVR42u3BMQEAAADCIPunNsU+YAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAeF6FwAABHxR7WQAAAABJRU5ErkJggg==";
+
   const osm = L.tileLayer(
     "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-    { maxZoom: 19 },
+    { maxZoom: 19, errorTileUrl: blankTile, crossOrigin: "anonymous" },
   );
   const satellite = L.tileLayer(
     "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.esri.com/">Esri</a>',
+      errorTileUrl: blankTile,
+      crossOrigin: "anonymous",
     },
   );
   osm.addTo(map);
@@ -508,6 +514,34 @@ export function initMap() {
     }
   }, 30000);
 }
+
+// Prefetch tiles for a bounding box across a zoom range.
+// Call like: window._prefetchTiles({ sw_lat: 51.4, sw_lng: -0.2, ne_lat: 51.6, ne_lng: 0.0, minZoom: 12, maxZoom: 16 });
+// Uses the current active tile layer's URL template.
+window._prefetchTiles = function({ sw_lat, sw_lng, ne_lat, ne_lng, minZoom = 10, maxZoom = 16 }) {
+  if (!state.map) return;
+  const activeLayer = state.map._layers ? Object.values(state.map._layers).find(l => l._url) : null;
+  if (!activeLayer || !activeLayer._url) return;
+  const template = activeLayer._url;
+  const subdomains = activeLayer.options?.subdomains || "abc";
+  let count = 0;
+  for (let z = minZoom; z <= maxZoom; z++) {
+    const n = Math.pow(2, z);
+    const lat2tile = lat => Math.floor((1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * n);
+    const lng2tile = lng => Math.floor((lng + 180) / 360 * n);
+    const tx1 = lng2tile(sw_lng), tx2 = lng2tile(ne_lng);
+    const ty1 = lat2tile(ne_lat), ty2 = lat2tile(sw_lat);
+    for (let x = Math.min(tx1, tx2); x <= Math.max(tx1, tx2); x++) {
+      for (let y = Math.min(ty1, ty2); y <= Math.max(ty1, ty2); y++) {
+        const s = subdomains[count % subdomains.length];
+        const url = template.replace("{s}", s).replace("{z}", z).replace("{x}", x).replace("{y}", y);
+        fetch(url, { mode: "no-cors" }).catch(() => {});
+        count++;
+      }
+    }
+  }
+  console.log(`[prefetch] Queued ${count} tiles (z${minZoom}-${maxZoom})`);
+};
 
 export function pinIcon(c, emoji) {
   if (emoji) {

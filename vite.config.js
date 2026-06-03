@@ -32,7 +32,7 @@ function injectPrecache() {
   const swPath = resolve(distDir, "sw.js");
   let sw = readFileSync(swPath, "utf-8");
   sw = sw.replace("__PRECACHE_URLS__", JSON.stringify(precacheUrls));
-  sw = sw.replace("__VERSION__", version);
+  sw = sw.replaceAll("__VERSION__", version);
   writeFileSync(swPath, sw);
   console.log(
     `[precache] Injected ${precacheUrls.length} URLs into sw.js (v${version})`,

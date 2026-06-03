@@ -1,7 +1,10 @@
-const PRECACHE_URLS = ["/assets/db-8O_s-WYM.js","/assets/dialogs-BCeQWc-r.js","/assets/e2e_core-D_9vyewO.js","/assets/e2e_core-DlIKFwdC.js","/assets/e2e_core_bg-B1xls2O6.wasm","/assets/gossip-O4fmqtLA.js","/assets/index-Cld-PLWc.css","/assets/index-cjEV59Zx.js","/assets/map-VJAVPJxT.js","/assets/media-worker-DCXgtr1S.js","/assets/relay-CHQsWmhH.js","/assets/rolldown-runtime-S-ySWqyJ.js","/assets/spatial-DxgiBsj4.wasm","/assets/state-DapcEymk.js","/assets/video-compress-7-wl32Fj.js","/bgm.mp3","/globe.svg","/icon-192.png","/icon-512.png","/index.html","/leaflet/MarkerCluster.Default.css","/leaflet/MarkerCluster.css","/leaflet/images/layers-2x.png","/leaflet/images/layers.png","/leaflet/images/marker-icon-2x.png","/leaflet/images/marker-icon.png","/leaflet/images/marker-shadow.png","/leaflet/images/spritesheet-2x.png","/leaflet/images/spritesheet.png","/leaflet/images/spritesheet.svg","/leaflet/leaflet.css","/leaflet/leaflet.draw.css","/leaflet/leaflet.draw.js","/leaflet/leaflet.js","/leaflet/leaflet.markercluster.js","/manifest.json"];
-const APP_CACHE = "pins-app-5a3852ed";
-const TILE_CACHE = "pins-tiles-__VERSION__";
-const TILE_MAX = 200;
+const PRECACHE_URLS = ["/assets/db-8O_s-WYM.js","/assets/dialogs-BCeQWc-r.js","/assets/e2e_core-D_9vyewO.js","/assets/e2e_core-DlIKFwdC.js","/assets/e2e_core_bg-B1xls2O6.wasm","/assets/gossip-O4fmqtLA.js","/assets/index-Cld-PLWc.css","/assets/index-xRnUeEym.js","/assets/map-dgOlKS1W.js","/assets/media-worker-DCXgtr1S.js","/assets/relay-CHQsWmhH.js","/assets/rolldown-runtime-S-ySWqyJ.js","/assets/spatial-DxgiBsj4.wasm","/assets/state-DapcEymk.js","/assets/video-compress-7-wl32Fj.js","/bgm.mp3","/globe.svg","/icon-192.png","/icon-512.png","/index.html","/leaflet/MarkerCluster.Default.css","/leaflet/MarkerCluster.css","/leaflet/images/layers-2x.png","/leaflet/images/layers.png","/leaflet/images/marker-icon-2x.png","/leaflet/images/marker-icon.png","/leaflet/images/marker-shadow.png","/leaflet/images/spritesheet-2x.png","/leaflet/images/spritesheet.png","/leaflet/images/spritesheet.svg","/leaflet/leaflet.css","/leaflet/leaflet.draw.css","/leaflet/leaflet.draw.js","/leaflet/leaflet.js","/leaflet/leaflet.markercluster.js","/manifest.json"];
+const APP_CACHE = "pins-app-9e98bd08";
+const TILE_CACHE = "pins-tiles-9e98bd08";
+const TILE_MAX = 5000;
+
+// LRU tracking: URL string → last-access timestamp
+let _tileAccess = new Map();
 
 self.addEventListener("install", (e) => {
   e.waitUntil(
@@ -113,16 +116,42 @@ self.addEventListener("fetch", (e) => {
 });
 
 function handleTileRequest(request) {
+  const reqKey = request.url;
+
   return caches.open(TILE_CACHE).then((cache) =>
     cache.match(request).then((cached) => {
-      if (cached) return cached;
+      if (cached) {
+        _tileAccess.set(reqKey, Date.now());
+        return cached;
+      }
       return fetch(request).then((res) => {
         if (res.ok) {
           cache.put(request, res.clone());
+          _tileAccess.set(reqKey, Date.now());
+          // LRU eviction: remove least-recently-accessed tiles when over limit
           cache.keys().then((keys) => {
-            if (keys.length > TILE_MAX) {
-              for (let i = 0; i < keys.length - TILE_MAX; i++) {
-                cache.delete(keys[i]);
+            const excess = keys.length - TILE_MAX;
+            if (excess > 0) {
+              // Build list of (key, timestamp) for all cached tiles
+              const now = Date.now();
+              const entries = keys.map((k) => {
+                const u = new URL(k.url);
+                return { key: k, ts: _tileAccess.get(u.href) || 0 };
+              });
+              // Sort by timestamp ascending (oldest access first)
+              entries.sort((a, b) => a.ts - b.ts);
+              // Evict the oldest
+              const toEvict = entries.slice(0, Math.min(excess, entries.length));
+              for (const e of toEvict) {
+                cache.delete(e.key);
+                _tileAccess.delete(new URL(e.key.url).href);
+              }
+            }
+            // Periodically clean LRU map of stale entries
+            if (_tileAccess.size > TILE_MAX * 2) {
+              const keep = new Set(keys.map(k => new URL(k.url).href));
+              for (const k of _tileAccess.keys()) {
+                if (!keep.has(k)) _tileAccess.delete(k);
               }
             }
           });
