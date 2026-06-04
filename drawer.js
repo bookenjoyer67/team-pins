@@ -9,6 +9,7 @@ import * as Relay from "./relay.js";
 import * as Mesh from "./mesh.js";
 import * as Sync from "./sync.js";
 import * as DB from "./db.js";
+import { showOfflineDownloadModal, showOfflineManagerModal } from "./map-offline.js";
 import { generate_qr_svg } from "./core/pkg/e2e_core.js";
 
 const COLLAPSED_WIDTH = "32px";
@@ -49,6 +50,7 @@ const SECTIONS = [
       { id: "trust", icon: "🛡", label: "Trust", active: () => state._trustSliderVisible || false, action: toggleTrust },
       { id: "fullscreen", icon: "⛶", label: "Fullscreen", action: toggleFullscreen },
       { id: "slideshow", icon: "▶", label: "Slideshow", action: () => Map.startCurrentMapSlideshow?.() || Map.startSlideshow?.(state.markers.filter(m => m._pinId).map(m => m._pinId)) },
+      { id: "offline", icon: "📥", label: "Offline", action: () => showOfflineDownloadModal(state.map) },
     ],
   },
   {
@@ -58,7 +60,7 @@ const SECTIONS = [
       { id: "host", icon: "📡", label: "Host", action: () => window._showHostModal?.() },
       { id: "join", icon: "🤝", label: "Join", action: () => window._showJoinModal?.() },
       { id: "discover", icon: "🔍", label: "Discover", action: () => Map.showDiscoverModal() },
-      { id: "export", icon: "📤", label: "Export", action: () => Sync.exportSet() },
+      { id: "export", icon: "📤", label: "Export", action: () => Sync.showExportFormatModal() },
       { id: "import", icon: "📥", label: "Import", action: () => Sync.importSet() },
       { id: "share", icon: "↗", label: "Share", action: () => Sync.shareMap() },
     ],

@@ -753,3 +753,6 @@ body.drawer-expanded .leaflet-control-container {
   border-bottom: 1px solid var(--border-light);
 }
 .notif-row:hover { background: var(--bg-input); }
+
+/* Context menu */
+#map-context-menu button:hover { background: var(--bg-input); }

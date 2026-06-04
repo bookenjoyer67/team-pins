@@ -69,6 +69,9 @@ function openDB() {
       if (!d.objectStoreNames.contains("chains")) {
         d.createObjectStore("chains", { keyPath: "chain_id" }).createIndex("community_id", "community_id", { unique: false });
       }
+      if (!d.objectStoreNames.contains("offline_regions")) {
+        d.createObjectStore("offline_regions", { keyPath: "id" });
+      }
       if (oldVersion < 8 && d.objectStoreNames.contains("teams") && d.objectStoreNames.contains("communities")) {
         const teamsStore = e.target.transaction.objectStore("teams");
         const communitiesStore = e.target.transaction.objectStore("communities");
@@ -229,7 +232,7 @@ export async function renameTeam(teamId, newName) {
 
 export async function deleteTeam(teamId) {
   await openDB();
-  const txn = db.transaction(["teams", "pins", "drawings", "settings", "layers", "schemas", "communities", "annotations", "tombstones", "subscribed_layers", "layer_deks", "chains"], "readwrite");
+  const txn = db.transaction(["teams", "pins", "drawings", "settings", "layers", "schemas", "communities", "annotations", "tombstones", "subscribed_layers", "layer_deks", "chains", "offline_regions"], "readwrite");
   const pinKeys = await promisify(txn.objectStore("pins").index("team_id").getAllKeys(teamId));
   for (const key of pinKeys) {
     const annKeys = await promisify(txn.objectStore("annotations").index("pin_id").getAllKeys(key));
@@ -542,6 +545,26 @@ export async function getChainsByCommunity(communityId) {
 export async function deleteChain(chainId) {
   await openDB();
   return promisify(tx("chains", "readwrite").delete(chainId));
+}
+
+// --- offline_regions ---
+
+export async function getOfflineRegions() {
+  await openDB();
+  if (!db.objectStoreNames.contains("offline_regions")) return [];
+  return promisify(tx("offline_regions").getAll());
+}
+
+export async function saveOfflineRegion(region) {
+  await openDB();
+  if (!db.objectStoreNames.contains("offline_regions")) return;
+  return promisify(tx("offline_regions", "readwrite").put(region));
+}
+
+export async function deleteOfflineRegion(id) {
+  await openDB();
+  if (!db.objectStoreNames.contains("offline_regions")) return;
+  return promisify(tx("offline_regions", "readwrite").delete(id));
 }
 
 // --- batch operations (single transaction per batch) ---

@@ -64,6 +64,86 @@ fn http_response(status: &str, content_type: &str, body: &[u8], allowed_origin: 
     resp
 }
 
+fn http_response_ct(status: &str, content_type: &str, body: &[u8], allowed_origin: &str, request_origin: Option<&str>) -> Vec<u8> {
+    http_response(status, content_type, body, allowed_origin, request_origin)
+}
+
+async fn handle_osm_proxy(
+    _state: &Arc<AppState>,
+    stream: &mut TcpStream,
+    method: &str,
+    raw_path: &str,
+    content_length: usize,
+    allowed_origin: &str,
+    req_origin: Option<&str>,
+) {
+    let osm_path = raw_path.strip_prefix("/api/proxy/osm/").unwrap_or(raw_path);
+    let osm_url = format!("https://api.openstreetmap.org/{}", osm_path);
+
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => {
+            let err = http_response("500 Internal Server Error", "text/plain", b"Client init failed", allowed_origin, req_origin);
+            let _ = stream.write_all(&err).await;
+            return;
+        }
+    };
+
+    let mut req = match method {
+        "GET" => client.get(&osm_url),
+        "POST" => {
+            let cap = content_length.min(65536);
+            let mut body = vec![0u8; cap];
+            if cap > 0 {
+                if stream.read_exact(&mut body).await.is_err() {
+                    return;
+                }
+            }
+            client
+                .post(&osm_url)
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(String::from_utf8_lossy(&body).to_string())
+        }
+        _ => {
+            let resp = http_response("405 Method Not Allowed", "text/plain", b"Only GET/POST supported", allowed_origin, req_origin);
+            let _ = stream.write_all(&resp).await;
+            return;
+        }
+    };
+
+    req = req.header("User-Agent", "piggPin-Relay/0.1.0");
+
+    match req.send().await {
+        Ok(resp) => {
+            let status_code = resp.status().as_u16();
+            let status_text = match status_code {
+                200 => "200 OK",
+                201 => "201 Created",
+                400 => "400 Bad Request",
+                404 => "404 Not Found",
+                429 => "429 Too Many Requests",
+                509 => "509 Bandwidth Limit Exceeded",
+                _ => "200 OK",
+            };
+            let ct = resp.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("application/json")
+                .to_string();
+            let body = resp.bytes().await.unwrap_or_default();
+            let proxy_resp = http_response_ct(status_text, &ct, &body, allowed_origin, req_origin);
+            let _ = stream.write_all(&proxy_resp).await;
+        }
+        Err(_) => {
+            let err = http_response("502 Bad Gateway", "text/plain", b"Upstream unreachable", allowed_origin, req_origin);
+            let _ = stream.write_all(&err).await;
+        }
+    }
+}
+
 pub async fn handle_http(state: Arc<AppState>, mut stream: TcpStream) {
     let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_default();
     let mut header_buf = Vec::new();
@@ -145,6 +225,12 @@ pub async fn handle_http(state: Arc<AppState>, mut stream: TcpStream) {
             let json = serde_json::json!({"id": id}).to_string();
             let resp = http_response("200 OK", "application/json", json.as_bytes(), allowed_origin, req_origin);
             let _ = stream.write_all(&resp).await;
+        }
+        ("GET", p) if p.starts_with("api/proxy/osm/") => {
+            handle_osm_proxy(&state, &mut stream, method, raw_path, content_length, allowed_origin, req_origin).await;
+        }
+        ("POST", p) if p.starts_with("api/proxy/osm/") => {
+            handle_osm_proxy(&state, &mut stream, method, raw_path, content_length, allowed_origin, req_origin).await;
         }
         ("GET", p) if p == "health" => {
             use std::sync::atomic::Ordering;

@@ -34,6 +34,7 @@
     "leaflet.markercluster": "^1.5.3",
     "mp4box": "^2.3.0",
     "path-browserify": "^1.0.1",
+    "protomaps-leaflet": "^5.1.0",
     "ws": "^8.20.0"
   },
   "devDependencies": {

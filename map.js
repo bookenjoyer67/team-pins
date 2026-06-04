@@ -25,6 +25,9 @@ import { escapeHtml, toast, showProgressDialog, confirmDialog, promptRoomPasswor
 import { t, getTutorialPin } from "./i18n.js";
 import { playPinDrop, playSave, playUndo, playRedo } from "./sounds.js";
 import { COLORS, colorPresetsHTML, hueDotHTML, hexInputHTML, wireColorPicker, validateHex } from "./helpers.js";
+import { initPOILayer, togglePOIEnabled, isPOIEnabled, schedulePOIQuery, clearPOIQueryTimer, showPOICategoryModal } from "./map-poi.js";
+import { showOfflineDownloadModal, showOfflineManagerModal } from "./map-offline.js";
+import { initOSMNotesLayer, isNotesEnabled, toggleNotesEnabled, scheduleNotesRefresh, clearNotesTimer, queryOSMNotes, showCreateNoteDialog } from "./map-osm-notes.js";
 import { compute_geometry } from "./core/pkg/e2e_core.js";
 import { getTrustWeight, computeAnnotationScore, trustScoreColor, computePinTrust, pinTrustIndicator } from "./trust.js";
 import { indexMarker, clearMarkerGrid } from "./gossip.js";
@@ -351,8 +354,25 @@ export function initMap() {
     },
   );
   osm.addTo(map);
+  const poiLayer = initPOILayer(map);
+  const osmNotesLayer = initOSMNotesLayer(map);
+
+  // PMTiles vector layer (loaded asynchronously if configured)
+  const pmtilesUrl = localStorage.getItem("pins-pmtiles-url");
+  const baseMaps = { [t("street")]: osm, [t("satellite")]: satellite };
+  if (pmtilesUrl) {
+    import("protomaps-leaflet").then(mod => {
+      try {
+        const layer = mod.leafletLayer({ url: pmtilesUrl, flavor: "light" });
+        baseMaps[t("vector")] = layer;
+        const ctrl = map._zoomControl; // re-create layers control
+        if (layer) layer.addTo(map);
+      } catch (e) { console.warn("[pmtiles] init failed:", e.message); }
+    }).catch(() => {});
+  }
+
   L.control
-    .layers({ [t("street")]: osm, [t("satellite")]: satellite }, null, {
+    .layers(baseMaps, { "OSM POI": poiLayer, "OSM Notes": osmNotesLayer }, {
       position: "topleft",
     })
     .addTo(map);
@@ -379,6 +399,28 @@ export function initMap() {
     const layersCtrl = map.getContainer().querySelector(".leaflet-control-layers");
     if (layersCtrl) layersCtrl.after(svBtn);
     else map.getContainer().appendChild(svBtn);
+
+    // POI category button
+    const poiBtn = L.DomUtil.create("button", "leaflet-control");
+    poiBtn.textContent = "\u2615";
+    poiBtn.title = "OSM POI Categories";
+    poiBtn.style.cssText = "width:32px;height:32px;border:none;border-radius:4px;background:#7c3aed;color:white;font-size:16px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;margin-left:3px;";
+    poiBtn.onclick = (e) => { e.stopPropagation(); showPOICategoryModal(); };
+    svBtn.after(poiBtn);
+
+    // Wire POI taggler
+    map.on("overlayadd", (e) => {
+      if (e.name === "OSM POI") { togglePOIEnabled(); schedulePOIQuery(map); }
+      if (e.name === "OSM Notes") { toggleNotesEnabled(); scheduleNotesRefresh(); }
+    });
+    map.on("overlayremove", (e) => {
+      if (e.name === "OSM POI") { togglePOIEnabled(); clearPOIQueryTimer(); }
+      if (e.name === "OSM Notes") { toggleNotesEnabled(); clearNotesTimer(); }
+    });
+    map.on("moveend", () => {
+      if (isPOIEnabled()) schedulePOIQuery(map);
+      if (isNotesEnabled()) scheduleNotesRefresh();
+    });
   }
   state.clusterGroup = L.markerClusterGroup({
     maxClusterRadius: 50,
@@ -476,6 +518,14 @@ export function initMap() {
     state.placingPin = false;
     state.map.getContainer().style.cursor = "";
     showPinForm(e.latlng.lat, e.latlng.lng);
+  });
+
+  // Right-click context menu
+  map.on("contextmenu", (e) => {
+    if (state.placingPin || state.streetViewing || state.freeDrawing || state.measuring || state._selectionActive) return;
+    const existing = document.getElementById("map-context-menu");
+    if (existing) existing.remove();
+    showOSMContextMenu(e.latlng.lat, e.latlng.lng, e.originalEvent.clientX, e.originalEvent.clientY);
   });
 
   // Double-tap to fullscreen on mobile
@@ -2469,7 +2519,9 @@ export function showPinDetailModal(pinId) {
       <div style="font-size:11px;color:var(--text-dim);margin-top:8px;">${rt}</div>
       ${ttlHtml}
       ${layerBadge}
-      <div style="margin-top:8px;">${attestBtns ? attestBtns + "<br>" : ""}${editBtns ? editBtns : ""}</div>
+      <div style="margin-top:8px;">${attestBtns ? attestBtns + "<br>" : ""}${editBtns ? editBtns : ""}
+        ${!isEmbed && !isTutorial ? `<button class="osm-edit-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F310; Edit in OSM</button>` : ""}
+      </div>
       <hr style="margin:12px 0 8px;border-color:var(--border);">
       <div class="annotation-thread pin-detail-thread" data-pin-id="${escapeHtml(pinId)}" style="max-height:none;overflow-y:visible;font-size:13px;">Loading...</div>
     </div>
@@ -2496,6 +2548,11 @@ export function showPinDetailModal(pinId) {
   card.addEventListener("click", (e) => {
     if (e.target.matches(".edit-pin-btn")) {
       setTimeout(() => clean(), 100);
+    }
+    if (e.target.matches(".osm-edit-btn")) {
+      const lat = parseFloat(e.target.dataset.lat);
+      const lng = parseFloat(e.target.dataset.lng);
+      window.open(`https://www.openstreetmap.org/edit?editor=id#map=18/${lat}/${lng}`, "_blank");
     }
   }, true);
 
@@ -2815,6 +2872,28 @@ export function showEditPinForm(pid) {
       ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${t("editPin")}</h3><input id="edit-pin-title" placeholder="${t("title")}" value="${escapeHtml(pin.title)}" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;" /><textarea id="edit-pin-note" placeholder="${t("description")}" rows="3" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;resize:vertical;">${escapeHtml(pin.note)}</textarea><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("color")}</div><div id="edit-pin-color-picker" style="display:flex;gap:2px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">${colorCircles}${editHueHtml}${editHexHtml}</div><input type="hidden" id="edit-pin-color" value="${escapeHtml(curColor)}" /><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("emoji") || "Emoji"}</div><div style="display:flex;gap:4px;margin-bottom:8px;"><input type="text" id="edit-pin-emoji" value="${escapeHtml(curEmoji)}" placeholder="😊" maxlength="2" style="width:56px;height:42px;text-align:center;font-size:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);padding:0;box-sizing:border-box;" /><button type="button" id="edit-pin-emoji-btn" style="width:28px;height:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;padding:0;">😊</button></div><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("layer") || "Layer"}</div><select id="edit-pin-layer" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;">${layerOptions}</select><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("schema") || "Schema"}</div><select id="edit-pin-schema" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;">${schemaOpts}</select><div id="edit-schema-fields" style="margin-bottom:8px;"></div><div style="display:flex;gap:4px;margin-bottom:8px;"><div style="flex:1;"><span style="font-size:11px;color:var(--text-dim);">${t("timeFrom") || "From (year)"}</span><input id="edit-pin-time-from" type="number" placeholder="any" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div><div style="flex:1;"><span style="font-size:11px;color:var(--text-dim);">${t("timeTo") || "To (year)"}</span><input id="edit-pin-time-to" type="number" placeholder="any" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div></div><label style="font-size:12px;color:var(--text-dim);">${t("replaceMedia")}</label><input type="file" id="edit-pin-media" accept="image/*,video/*" style="font-size:12px;padding:4px;border:1px solid var(--border);border-radius:3px;width:100%;box-sizing:border-box;margin-bottom:12px;background:var(--bg-input);" /><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="edit-pin-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="edit-pin-save" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("save")}</button></div></div>`;
       document.body.appendChild(ov);
       document.getElementById("edit-pin-title").focus();
+
+      const editNoteTextarea = document.getElementById("edit-pin-note");
+      if (editNoteTextarea) {
+        const geoBtn = document.createElement("button");
+        geoBtn.type = "button";
+        geoBtn.textContent = "📍";
+        geoBtn.title = t("reverseGeocode") || "Fill address";
+        geoBtn.style.cssText = "position:relative;width:28px;height:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;padding:0;";
+        geoBtn.onclick = async () => {
+          geoBtn.textContent = "⏳";
+          const address = await reverseGeocode(pin.lat, pin.lng);
+          geoBtn.textContent = "📍";
+          if (address) {
+            const current = editNoteTextarea.value.trim();
+            editNoteTextarea.value = current ? current + "\n" + address : address;
+            toast("Address filled", "#16a34a");
+          } else {
+            toast("Could not find address", "#dc2626");
+          }
+        };
+        editNoteTextarea.parentNode.insertBefore(geoBtn, editNoteTextarea.nextSibling);
+      }
       const clean = () => ov.remove();
       document.getElementById("edit-pin-cancel").onclick = clean;
       ov.onclick = (e) => {
@@ -3019,6 +3098,30 @@ export function showPinForm(lat, lng) {
   ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${t("newPin")}</h3><input id="pin-title" placeholder="${t("title")}" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;" /><textarea id="pin-note" placeholder="${t("description")}" rows="3" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;resize:vertical;"></textarea><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("color")}</div><div id="pin-color-picker" style="display:flex;gap:2px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">${colorCircles}${hueHtml}${hexHtml}</div><input type="hidden" id="pin-color" value="#2563eb" /><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("emoji") || "Emoji"}</div><div style="display:flex;gap:4px;margin-bottom:8px;"><input type="text" id="pin-emoji" placeholder="😊" maxlength="2" style="width:56px;height:42px;text-align:center;font-size:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);padding:0;box-sizing:border-box;" /><button type="button" id="pin-emoji-btn" style="width:28px;height:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;padding:0;">😊</button></div><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("layer") || "Layer"}</div><select id="pin-layer" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;">${layerOptions}</select><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("schema") || "Schema"}</div><select id="pin-schema" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;">${schemaOptions}</select><div id="schema-fields" style="margin-bottom:8px;"></div><div style="display:flex;gap:4px;margin-bottom:8px;"><div style="flex:1;"><span style="font-size:11px;color:var(--text-dim);">${t("timeFrom") || "From (year)"}</span><input id="pin-time-from" type="number" placeholder="any" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div><div style="flex:1;"><span style="font-size:11px;color:var(--text-dim);">${t("timeTo") || "To (year)"}</span><input id="pin-time-to" type="number" placeholder="any" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div></div>${ttlInfo}${anonOpt}<label style="font-size:12px;color:var(--text-dim);">${t("photoVideo")}</label><input type="file" id="pin-media" accept="image/*,video/*" style="font-size:12px;padding:4px;border:1px solid var(--border);border-radius:3px;width:100%;box-sizing:border-box;margin-bottom:12px;background:var(--bg-input);" /><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="pin-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="pin-save" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("save")}</button></div></div>`;
   document.body.appendChild(ov);
   document.getElementById("pin-title").focus();
+
+  // Reverse geocode button — append after note textarea
+  const noteTextarea = document.getElementById("pin-note");
+  if (noteTextarea) {
+    const geoBtn = document.createElement("button");
+    geoBtn.type = "button";
+    geoBtn.textContent = "📍";
+    geoBtn.title = t("reverseGeocode") || "Fill address";
+    geoBtn.style.cssText = "position:absolute;right:16px;margin-top:6px;width:28px;height:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;padding:0;";
+    geoBtn.style.position = "relative";
+    geoBtn.onclick = async () => {
+      geoBtn.textContent = "⏳";
+      const address = await reverseGeocode(lat, lng);
+      geoBtn.textContent = "📍";
+      if (address) {
+        const current = noteTextarea.value.trim();
+        noteTextarea.value = current ? current + "\n" + address : address;
+        toast("Address filled", "#16a34a");
+      } else {
+        toast("Could not find address", "#dc2626");
+      }
+    };
+    noteTextarea.parentNode.insertBefore(geoBtn, noteTextarea.nextSibling);
+  }
 
   // --- Recording controls ---
   let mediaRecorder = null, mediaStream = null, recordedChunks = [], recordType = null;
@@ -3990,21 +4093,20 @@ export function addPinButton() {
       searchAbort = new AbortController();
       try {
         const resp = await fetch(
-          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`,
-          { signal: searchAbort.signal, headers: { "User-Agent": "piggPin/0.0.1" } },
+          `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=5&lang=en`,
+          { signal: searchAbort.signal },
         );
-        const results = await resp.json();
-        if (!results.length) return;
-        const bbox = results[0].boundingbox;
-        if (bbox) {
-          state.map.fitBounds([
-            [bbox[0], bbox[2]],
-            [bbox[1], bbox[3]],
-          ]);
+        const data = await resp.json();
+        if (!data.features || !data.features.length) return;
+        const f = data.features[0];
+        const extent = f.properties.extent;
+        if (extent && extent.length === 4) {
+          state.map.fitBounds([[extent[1], extent[0]], [extent[3], extent[2]]]);
         } else {
-          state.map.setView([results[0].lat, results[0].lon], 15);
+          const [lng, lat] = f.geometry.coordinates;
+          state.map.setView([lat, lng], 15);
         }
-      } catch (e) { if (e.name !== "AbortError") console.warn("[osm] search failed:", e.message); }
+      } catch (e) { if (e.name !== "AbortError") console.warn("[search] failed:", e.message); }
     }, 750);
   };
   state.map.getContainer().appendChild(osmSearch);
@@ -5396,6 +5498,63 @@ export function addWatermark() {
   el.title = "Made with piggPin";
   state.map.getContainer().appendChild(el);
 }
+
+export function reverseGeocode(lat, lng) {
+  if (!navigator.onLine) return Promise.resolve(null);
+  const now = Date.now();
+  if (now - (state._nominatimLastCall || 0) < 2000) return Promise.resolve(null);
+  state._nominatimLastCall = now;
+  const url = `https://photon.komoot.io/reverse/?lat=${lat}&lon=${lng}&limit=1&lang=en`;
+  return fetch(url, { headers: { "User-Agent": "piggPin/0.0.1" } })
+    .then(r => r.json())
+    .then(data => {
+      if (!data.features || !data.features.length) return null;
+      const p = data.features[0].properties;
+      return p.name || [p.street, p.housenumber, p.city, p.country].filter(Boolean).join(", ") || null;
+    })
+    .catch(() => null);
+}
+
+// ─── Right-click Context Menu ───────────────────────────────────────
+
+function showOSMContextMenu(lat, lng, x, y) {
+  const menu = document.createElement("div");
+  menu.id = "map-context-menu";
+  menu.style.cssText = `position:fixed;left:${x}px;top:${y}px;z-index:4000;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.3);padding:4px;min-width:190px;`;
+  menu.innerHTML = `
+    <button class="ctx-edit-osm" style="display:flex;align-items:center;gap:6px;width:100%;padding:6px 10px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px;text-align:left;border-radius:3px;">&#x1F310; Edit in OpenStreetMap</button>
+    <button class="ctx-note-osm" style="display:flex;align-items:center;gap:6px;width:100%;padding:6px 10px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px;text-align:left;border-radius:3px;">&#x1F4DD; Report a problem</button>
+    <hr style="margin:4px 0;border-color:var(--border);">
+    <button class="ctx-pin-here" style="display:flex;align-items:center;gap:6px;width:100%;padding:6px 10px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px;text-align:left;border-radius:3px;">&#x1F4CC; Place pin here</button>
+  `;
+  document.body.appendChild(menu);
+
+  menu.querySelector(".ctx-edit-osm").onclick = () => {
+    window.open(`https://www.openstreetmap.org/edit?editor=id#map=18/${lat}/${lng}`, "_blank");
+    menu.remove();
+  };
+  menu.querySelector(".ctx-note-osm").onclick = () => {
+    const proxy = localStorage.getItem("pins-osm-proxy");
+    if (proxy) {
+      showCreateNoteDialog(lat, lng);
+    } else {
+      window.open(`https://www.openstreetmap.org/note/new#map=18/${lat}/${lng}`, "_blank");
+    }
+    menu.remove();
+  };
+  menu.querySelector(".ctx-pin-here").onclick = () => {
+    state.placingPin = true;
+    state.map.getContainer().style.cursor = "crosshair";
+    showPinForm(lat, lng);
+    menu.remove();
+  };
+
+  setTimeout(() => {
+    const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener("click", close); } };
+    document.addEventListener("click", close);
+  }, 0);
+}
+
 // Re-exports from extracted modules (for consumers like main.js)
 export {
   loadLayersForSet,

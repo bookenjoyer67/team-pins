@@ -73,6 +73,9 @@ self.addEventListener("fetch", (e) => {
 
   if (e.request.method !== "GET") return;
 
+  // Pass through range requests for PMTiles without caching
+  if (e.request.headers.has("Range")) return;
+
   if (e.request.mode === "navigate") {
     e.respondWith(
       fetch(e.request)

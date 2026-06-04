@@ -1,6 +1,6 @@
-const PRECACHE_URLS = ["/assets/db-8O_s-WYM.js","/assets/dialogs-Dd_w3HWf.js","/assets/e2e_core-D_9vyewO.js","/assets/e2e_core-DlIKFwdC.js","/assets/e2e_core_bg-B1xls2O6.wasm","/assets/gossip-O4fmqtLA.js","/assets/index-BlAG-G3h.js","/assets/index-Cld-PLWc.css","/assets/map-DnQ53Q3f.js","/assets/media-worker-DCXgtr1S.js","/assets/relay-BX9hKQT1.js","/assets/rolldown-runtime-S-ySWqyJ.js","/assets/spatial-DxgiBsj4.wasm","/assets/state-DapcEymk.js","/assets/video-compress-7-wl32Fj.js","/bgm.mp3","/globe.svg","/icon-192.png","/icon-512.png","/index.html","/leaflet/MarkerCluster.Default.css","/leaflet/MarkerCluster.css","/leaflet/images/layers-2x.png","/leaflet/images/layers.png","/leaflet/images/marker-icon-2x.png","/leaflet/images/marker-icon.png","/leaflet/images/marker-shadow.png","/leaflet/images/spritesheet-2x.png","/leaflet/images/spritesheet.png","/leaflet/images/spritesheet.svg","/leaflet/leaflet.css","/leaflet/leaflet.draw.css","/leaflet/leaflet.draw.js","/leaflet/leaflet.js","/leaflet/leaflet.markercluster.js","/manifest.json"];
-const APP_CACHE = "pins-app-4240bf1f";
-const TILE_CACHE = "pins-tiles-4240bf1f";
+const PRECACHE_URLS = ["/assets/chunk-CilyBKbf.js","/assets/db-BwQtvwFy.js","/assets/dialogs-Bh1sfB2R.js","/assets/e2e_core-6lJB7T9y.js","/assets/e2e_core_bg-B1xls2O6.wasm","/assets/esm-DKbryqmV.js","/assets/gossip-ynq4jGwo.js","/assets/index-CKTO-80_.css","/assets/index-DEK2dbBD.js","/assets/map-D7a_fYSX.js","/assets/media-worker-DCXgtr1S.js","/assets/relay-ChqleiwD.js","/assets/spatial-DxgiBsj4.wasm","/assets/state-hYpnWe0b.js","/assets/video-compress-7-wl32Fj.js","/bgm.mp3","/globe.svg","/icon-192.png","/icon-512.png","/index.html","/leaflet/MarkerCluster.Default.css","/leaflet/MarkerCluster.css","/leaflet/images/layers-2x.png","/leaflet/images/layers.png","/leaflet/images/marker-icon-2x.png","/leaflet/images/marker-icon.png","/leaflet/images/marker-shadow.png","/leaflet/images/spritesheet-2x.png","/leaflet/images/spritesheet.png","/leaflet/images/spritesheet.svg","/leaflet/leaflet.css","/leaflet/leaflet.draw.css","/leaflet/leaflet.draw.js","/leaflet/leaflet.js","/leaflet/leaflet.markercluster.js","/manifest.json"];
+const APP_CACHE = "pins-app-31035ad9";
+const TILE_CACHE = "pins-tiles-31035ad9";
 const TILE_MAX = 5000;
 
 // LRU tracking: URL string → last-access timestamp
@@ -72,6 +72,9 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
 
   if (e.request.method !== "GET") return;
+
+  // Pass through range requests for PMTiles without caching
+  if (e.request.headers.has("Range")) return;
 
   if (e.request.mode === "navigate") {
     e.respondWith(

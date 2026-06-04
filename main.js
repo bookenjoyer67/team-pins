@@ -1217,12 +1217,13 @@ export function renderUI() {
       const now = Date.now();
       if (now - (state._nominatimLastCall || 0) < 2000) return;
       state._nominatimLastCall = now;
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`;
-      fetch(url, { headers: { "User-Agent": "piggPin/0.0.1" } }).then(r => r.json()).then(results => {
-        if (!results.length) return;
-        const bbox = results[0].boundingbox;
-        if (bbox) state.map.fitBounds([[bbox[0], bbox[2]], [bbox[1], bbox[3]]]);
-        else state.map.setView([results[0].lat, results[0].lon], 15);
+      const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=5&lang=en`;
+      fetch(url).then(r => r.json()).then(data => {
+        if (!data.features || !data.features.length) return;
+        const f = data.features[0];
+        const extent = f.properties.extent;
+        if (extent && extent.length === 4) state.map.fitBounds([[extent[1], extent[0]], [extent[3], extent[2]]]);
+        else { const [lng, lat] = f.geometry.coordinates; state.map.setView([lat, lng], 15); }
       }).catch(() => {});
     };
     topbarSearch.addEventListener("keydown", (e) => {

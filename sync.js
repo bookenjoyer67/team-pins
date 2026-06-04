@@ -1431,11 +1431,33 @@ function showShareMethodDialog(compressed, tooLarge, bgm, preview = {}, jsonPayl
 
 export async function importSet() {
   const fileInput = document.createElement("input");
-  fileInput.type = "file"; fileInput.accept = ".piggpin,.txt";
+  fileInput.type = "file"; fileInput.accept = ".piggpin,.txt,.geojson,.json,.kml,.gpx";
   fileInput.onchange = async () => {
     const file = fileInput.files[0]; if (!file) return;
+    const ext = file.name.split(".").pop()?.toLowerCase();
     const buf = await file.arrayBuffer();
     const bytes = new Uint8Array(buf);
+
+    // Detect non-piggPin formats
+    const text = new TextDecoder().decode(bytes);
+    if (ext === "geojson" || ext === "json") {
+      try { JSON.parse(text); await importGeoJSON(text); return; } catch (_) {}
+    }
+    if (ext === "kml") {
+      if (text.includes("<kml") || text.includes("<Placemark")) { await importKML(text); return; }
+    }
+    if (ext === "gpx") {
+      if (text.includes("<gpx") || text.includes("<wpt") || text.includes("<trk")) { await importGPX(text); return; }
+    }
+    // Fallback: try auto-detect
+    if (text.trimStart().startsWith("<?xml")) {
+      if (text.includes("<kml")) { await importKML(text); return; }
+      if (text.includes("<gpx")) { await importGPX(text); return; }
+    }
+    if (text.trimStart().startsWith("{") && text.includes("\"type\"")) {
+      await importGeoJSON(text); return;
+    }
+
     if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) {
       let data;
       try { data = decompress_gzip(bytes); } catch (_) { await alertDialog("Invalid data"); return; }
@@ -1568,6 +1590,522 @@ async function doImport(data) {
   if (data.map_center) await DB.saveSettings(sid, { map_center: data.map_center, map_zoom: data.map_zoom });
   await window._loadSetList();
   await window._switchSet(sid);
+}
+
+// ─── Format Export/Import ────────────────────────────────────────────
+
+function getExportSummary() {
+  const pinCount = state.markers.filter(m => m._pinId).length;
+  const drawingCount = (window._drawingLayers || []).length;
+  return { pinCount, drawingCount };
+}
+
+function escapeXml(s) {
+  if (!s) return "";
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+function geojsonToKmlGeometry(geom) {
+  const coords = geom.coordinates;
+  if (geom.type === "Point") {
+    return `<Point><coordinates>${coords[0]},${coords[1]},0</coordinates></Point>`;
+  }
+  if (geom.type === "LineString") {
+    const pts = coords.map(c => `${c[0]},${c[1]},0`).join(" ");
+    return `<LineString><coordinates>${pts}</coordinates></LineString>`;
+  }
+  if (geom.type === "Polygon") {
+    const rings = coords.map(ring => ring.map(c => `${c[0]},${c[1]},0`).join(" ")).map(pts => `<LinearRing><coordinates>${pts}</coordinates></LinearRing>`).join("");
+    return `<Polygon><outerBoundaryIs>${rings.split("</LinearRing>")[0]}</outerBoundaryIs>${rings.includes("</LinearRing>") && rings.split("</LinearRing>").slice(1).join("</LinearRing>") ? rings.split("</LinearRing>").slice(1).map(r => `<innerBoundaryIs>${r}</innerBoundaryIs>`).join("") + "</LinearRing>" : ""}</Polygon>`;
+  }
+  if (geom.type === "MultiLineString") {
+    return coords.map(ring => `<LineString><coordinates>${ring.map(c => `${c[0]},${c[1]},0`).join(" ")}</coordinates></LineString>`).join("");
+  }
+  if (geom.type === "MultiPolygon") {
+    return coords.map(poly => `<Polygon><outerBoundaryIs><LinearRing><coordinates>${poly[0].map(c => `${c[0]},${c[1]},0`).join(" ")}</coordinates></LinearRing></outerBoundaryIs></Polygon>`).join("");
+  }
+  return "";
+}
+
+export async function exportGeoJSON() {
+  if (!state.currentSet || !state.dek) return;
+  const info = getExportSummary();
+  const warn = "media, schema data, and attestations";
+  const ok = await confirmDialog(`Exporting as GeoJSON will exclude ${warn}. This format is best for sharing coordinates with other mapping tools.\n\nContinue?`);
+  if (!ok) return;
+
+  const prog = showProgressDialog("Building GeoJSON...");
+  try {
+    prog.update(10, "Loading data...");
+    const pins = await DB.getAllPins(state.currentSet);
+    const drawings = await DB.getAllDrawings(state.currentSet);
+
+    const features = [];
+    let total = pins.length + drawings.length;
+    let done = 0;
+
+    for (const row of pins) {
+      try {
+        const pin = decrypt_pin_data(row.ciphertext, row.nonce, state.dek);
+        const layer = state.layers.find(l => l.layer_id === row.layer_id);
+        features.push({
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [pin.lng, pin.lat] },
+          properties: {
+            title: pin.title || "Untitled",
+            note: pin.note || "",
+            color: pin.color || "#2563eb",
+            emoji: row.emoji || "",
+            layer: layer?.name || "Default",
+            pin_id: row.pin_id,
+          },
+        });
+      } catch (_) {}
+      done++;
+      if (done % 50 === 0) prog.update(10 + Math.round(done / Math.max(total, 1) * 70), `${done}/${total}`);
+    }
+
+    for (const row of drawings) {
+      try {
+        const geo = decrypt_geojson(row.encrypted_geojson, row.nonce, state.dek);
+        if (!geo) continue;
+        const layer = state.layers.find(l => l.layer_id === row.layer_id);
+        const feature = geo.type === "Feature" ? geo : { type: "Feature", geometry: geo };
+        feature.properties = {
+          ...feature.properties,
+          layer: layer?.name || "Default",
+          drawing_id: row.drawing_id,
+        };
+        features.push(feature);
+      } catch (_) {}
+      done++;
+      if (done % 50 === 0) prog.update(10 + Math.round(done / Math.max(total, 1) * 70), `${done}/${total}`);
+    }
+
+    prog.update(85, "Serializing...");
+    const fc = { type: "FeatureCollection", features };
+    const json = JSON.stringify(fc, null, 2);
+    const blob = new Blob([json], { type: "application/geo+json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const name = window._names[state.currentSet] || state.currentSet || "export";
+    a.href = url; a.download = name.replace(/[^a-zA-Z0-9 _-]/g, "_") + ".geojson";
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    prog.update(100, "Done");
+    setTimeout(prog.done, 600);
+    toast("GeoJSON exported", "#16a34a");
+  } catch (e) {
+    prog.done();
+    await alertDialog("Export failed: " + (e.message || "Unknown error"));
+  }
+}
+
+export async function exportKML() {
+  if (!state.currentSet || !state.dek) return;
+  const ok = await confirmDialog("Exporting as KML will exclude media, schema data, and attestations. This format is compatible with Google Earth and many GIS tools.\n\nContinue?");
+  if (!ok) return;
+
+  const prog = showProgressDialog("Building KML...");
+  try {
+    prog.update(10, "Loading data...");
+    const pins = await DB.getAllPins(state.currentSet);
+    const drawings = await DB.getAllDrawings(state.currentSet);
+    const name = escapeXml(window._names[state.currentSet] || state.currentSet || "export");
+
+    let kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+  <name>${name}</name>
+`;
+
+    let total = pins.length + drawings.length;
+    let done = 0;
+
+    for (const row of pins) {
+      try {
+        const pin = decrypt_pin_data(row.ciphertext, row.nonce, state.dek);
+        const layer = state.layers.find(l => l.layer_id === row.layer_id);
+        kml += `  <Placemark>
+    <name>${escapeXml(pin.title || "Untitled")}</name>
+    <description>${escapeXml(pin.note || "")}</description>
+    <ExtendedData>
+      <Data name="layer"><value>${escapeXml(layer?.name || "Default")}</value></Data>
+      <Data name="emoji"><value>${escapeXml(row.emoji || "")}</value></Data>
+    </ExtendedData>
+    <Point><coordinates>${pin.lng},${pin.lat},0</coordinates></Point>
+  </Placemark>
+`;
+      } catch (_) {}
+      done++;
+    }
+
+    for (const row of drawings) {
+      try {
+        const geo = decrypt_geojson(row.encrypted_geojson, row.nonce, state.dek);
+        if (!geo) continue;
+        const layer = state.layers.find(l => l.layer_id === row.layer_id);
+        const geom = geo.type === "Feature" ? geo.geometry : geo;
+        const title = geo.properties?.title || "Drawing";
+        const note = geo.properties?.note || "";
+        const gkml = geojsonToKmlGeometry(geom);
+        kml += `  <Placemark>
+    <name>${escapeXml(title)}</name>
+    <description>${escapeXml(note)}</description>
+    <ExtendedData>
+      <Data name="layer"><value>${escapeXml(layer?.name || "Default")}</value></Data>
+    </ExtendedData>
+    ${gkml}
+  </Placemark>
+`;
+      } catch (_) {}
+      done++;
+      if (done % 50 === 0) prog.update(10 + Math.round(done / Math.max(total, 1) * 70), `${done}/${total}`);
+    }
+
+    kml += `</Document>
+</kml>`;
+
+    prog.update(85, "Serializing...");
+    const blob = new Blob([kml], { type: "application/vnd.google-earth.kml+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const fname = (window._names[state.currentSet] || state.currentSet || "export").replace(/[^a-zA-Z0-9 _-]/g, "_");
+    a.href = url; a.download = fname + ".kml";
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    prog.update(100, "Done");
+    setTimeout(prog.done, 600);
+    toast("KML exported", "#16a34a");
+  } catch (e) {
+    prog.done();
+    await alertDialog("Export failed: " + (e.message || "Unknown error"));
+  }
+}
+
+export async function exportGPX() {
+  if (!state.currentSet || !state.dek) return;
+  const ok = await confirmDialog("Exporting as GPX will exclude media, schema data, and attestations. This format is compatible with GPS devices, OsmAnd, and Organic Maps.\n\nContinue?");
+  if (!ok) return;
+
+  const prog = showProgressDialog("Building GPX...");
+  try {
+    prog.update(10, "Loading data...");
+    const pins = await DB.getAllPins(state.currentSet);
+    const drawings = await DB.getAllDrawings(state.currentSet);
+    const name = escapeXml(window._names[state.currentSet] || state.currentSet || "export");
+
+    let gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1"
+     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+     xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+<metadata><name>${name}</name></metadata>
+`;
+
+    let total = pins.length + drawings.length;
+    let done = 0;
+
+    for (const row of pins) {
+      try {
+        const pin = decrypt_pin_data(row.ciphertext, row.nonce, state.dek);
+        gpx += `  <wpt lat="${pin.lat}" lon="${pin.lng}">
+    <name>${escapeXml(pin.title || "Untitled")}</name>
+    <desc>${escapeXml(pin.note || "")}</desc>
+    <extensions><gpxx:WaypointExtension xmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3"><gpxx:DisplayMode>SymbolAndName</gpxx:DisplayMode></gpxx:WaypointExtension></extensions>
+  </wpt>
+`;
+      } catch (_) {}
+      done++;
+    }
+
+    for (const row of drawings) {
+      try {
+        const geo = decrypt_geojson(row.encrypted_geojson, row.nonce, state.dek);
+        if (!geo) continue;
+        const geom = geo.type === "Feature" ? geo.geometry : geo;
+        const title = geo.properties?.title || "Drawing";
+        if (geom.type === "LineString" && geom.coordinates.length >= 2) {
+          gpx += `  <trk>
+    <name>${escapeXml(title)}</name>
+    <trkseg>
+${geom.coordinates.map(c => `      <trkpt lat="${c[1]}" lon="${c[0]}"><ele>0</ele></trkpt>`).join("\n")}
+    </trkseg>
+  </trk>
+`;
+        } else if (geom.type === "Point") {
+          gpx += `  <wpt lat="${geom.coordinates[1]}" lon="${geom.coordinates[0]}">
+    <name>${escapeXml(title)}</name>
+  </wpt>
+`;
+        }
+      } catch (_) {}
+      done++;
+      if (done % 50 === 0) prog.update(10 + Math.round(done / Math.max(total, 1) * 70), `${done}/${total}`);
+    }
+
+    gpx += `</gpx>`;
+
+    prog.update(85, "Serializing...");
+    const blob = new Blob([gpx], { type: "application/gpx+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const fname = (window._names[state.currentSet] || state.currentSet || "export").replace(/[^a-zA-Z0-9 _-]/g, "_");
+    a.href = url; a.download = fname + ".gpx";
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+    prog.update(100, "Done");
+    setTimeout(prog.done, 600);
+    toast("GPX exported", "#16a34a");
+  } catch (e) {
+    prog.done();
+    await alertDialog("Export failed: " + (e.message || "Unknown error"));
+  }
+}
+
+// ─── Import functions ────────────────────────────────────────────────
+
+export async function importGeoJSON(text) {
+  if (!state.currentSet || !state.dek) return;
+  let data;
+  try { data = JSON.parse(text); } catch (_) { await alertDialog("Invalid GeoJSON file"); return; }
+
+  const features = data.type === "FeatureCollection" ? data.features :
+                   data.type === "Feature" ? [data] :
+                   Array.isArray(data) ? data : [];
+
+  if (!features.length) { await alertDialog("No features found in GeoJSON file"); return; }
+
+  const ok = await confirmDialog(`Import ${features.length} feature(s) into the current map? They will be encrypted with this map's key.`);
+  if (!ok) return;
+
+  const prog = showProgressDialog("Importing GeoJSON...");
+  const activeLayerId = state.activeLayerId || (state.layers[0]?.layer_id || null);
+  let imported = 0, skipped = 0;
+
+  for (let i = 0; i < features.length; i++) {
+    const f = features[i];
+    const geom = f.geometry || (f.type === "Point" ? { type: "Point", coordinates: [f.lon || f.lng, f.lat] } : null);
+    if (!geom) { skipped++; continue; }
+
+    const props = f.properties || {};
+
+    try {
+      if (geom.type === "Point" && geom.coordinates) {
+        const lng = geom.coordinates[0], lat = geom.coordinates[1];
+        if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) { skipped++; continue; }
+        const { savePin } = await import("./map.js");
+        await savePin(lat, lng, props.title || "Imported", props.note || "", props.color || "#2563eb", null, props.emoji || "", activeLayerId, null, null);
+      } else if (["LineString", "Polygon", "MultiLineString", "MultiPolygon"].includes(geom.type)) {
+        const { saveDrawing } = await import("./map.js");
+        await saveDrawing({ type: "Feature", geometry: geom, properties: { title: props.title || "Imported Drawing", note: props.note || "", color: props.color || "#2563eb" } }, null, activeLayerId);
+      } else { skipped++; continue; }
+      imported++;
+    } catch (_) { skipped++; }
+
+    if (i % 20 === 0) prog.update(Math.round(i / features.length * 90), `Imported ${imported} / ${features.length}`);
+  }
+
+  prog.update(100, "Done");
+  setTimeout(prog.done, 600);
+  toast(`${imported} imported, ${skipped} skipped`, "#16a34a");
+}
+
+async function importKML(text) {
+  if (!state.currentSet || !state.dek) return;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, "text/xml");
+  if (doc.querySelector("parsererror")) { await alertDialog("Invalid KML file"); return; }
+
+  const placemarks = doc.querySelectorAll("Placemark, kml|Placemark, \\*|Placemark");
+  // Fallback: query all Placemark in any namespace
+  const allPlacemarks = doc.getElementsByTagNameNS ? doc.getElementsByTagNameNS("*", "Placemark") : doc.getElementsByTagName("Placemark");
+
+  const getTag = (el, tag) => {
+    const ns = el.getElementsByTagNameNS?.("*", tag);
+    if (ns && ns.length) return ns;
+    return el.getElementsByTagName(tag);
+  };
+
+  const toParse = allPlacemarks?.length ? Array.from(allPlacemarks) : (placemarks?.length ? Array.from(placemarks) : []);
+  if (!toParse.length) { await alertDialog("No Placemarks found in KML file"); return; }
+
+  const ok = await confirmDialog(`Import ${toParse.length} placemark(s) into the current map? They will be encrypted with this map's key.`);
+  if (!ok) return;
+
+  const prog = showProgressDialog("Importing KML...");
+  const activeLayerId = state.activeLayerId || (state.layers[0]?.layer_id || null);
+  let imported = 0, skipped = 0;
+
+  for (let i = 0; i < toParse.length; i++) {
+    const pm = toParse[i];
+    const nameEl = getTag(pm, "name");
+    const descEl = getTag(pm, "description");
+    const name = nameEl?.[0]?.textContent || "Imported";
+    const note = descEl?.[0]?.textContent || "";
+
+    const pointEl = getTag(pm, "Point");
+    const lineEl = getTag(pm, "LineString");
+    const polyEl = getTag(pm, "Polygon");
+
+    try {
+      if (pointEl?.[0]) {
+        const coordEl = getTag(pointEl[0], "coordinates");
+        if (coordEl?.[0]) {
+          const parts = coordEl[0].textContent.trim().split(",");
+          const lng = parseFloat(parts[0]), lat = parseFloat(parts[1]);
+          if (!isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+            const { savePin } = await import("./map.js");
+            await savePin(lat, lng, name, note, "#2563eb", null, "", activeLayerId, null, null);
+            imported++;
+          } else { skipped++; }
+        } else { skipped++; }
+      } else if (lineEl?.[0]) {
+        const coordEl = getTag(lineEl[0], "coordinates");
+        if (coordEl?.[0]) {
+          const coords = coordEl[0].textContent.trim().split(/\s+/).map(p => { const a = p.split(","); return [parseFloat(a[0]), parseFloat(a[1])]; }).filter(c => c.length === 2 && !isNaN(c[0]) && !isNaN(c[1]));
+          if (coords.length >= 2) {
+            const { saveDrawing } = await import("./map.js");
+            await saveDrawing({ type: "Feature", geometry: { type: "LineString", coordinates: coords }, properties: { title: name, note } }, null, activeLayerId);
+            imported++;
+          } else { skipped++; }
+        } else { skipped++; }
+      } else if (polyEl?.[0]) {
+        const obiEl = getTag(polyEl[0], "outerBoundaryIs");
+        if (obiEl?.[0]) {
+          const lrEl = getTag(obiEl[0], "LinearRing");
+          const coordEl = lrEl?.[0] ? getTag(lrEl[0], "coordinates") : null;
+          if (coordEl?.[0]) {
+            const coords = coordEl[0].textContent.trim().split(/\s+/).map(p => { const a = p.split(","); return [parseFloat(a[0]), parseFloat(a[1])]; }).filter(c => c.length === 2 && !isNaN(c[0]) && !isNaN(c[1]));
+            if (coords.length >= 4) {
+              const { saveDrawing } = await import("./map.js");
+              await saveDrawing({ type: "Feature", geometry: { type: "Polygon", coordinates: [coords] }, properties: { title: name, note } }, null, activeLayerId);
+              imported++;
+            } else { skipped++; }
+          } else { skipped++; }
+        } else { skipped++; }
+      } else { skipped++; }
+    } catch (_) { skipped++; }
+
+    if (i % 20 === 0) prog.update(Math.round(i / toParse.length * 90), `Imported ${imported} / ${toParse.length}`);
+  }
+
+  prog.update(100, "Done");
+  setTimeout(prog.done, 600);
+  toast(`${imported} imported, ${skipped} skipped`, "#16a34a");
+}
+
+async function importGPX(text) {
+  if (!state.currentSet || !state.dek) return;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, "text/xml");
+  if (doc.querySelector("parsererror")) { await alertDialog("Invalid GPX file"); return; }
+
+  const getTag = (el, tag) => {
+    const ns = el.getElementsByTagNameNS?.("*", tag);
+    if (ns && ns.length) return ns;
+    return el.getElementsByTagName(tag);
+  };
+
+  const wpts = Array.from(doc.getElementsByTagNameNS?.("*", "wpt") || doc.getElementsByTagName("wpt") || []);
+  const trksegs = Array.from(doc.getElementsByTagNameNS?.("*", "trkseg") || doc.getElementsByTagName("trkseg") || []);
+
+  const total = wpts.length + trksegs.length;
+  if (!total) { await alertDialog("No waypoints or tracks found in GPX file"); return; }
+
+  const ok = await confirmDialog(`Import ${wpts.length} waypoint(s) and ${trksegs.length} track(s) into the current map? They will be encrypted with this map's key.`);
+  if (!ok) return;
+
+  const prog = showProgressDialog("Importing GPX...");
+  const activeLayerId = state.activeLayerId || (state.layers[0]?.layer_id || null);
+  let imported = 0, skipped = 0;
+
+  for (const wpt of wpts) {
+    const lat = parseFloat(wpt.getAttribute("lat")), lon = parseFloat(wpt.getAttribute("lon"));
+    if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) { skipped++; continue; }
+    const nameEl = getTag(wpt, "name"), descEl = getTag(wpt, "desc");
+    const name = nameEl?.[0]?.textContent || "Waypoint";
+    const note = descEl?.[0]?.textContent || "";
+    try {
+      const { savePin } = await import("./map.js");
+      await savePin(lat, lon, name, note, "#2563eb", null, "", activeLayerId, null, null);
+      imported++;
+    } catch (_) { skipped++; }
+    if (imported % 20 === 0) prog.update(Math.round(imported / Math.max(total, 1) * 90), `${imported}/${total}`);
+  }
+
+  for (const seg of trksegs) {
+    const trkpts = Array.from(seg.getElementsByTagNameNS?.("*", "trkpt") || seg.getElementsByTagName("trkpt") || []);
+    const coords = [];
+    for (const pt of trkpts) {
+      const lat = parseFloat(pt.getAttribute("lat")), lon = parseFloat(pt.getAttribute("lon"));
+      if (!isNaN(lat) && !isNaN(lon)) coords.push([lon, lat]);
+    }
+    if (coords.length >= 2) {
+      const trk = seg.closest ? seg.closest("trk") : seg.parentElement;
+      const trkNameEl = trk ? getTag(trk, "name") : null;
+      const title = trkNameEl?.[0]?.textContent || "Track";
+      try {
+        const { saveDrawing } = await import("./map.js");
+        await saveDrawing({ type: "Feature", geometry: { type: "LineString", coordinates: coords }, properties: { title } }, null, activeLayerId);
+        imported++;
+      } catch (_) { skipped++; }
+    } else { skipped++; }
+    if (imported % 20 === 0) prog.update(Math.round(imported / Math.max(total, 1) * 90), `${imported}/${total}`);
+  }
+
+  prog.update(100, "Done");
+  setTimeout(prog.done, 600);
+  toast(`${imported} imported, ${skipped} skipped`, "#16a34a");
+}
+
+// ─── Export format modal ─────────────────────────────────────────────
+
+export function showExportFormatModal() {
+  if (!state.currentSet) return;
+  const info = getExportSummary();
+  const name = escapeHtml(window._names[state.currentSet] || state.currentSet || "export");
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;";
+  const tierStyle = "border:1px solid var(--border-light);border-radius:6px;padding:10px;margin-bottom:8px;";
+  ov.innerHTML = `<div style="background:var(--bg-card);padding:16px;border-radius:8px;min-width:380px;max-width:420px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+    <h3 style="margin:0 0 4px;">Export Map</h3>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;display:flex;gap:12px;flex-wrap:wrap;">
+      <span>${info.pinCount} pin${info.pinCount !== 1 ? "s" : ""}</span>
+      ${info.drawingCount > 0 ? `<span>${info.drawingCount} drawing${info.drawingCount !== 1 ? "s" : ""}</span>` : ""}
+      <span>${escapeHtml(name)}</span>
+    </div>
+    <div style="${tierStyle}border-left:3px solid #2563eb;">
+      <div style="font-weight:600;font-size:13px;margin-bottom:2px;">piggPin (.piggpin)</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Encrypted. Includes media, schemas, and attestations.</div>
+      <button id="exp-fmt-piggpin" style="display:block;width:100%;padding:7px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;font-size:13px;">Export piggPin Format</button>
+    </div>
+    <div style="${tierStyle}border-left:3px solid #16a34a;">
+      <div style="font-weight:600;font-size:13px;margin-bottom:2px;">GeoJSON (.geojson)</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Standard geographic format. Compatible with most GIS tools.</div>
+      <button id="exp-fmt-geojson" style="display:block;width:100%;padding:7px;border:none;background:#16a34a;color:white;border-radius:4px;cursor:pointer;font-size:13px;">Export GeoJSON</button>
+    </div>
+    <div style="${tierStyle}border-left:3px solid #ea580c;">
+      <div style="font-weight:600;font-size:13px;margin-bottom:2px;">KML (.kml)</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Google Earth format. Works with My Maps, GPSBabel, QGIS.</div>
+      <button id="exp-fmt-kml" style="display:block;width:100%;padding:7px;border:none;background:#ea580c;color:white;border-radius:4px;cursor:pointer;font-size:13px;">Export KML</button>
+    </div>
+    <div style="${tierStyle}border-left:3px solid #7c3aed;">
+      <div style="font-weight:600;font-size:13px;margin-bottom:2px;">GPX (.gpx)</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">GPS Exchange format. Compatible with OsmAnd, Organic Maps, Garmin.</div>
+      <button id="exp-fmt-gpx" style="display:block;width:100%;padding:7px;border:none;background:#7c3aed;color:white;border-radius:4px;cursor:pointer;font-size:13px;">Export GPX</button>
+    </div>
+    <div style="font-size:10px;color:var(--text-dim);margin-top:6px;">Non-piggPin formats exclude encrypted media, schema data, and attestations.</div>
+    <button id="exp-fmt-cancel" style="display:block;width:100%;padding:7px;margin-top:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:13px;">Cancel</button>
+  </div>`;
+  document.body.appendChild(ov);
+
+  const clean = () => ov.remove();
+  ov.onclick = (e) => { if (e.target === ov) clean(); };
+  document.getElementById("exp-fmt-cancel").onclick = clean;
+  document.getElementById("exp-fmt-piggpin").onclick = () => { clean(); exportSet(); };
+  document.getElementById("exp-fmt-geojson").onclick = () => { clean(); exportGeoJSON(); };
+  document.getElementById("exp-fmt-kml").onclick = () => { clean(); exportKML(); };
+  document.getElementById("exp-fmt-gpx").onclick = () => { clean(); exportGPX(); };
 }
 
 export async function rotateSetKeys() {
