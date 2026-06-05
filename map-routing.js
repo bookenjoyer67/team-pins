@@ -231,7 +231,6 @@ async function fetchAndRenderRoute() {
   console.log("[routing] waypoints:", _waypoints);
 
   try {
-    removePanel();
     const loading = document.createElement("div");
     loading.id = "routing-loading";
     loading.style.cssText = "position:absolute;top:10px;right:50px;z-index:1000;padding:8px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;font-size:13px;color:var(--text);box-shadow:0 2px 8px rgba(0,0,0,0.15);";
