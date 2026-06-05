@@ -152,6 +152,10 @@ export function showPOICategoryModal() {
 
   ov.innerHTML = `<div style="background:var(--bg-card);padding:16px;border-radius:8px;min-width:280px;max-width:320px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
     <h3 style="margin:0 0 8px;font-size:14px;">POI Categories</h3>
+    <label style="display:flex;align-items:center;gap:8px;padding:6px 0;margin-bottom:4px;font-size:13px;font-weight:600;cursor:pointer;">
+      <input type="checkbox" id="poi-enable" ${_poiEnabled ? "checked" : ""} /> Enable OSM POI
+    </label>
+    <hr style="margin:4px 0 8px;border-color:var(--border);">
     <div style="display:flex;gap:8px;margin-bottom:8px;">
       <button id="poi-cat-all" style="flex:1;padding:4px 8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text);border-radius:4px;cursor:pointer;font-size:11px;">Select All</button>
       <button id="poi-cat-none" style="flex:1;padding:4px 8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text);border-radius:4px;cursor:pointer;font-size:11px;">Clear All</button>
@@ -165,17 +169,26 @@ export function showPOICategoryModal() {
 
   const clean = () => ov.remove();
   ov.onclick = (e) => { if (e.target === ov) clean(); };
+  document.getElementById("poi-enable").onchange = () => {
+    if (_poiEnabled) {
+      togglePOIEnabled();
+      _poiLayerGroup.clearLayers();
+    } else {
+      togglePOIEnabled();
+      if (_activeCategories.size > 0) queryPOIs();
+    }
+  };
   document.getElementById("poi-cat-close").onclick = () => {
-    const checks = ov.querySelectorAll("input[type=\"checkbox\"]");
+    const checks = ov.querySelectorAll("input[type=\"checkbox\"]:not(#poi-enable)");
     const cats = new Set();
     checks.forEach(c => { if (c.checked) cats.add(c.value); });
     setActiveCategories(cats);
     clean();
   };
   document.getElementById("poi-cat-all").onclick = () => {
-    ov.querySelectorAll("input[type=\"checkbox\"]").forEach(c => c.checked = true);
+    ov.querySelectorAll("input[type=\"checkbox\"]:not(#poi-enable)").forEach(c => c.checked = true);
   };
   document.getElementById("poi-cat-none").onclick = () => {
-    ov.querySelectorAll("input[type=\"checkbox\"]").forEach(c => c.checked = false);
+    ov.querySelectorAll("input[type=\"checkbox\"]:not(#poi-enable)").forEach(c => c.checked = false);
   };
 }

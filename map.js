@@ -407,7 +407,7 @@ export function initMap() {
   }
 
   const layersCtrl = L.control
-    .layers(baseMaps, { "OSM POI": poiLayer, "OSM Notes": osmNotesLayer }, {
+    .layers(baseMaps, { "OSM Notes": osmNotesLayer }, {
       position: "topleft",
     })
     .addTo(map);
@@ -451,17 +451,14 @@ export function initMap() {
     styleBtn.onclick = (e) => { e.stopPropagation(); showStylePicker(); };
     poiBtn.after(styleBtn);
 
-    // Wire POI taggler
+    // Wire OSM Notes taggler
     map.on("overlayadd", (e) => {
-      if (e.name === "OSM POI") { togglePOIEnabled(); schedulePOIQuery(map); }
       if (e.name === "OSM Notes") { toggleNotesEnabled(); scheduleNotesRefresh(); }
     });
     map.on("overlayremove", (e) => {
-      if (e.name === "OSM POI") { togglePOIEnabled(); clearPOIQueryTimer(); }
       if (e.name === "OSM Notes") { toggleNotesEnabled(); clearNotesTimer(); }
     });
     map.on("moveend", () => {
-      if (isPOIEnabled()) schedulePOIQuery(map);
       if (isNotesEnabled()) scheduleNotesRefresh();
     });
   }
