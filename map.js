@@ -28,6 +28,7 @@ import { COLORS, colorPresetsHTML, hueDotHTML, hexInputHTML, wireColorPicker, va
 import { initPOILayer, togglePOIEnabled, isPOIEnabled, schedulePOIQuery, clearPOIQueryTimer, showPOICategoryModal } from "./map-poi.js";
 import { showOfflineDownloadModal, showOfflineManagerModal } from "./map-offline.js";
 import { initOSMNotesLayer, isNotesEnabled, toggleNotesEnabled, scheduleNotesRefresh, clearNotesTimer, queryOSMNotes, showCreateNoteDialog } from "./map-osm-notes.js";
+import { isRoutingActive, toggleRouting, addWaypoint, clearRoute } from "./map-routing.js";
 import { compute_geometry } from "./core/pkg/e2e_core.js";
 import { getTrustWeight, computeAnnotationScore, trustScoreColor, computePinTrust, pinTrustIndicator } from "./trust.js";
 import { indexMarker, clearMarkerGrid } from "./gossip.js";
@@ -514,6 +515,10 @@ export function initMap() {
       );
       return;
     }
+    if (isRoutingActive()) {
+      addWaypoint(e.latlng.lat, e.latlng.lng);
+      return;
+    }
     if (!state.placingPin) return;
     state.placingPin = false;
     state.map.getContainer().style.cursor = "";
@@ -522,7 +527,7 @@ export function initMap() {
 
   // Right-click context menu
   map.on("contextmenu", (e) => {
-    if (state.placingPin || state.streetViewing || state.freeDrawing || state.measuring || state._selectionActive) return;
+    if (state.placingPin || state.streetViewing || state.freeDrawing || state.measuring || state._selectionActive || isRoutingActive()) return;
     const existing = document.getElementById("map-context-menu");
     if (existing) existing.remove();
     showOSMContextMenu(e.latlng.lat, e.latlng.lng, e.originalEvent.clientX, e.originalEvent.clientY);
@@ -2314,8 +2319,9 @@ export async function loadPins() {
             ? `<br><button class="attest-confirm-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="padding:2px 8px;border:1px solid #16a34a;background:var(--bg-card);color:#16a34a;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">✅</button><button class="attest-dispute-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="padding:2px 8px;border:1px solid #f97316;background:var(--bg-card);color:#f97316;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">⚠️</button><button class="attest-flag-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="padding:2px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">🚩</button>`
             : "";
           const isTutorial = window._tutorialPids?.includes(rowData.pin_id);
-          const editBtns = (isTutorial || !isOwner) ? "" : `${canEdit ? `<button class="edit-pin-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="margin-top:6px;padding:4px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:12px;">${t("edit")}</button>` : ""}${canDelete ? `<button class="delete-pin-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="margin-top:6px;padding:4px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:12px;">${t("delete")}</button>` : ""}`;
-           return `<div style="position:relative;"><button class="pin-expand-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="position:absolute;top:2px;right:2px;padding:1px 6px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:14px;line-height:1.3;color:var(--text-dim);" title="${t("expand") || "Expand"}">↗</button><b>${escapeHtml(pinData.title)}</b>${marker._pinEmoji ? " " + marker._pinEmoji : ""}${anonBadge}${trustBadge}<br>${escapeHtml(pinData.note)}${customHtml}${mh}${r && r.ciphertext ? `<br><button class="download-media-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;background:transparent;color:#2563eb;border-radius:3px;cursor:pointer;margin-top:4px;">⬇ Download</button>` : ""}<br><small style="color:var(--text-dim)">${rt}</small>${ttlHtml}${layerBadge}${attestBtns}${editBtns ? "<br>" + editBtns : ""}<hr style="margin:8px 0 4px;border-color:var(--border);"><div class="annotation-thread" data-pin-id="${escapeHtml(rowData.pin_id)}" style="max-height:240px;overflow-y:auto;font-size:12px;">Loading...</div></div>`;
+           const editBtns = (isTutorial || !isOwner) ? "" : `${canEdit ? `<button class="edit-pin-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="margin-top:6px;padding:4px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:12px;">${t("edit")}</button>` : ""}${canDelete ? `<button class="delete-pin-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="margin-top:6px;padding:4px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:12px;">${t("delete")}</button>` : ""}`;
+           const routeBtn = `<button class="pin-route-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="margin-top:6px;padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;">&#x1F6E3; Route</button>`;
+           return `<div style="position:relative;"><button class="pin-expand-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="position:absolute;top:2px;right:2px;padding:1px 6px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:14px;line-height:1.3;color:var(--text-dim);" title="${t("expand") || "Expand"}">↗</button><b>${escapeHtml(pinData.title)}</b>${marker._pinEmoji ? " " + marker._pinEmoji : ""}${anonBadge}${trustBadge}<br>${escapeHtml(pinData.note)}${customHtml}${mh}${r && r.ciphertext ? `<br><button class="download-media-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;background:transparent;color:#2563eb;border-radius:3px;cursor:pointer;margin-top:4px;">⬇ Download</button>` : ""}<br><small style="color:var(--text-dim)">${rt}</small>${ttlHtml}${layerBadge}${attestBtns}${editBtns ? "<br>" + editBtns : ""}<br>${routeBtn}<hr style="margin:8px 0 4px;border-color:var(--border);"><div class="annotation-thread" data-pin-id="${escapeHtml(rowData.pin_id)}" style="max-height:240px;overflow-y:auto;font-size:12px;">Loading...</div></div>`;
         });
       })(m, pin, row);
       state.markers.push(m);
@@ -2521,6 +2527,7 @@ export function showPinDetailModal(pinId) {
       ${layerBadge}
       <div style="margin-top:8px;">${attestBtns ? attestBtns + "<br>" : ""}${editBtns ? editBtns : ""}
         ${!isEmbed && !isTutorial ? `<button class="osm-edit-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F310; Edit in OSM</button>` : ""}
+        ${!isEmbed ? `<button class="pin-route-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F6E3; Route</button>` : ""}
       </div>
       <hr style="margin:12px 0 8px;border-color:var(--border);">
       <div class="annotation-thread pin-detail-thread" data-pin-id="${escapeHtml(pinId)}" style="max-height:none;overflow-y:visible;font-size:13px;">Loading...</div>
@@ -2553,6 +2560,12 @@ export function showPinDetailModal(pinId) {
       const lat = parseFloat(e.target.dataset.lat);
       const lng = parseFloat(e.target.dataset.lng);
       window.open(`https://www.openstreetmap.org/edit?editor=id#map=18/${lat}/${lng}`, "_blank");
+    }
+    if (e.target.matches(".pin-route-btn")) {
+      import("./map-routing.js").then(r => {
+        if (!r.isRoutingActive()) r.toggleRouting();
+        r.addWaypoint(parseFloat(e.target.dataset.lat), parseFloat(e.target.dataset.lng));
+      });
     }
   }, true);
 
@@ -2629,8 +2642,8 @@ export async function deleteSelected() {
 
 export function placePin() {
   if (!state.map || !state.currentSet) return;
-  const c = state.map.getCenter();
-  showPinForm(c.lat, c.lng);
+  state.placingPin = !state.placingPin;
+  state.map.getContainer().style.cursor = state.placingPin ? "crosshair" : "";
 }
 
 // Undo/redo
@@ -5524,6 +5537,7 @@ function showOSMContextMenu(lat, lng, x, y) {
   menu.innerHTML = `
     <button class="ctx-edit-osm" style="display:flex;align-items:center;gap:6px;width:100%;padding:6px 10px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px;text-align:left;border-radius:3px;">&#x1F310; Edit in OpenStreetMap</button>
     <button class="ctx-note-osm" style="display:flex;align-items:center;gap:6px;width:100%;padding:6px 10px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px;text-align:left;border-radius:3px;">&#x1F4DD; Report a problem</button>
+    <button class="ctx-route-here" style="display:flex;align-items:center;gap:6px;width:100%;padding:6px 10px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px;text-align:left;border-radius:3px;">&#x1F6E3; Route</button>
     <hr style="margin:4px 0;border-color:var(--border);">
     <button class="ctx-pin-here" style="display:flex;align-items:center;gap:6px;width:100%;padding:6px 10px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px;text-align:left;border-radius:3px;">&#x1F4CC; Place pin here</button>
   `;
@@ -5540,6 +5554,13 @@ function showOSMContextMenu(lat, lng, x, y) {
     } else {
       window.open(`https://www.openstreetmap.org/note/new#map=18/${lat}/${lng}`, "_blank");
     }
+    menu.remove();
+  };
+  menu.querySelector(".ctx-route-here").onclick = () => {
+    import("./map-routing.js").then(r => {
+      if (!r.isRoutingActive()) r.toggleRouting();
+      r.addWaypoint(lat, lng);
+    });
     menu.remove();
   };
   menu.querySelector(".ctx-pin-here").onclick = () => {

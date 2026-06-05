@@ -10,6 +10,7 @@ import * as Mesh from "./mesh.js";
 import * as Sync from "./sync.js";
 import * as DB from "./db.js";
 import { showOfflineDownloadModal, showOfflineManagerModal } from "./map-offline.js";
+import { toggleRouting, isRoutingActive } from "./map-routing.js";
 import { generate_qr_svg } from "./core/pkg/e2e_core.js";
 
 const COLLAPSED_WIDTH = "32px";
@@ -39,6 +40,7 @@ const SECTIONS = [
       { id: "measure", icon: "📏", label: "Measure", active: () => state.measuring, action: toggleMeasure },
       { id: "select", icon: "⊞", label: "Select", active: () => state._selectionActive || false, action: toggleSelect },
       { id: "chains", icon: "🔗", label: "Chains", action: () => Map.showChainsModal() },
+      { id: "route", icon: "🛣", label: "Route", active: () => isRoutingActive(), action: toggleRouting },
     ],
   },
   {

@@ -1095,6 +1095,7 @@ document.addEventListener("click", async e => { try {
   if (b.matches(".edit-dwg-btn")) { e.stopPropagation(); Map.showEditDrawingForm(b.dataset.did); return; }
   if (b.matches(".delete-dwg-btn")) { e.stopPropagation(); if (await confirmDialog(t("deleteConfirm"))) { await Map.deleteDrawing(b.dataset.did); state.map.closePopup(); } return; }
   if (b.matches(".pin-expand-btn")) { e.stopPropagation(); Map.showPinDetailModal(b.dataset.pid); return; }
+  if (b.matches(".pin-route-btn")) { e.stopPropagation(); import("./map-routing.js").then(r => { if (!r.isRoutingActive()) r.toggleRouting(); r.addWaypoint(parseFloat(b.dataset.lat), parseFloat(b.dataset.lng)); state.map.closePopup(); }); return; }
 
   if (b.matches(".attest-confirm-btn") || b.matches(".attest-dispute-btn") || b.matches(".attest-flag-btn")) {
     e.stopPropagation();

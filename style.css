@@ -756,3 +756,10 @@ body.drawer-expanded .leaflet-control-container {
 
 /* Context menu */
 #map-context-menu button:hover { background: var(--bg-input); }
+
+/* Routing Panel */
+#routing-panel { font-family: inherit; user-select: none; }
+.routing-step:hover { background: var(--bg-input); }
+.routing-alt-chip:hover { background: var(--bg-glass) !important; }
+.routing-step:last-child { border-bottom: none !important; }
+.routing-route-line { cursor: copy; }

@@ -192,6 +192,11 @@ const translations = {
     osmNoteSubmitted: "Note submitted — thank you!",
     osmNotes: "OSM Notes",
     osmProxyUrl: "OSM API Proxy URL",
+    route: "Route",
+    routeToHere: "Route to here",
+    routeFailed: "Routing failed — check server",
+    routeClickStart: "Click map to set start point. Click again to set destination.",
+    routeServerUrl: "Routing Server (OSRM)",
   },
   es: {
     searchPlaces: "Buscar lugares...",
