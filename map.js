@@ -358,21 +358,55 @@ export function initMap() {
   const poiLayer = initPOILayer(map);
   const osmNotesLayer = initOSMNotesLayer(map);
 
-  // PMTiles vector layer (loaded asynchronously if configured)
-  const pmtilesUrl = localStorage.getItem("pins-pmtiles-url");
   const baseMaps = { [t("street")]: osm, [t("satellite")]: satellite };
-  if (pmtilesUrl) {
-    import("protomaps-leaflet").then(mod => {
+
+  // MapLibre GL vector basemap layer
+  const styleUrl = localStorage.getItem("pins-maplibre-style") || "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json";
+  const pmtilesUrl = localStorage.getItem("pins-pmtiles-url");
+  if (styleUrl || pmtilesUrl) {
+    import("maplibre-gl").then(async (maplibregl) => {
       try {
-        const layer = mod.leafletLayer({ url: pmtilesUrl, flavor: "light" });
-        baseMaps[t("vector")] = layer;
-        const ctrl = map._zoomControl; // re-create layers control
-        if (layer) layer.addTo(map);
-      } catch (e) { console.warn("[pmtiles] init failed:", e.message); }
+        if (!window.maplibregl) window.maplibregl = maplibregl;
+        // Load UMD plugin via script tag (CJS require path breaks in Vite ESM)
+        await new Promise((resolve, reject) => {
+          if (L.maplibreGL) { resolve(); return; }
+          const s = document.createElement("script");
+          s.src = "/leaflet/leaflet-maplibre-gl.js";
+          s.onload = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
+        });
+        if (!styleUrl && pmtilesUrl) {
+          const { Protocol } = await import("pmtiles");
+          maplibregl.addProtocol("pmtiles", new Protocol().tile);
+        }
+        const gl = L.maplibreGL({
+          style: styleUrl || {
+            version: 8,
+            glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
+            sources: {
+              openmaptiles: { type: "vector", url: `pmtiles://${pmtilesUrl}` }
+            },
+            layers: [
+              { id: "background", type: "background", paint: { "background-color": "#f8f4f0" } },
+              { id: "water", type: "fill", source: "openmaptiles", "source-layer": "water", paint: { "fill-color": "#a0c8f0" } },
+              { id: "landuse-residential", type: "fill", source: "openmaptiles", "source-layer": "landuse", filter: ["==", "class", "residential"], paint: { "fill-color": "#e8e0d8" } },
+              { id: "road-major", type: "line", source: "openmaptiles", "source-layer": "transportation", filter: ["in", "class", "motorway", "trunk", "primary"], paint: { "line-color": "#f8c8a0", "line-width": 3 } },
+              { id: "road-secondary", type: "line", source: "openmaptiles", "source-layer": "transportation", filter: ["in", "class", "secondary", "tertiary"], paint: { "line-color": "#ffffff", "line-width": 2 } },
+              { id: "building", type: "fill", source: "openmaptiles", "source-layer": "building", paint: { "fill-color": "#d4c8bc", "fill-opacity": 0.5 } },
+            ],
+          },
+          attributionControl: false,
+        });
+        baseMaps[t("vector")] = gl;
+        window._mlMap = gl.getMaplibreMap();
+        layersCtrl.addBaseLayer(gl, t("vector"));
+        gl.getMaplibreMap()?.resize();
+      } catch (e) { console.warn("[maplibre] init failed:", e.message); }
     }).catch(() => {});
   }
 
-  L.control
+  const layersCtrl = L.control
     .layers(baseMaps, { "OSM POI": poiLayer, "OSM Notes": osmNotesLayer }, {
       position: "topleft",
     })
@@ -408,6 +442,14 @@ export function initMap() {
     poiBtn.style.cssText = "width:32px;height:32px;border:none;border-radius:4px;background:#7c3aed;color:white;font-size:16px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;margin-left:3px;";
     poiBtn.onclick = (e) => { e.stopPropagation(); showPOICategoryModal(); };
     svBtn.after(poiBtn);
+
+    // Style picker button
+    const styleBtn = L.DomUtil.create("button", "leaflet-control");
+    styleBtn.textContent = "\u{1F3A8}";
+    styleBtn.title = "Map Style";
+    styleBtn.style.cssText = "width:32px;height:32px;border:none;border-radius:4px;background:#0891b2;color:white;font-size:14px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;margin-left:3px;";
+    styleBtn.onclick = (e) => { e.stopPropagation(); showStylePicker(); };
+    poiBtn.after(styleBtn);
 
     // Wire POI taggler
     map.on("overlayadd", (e) => {
@@ -5569,6 +5611,60 @@ function showOSMContextMenu(lat, lng, x, y) {
     showPinForm(lat, lng);
     menu.remove();
   };
+
+  setTimeout(() => {
+    const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener("click", close); } };
+    document.addEventListener("click", close);
+  }, 0);
+}
+
+// ─── Style Picker ───────────────────────────────────────────────────
+
+const MAP_STYLES = [
+  { url: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json", label: "CARTO Positron (Light)" },
+  { url: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json", label: "CARTO Dark Matter (Dark)" },
+  { url: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json", label: "CARTO Voyager (Natural)" },
+];
+
+function showStylePicker() {
+  const existing = document.getElementById("style-picker-menu");
+  if (existing) { existing.remove(); return; }
+
+  const current = localStorage.getItem("pins-maplibre-style") || MAP_STYLES[0].url;
+  const isCustom = current && !MAP_STYLES.some(s => s.url === current);
+
+  const menu = document.createElement("div");
+  menu.id = "style-picker-menu";
+  menu.style.cssText = "position:fixed;top:150px;left:12px;z-index:4000;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.3);padding:4px;min-width:220px;";
+
+  const items = MAP_STYLES.map(s => {
+    const active = s.url === current && !isCustom;
+    return `<button class="style-pick" data-url="${s.url}" style="display:block;width:100%;padding:5px 10px;border:none;background:${active ? "var(--bg-input)" : "transparent"};color:var(--text);cursor:pointer;font-size:12px;text-align:left;border-radius:3px;">${active ? "\u25C9" : "\u25CB"} ${s.label}</button>`;
+  }).join("");
+
+  menu.innerHTML = `<div style="padding:4px 10px;font-size:12px;font-weight:600;color:var(--text-dim);border-bottom:1px solid var(--border);margin-bottom:4px;">\u{1F3A8} Map Style</div>${items}<hr style="margin:4px 0;border-color:var(--border);"><button class="style-pick" data-url="__custom__" style="display:block;width:100%;padding:5px 10px;border:none;background:${isCustom ? "var(--bg-input)" : "transparent"};color:var(--text);cursor:pointer;font-size:12px;text-align:left;border-radius:3px;">${isCustom ? "\u25C9" : "\u25CB"} Custom URL...</button>`;
+  document.body.appendChild(menu);
+
+  menu.querySelectorAll(".style-pick").forEach(btn => {
+    btn.onclick = () => {
+      let url = btn.dataset.url;
+      if (url === "__custom__") {
+        url = prompt("Enter MapLibre style URL:", current);
+        if (!url) return;
+      }
+      localStorage.setItem("pins-maplibre-style", url);
+      menu.remove();
+      const mlMap = window._mlMap;
+      if (mlMap && mlMap.setStyle) {
+        mlMap.setStyle(url);
+        toast("Style updated", "#16a34a");
+      } else {
+        const t = toast("Style saved \u2014 refresh and switch to the Vector layer to apply<br><b>Click to refresh</b>", "#f97316", 10000);
+        t.style.cursor = "pointer";
+        t.onclick = () => location.reload();
+      }
+    };
+  });
 
   setTimeout(() => {
     const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener("click", close); } };

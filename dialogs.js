@@ -26,7 +26,7 @@ export function toast(msg, color = "#dc2626", duration = 2000, undoAction = null
   const el = document.createElement("div");
   el.style.cssText = `position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:${color};color:white;padding:10px 20px;border-radius:6px;z-index:3000;font-size:14px;box-shadow:0 2px 10px rgba(0,0,0,0.3);display:flex;align-items:center;gap:10px;`;
   const text = document.createElement("span");
-  text.textContent = msg;
+  text.innerHTML = msg;
   el.appendChild(text);
   if (undoAction) {
     const btn = document.createElement("button");
@@ -41,6 +41,7 @@ export function toast(msg, color = "#dc2626", duration = 2000, undoAction = null
     el.style.transition = "opacity 0.3s";
     setTimeout(() => el.remove(), 300);
   }, duration);
+  return el;
 }
 
 export function promptRoomPassword(title) {

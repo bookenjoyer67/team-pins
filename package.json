@@ -23,6 +23,7 @@
     "@capacitor/cli": "^8.3.1",
     "@capacitor/core": "^8.3.1",
     "@capacitor/ios": "^8.3.1",
+    "@maplibre/maplibre-gl-leaflet": "^0.1.3",
     "@meshtastic/core": "^2.6.7",
     "@meshtastic/protobufs": "^2.7.18",
     "@meshtastic/transport-web-bluetooth": "^0.1.5",
@@ -32,9 +33,10 @@
     "leaflet": "^1.9.4",
     "leaflet-draw": "^1.0.4",
     "leaflet.markercluster": "^1.5.3",
+    "maplibre-gl": "^5.24.0",
     "mp4box": "^2.3.0",
     "path-browserify": "^1.0.1",
-    "protomaps-leaflet": "^5.1.0",
+    "pmtiles": "^3.2.1",
     "ws": "^8.20.0"
   },
   "devDependencies": {
