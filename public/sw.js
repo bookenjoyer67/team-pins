@@ -14,6 +14,7 @@ self.addEventListener("install", (e) => {
       return cache.addAll(valid).catch((err) => {
         console.warn("[sw] precache addAll error:", err.message);
       });
+    }).then(() => self.skipWaiting())
     })
   );
 });
