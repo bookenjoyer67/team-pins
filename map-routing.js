@@ -259,6 +259,14 @@ async function fetchAndRenderRoute() {
   } catch (e) {
     const existing = document.getElementById("routing-loading");
     if (existing) existing.remove();
+    if (localStorage.getItem("pins-routing-avoid-mw") === "1") {
+      localStorage.setItem("pins-routing-avoid-mw", "0");
+      const cb = _panel?.querySelector("#routing-avoid-motorway");
+      if (cb) cb.checked = false;
+      toast("Routing failed \u2014 check server or try different points", "#dc2626");
+      fetchAndRenderRoute();
+      return;
+    }
     toast("Routing failed \u2014 check server or try different points", "#dc2626");
     console.warn("[routing]", e.message);
   }
