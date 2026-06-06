@@ -3120,6 +3120,37 @@ export function showDrawingForm(g) {
   };
 }
 
+// ─── Shared pin form HTML builder ───────────────────────────────────
+
+function buildPinFormHTML(opts) {
+  const p = opts.prefix;
+  const colorCircles = colorPresetsHTML(COLORS, opts.color || "#2563eb");
+  const hueHtml = hueDotHTML(opts.color || "#2563eb", `${p}-hue`);
+  const hexHtml = hexInputHTML(`${p}-hex`, escapeHtml(opts.color || "#2563eb"));
+  const titleVal = escapeHtml(opts.titleValue || "");
+  const noteVal = escapeHtml(opts.note || "");
+  const emojiVal = escapeHtml(opts.emoji || "");
+
+  const extras = opts.showTTL ? `${opts.ttlInfo || ""}` : "";
+  const anonHTML = opts.showAnon
+    ? `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);margin-bottom:8px;cursor:pointer;"><input type="checkbox" id="${p}-anonymous" /> Post anonymously</label>`
+    : "";
+  const cancelBtn = opts.showCancel
+    ? `<button id="${p}-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button>`
+    : "";
+  const mediaSection = opts.showRecording
+    ? `<input type="file" id="${p}-media" accept="image/*,video/*,audio/*" style="font-size:12px;margin-bottom:10px;display:block;" />`
+    : `<div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("photoVideo")}</div><input type="file" id="${p}-media" accept="image/*,video/*,audio/*" style="font-size:12px;margin-bottom:10px;display:block;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;padding:4px;width:100%;box-sizing:border-box;" />`;
+
+  const timeFromVal = opts.timeFrom != null ? opts.timeFrom : "";
+  const timeUntilVal = opts.timeUntil != null ? opts.timeUntil : "";
+  const timeSection = opts.showTime
+    ? `<div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("timeFrom")}</div><input type="text" id="${p}-time-from" placeholder="YYYY" value="${timeFromVal}" style="width:100%;padding:6px;margin-bottom:4px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;" /><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("timeTo")}</div><input type="text" id="${p}-time-to" placeholder="YYYY" value="${timeUntilVal}" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;" />`
+    : "";
+
+  return `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${opts.title}</h3>${extras}<input id="${p}-title" placeholder="${t("title")}" value="${titleVal}" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:13px;" /><textarea id="${p}-note" placeholder="${t("description")}" rows="3" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;resize:vertical;background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:4px;font-size:13px;">${noteVal}</textarea><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("color")}</div><div id="${p}-color-picker" style="display:flex;gap:2px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">${colorCircles}${hueHtml}${hexHtml}</div><input type="hidden" id="${p}-color" value="${escapeHtml(opts.color || "#2563eb")}" /><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("emoji") || "Emoji"}</div><div style="display:flex;gap:4px;margin-bottom:8px;"><input type="text" id="${p}-emoji" placeholder="😊" value="${emojiVal}" maxlength="2" style="width:56px;height:42px;text-align:center;font-size:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);padding:0;box-sizing:border-box;" /><button type="button" id="${p}-emoji-btn" style="width:28px;height:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;padding:0;">😊</button></div><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("layer") || "Layer"}</div><select id="${p}-layer" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;">${opts.layerOptions}</select><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("schema") || "Schema"}</div><select id="${p}-schema" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;">${opts.schemaOptions}</select><div id="${p}-schema-fields" style="margin-bottom:8px;"></div>${anonHTML}${timeSection}${mediaSection}<div style="display:flex;gap:8px;justify-content:flex-end;">${cancelBtn}<button id="${p}-save" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("save")}</button></div></div>`;
+}
+
 export function showPinForm(lat, lng) {
   const gov = {
     ttl_enabled: false, ttl_base_mins: 10080, ttl_vote_mins: 360,
