@@ -19,6 +19,7 @@ import * as Sync from "./sync.js";
 import * as Relay from "./relay.js";
 import { initPushNotifications, togglePush, isPushEnabled, handlePushInfo } from "./push-sub.js";
 import { clearDiscoveryCache } from "./gossip.js";
+import { migrateAttestationsToVotes } from "./trust.js";
 let Mesh = null;
 const votedPins = {};
 
@@ -947,44 +948,56 @@ function wireGlobals() {
 
 // --- Click handler sub-routines (extracted for readability) ---
 
-async function handleAttest(b) {
+async function handleVote(b) {
   const pid = b.dataset.pid;
   if (!pid || !state.signingSecretKey) return;
   const row = await DB.getPin(pid).catch(() => null);
   if (!row) { toast("Pin no longer exists", "#f97316"); return; }
   if (row.author_pubkey && row.author_pubkey === state.signingPublicKey && !row.posted_anonymously) {
-    toast("Cannot attest your own pin", "#f97316"); return;
+    toast("Cannot vote on your own pin", "#f97316"); return;
   }
-  try {
-    const attType = b.matches(".attest-confirm-btn") ? "confirmed" : b.matches(".attest-dispute-btn") ? "disputed" : "flagged";
-    row.attestations = row.attestations || [];
-    const existingIdx = row.attestations.findIndex(a => a.pubkey === state.signingPublicKey);
-    const ts = Date.now();
-    const sig = sign(pid + "|" + attType + "|" + ts, state.signingSecretKey);
-    const att = { pubkey: state.signingPublicKey, type: attType, timestamp: ts, signature: sig };
-    if (existingIdx >= 0) {
-      if (row.attestations[existingIdx].type === attType) { toast("Already attested", "#f97316"); return; }
-      row.attestations[existingIdx] = att;
-    } else {
-      row.attestations.push(att);
-    }
-    const gov = state.currentCommunity?.governance || {};
-    if (gov.ttl_enabled && row.ttl_base_at) {
-      const atts = row.attestations;
-      const up = atts.filter(a => a.type === "confirmed").length;
-      const down = atts.filter(a => a.type === "disputed").length + atts.filter(a => a.type === "flagged").length;
-      let mins = (gov.ttl_base_mins || 10080) + ((up - down) * (gov.ttl_vote_mins || 360));
-      mins = Math.max(gov.ttl_min_mins || 60, Math.min(gov.ttl_max_mins || 43200, mins));
-      row.ttl_expires_at = row.ttl_base_at + (mins * 60000);
-      const dir = attType === "confirmed" ? 1 : -1;
-      window._broadcastPinVote?.(pid, dir);
-    }
-    await DB.savePin(row);
-    window._broadcast?.("new_pin", { ...row, team_id: state.currentSet });
-    Map.refreshPinMarkerPopup(state.markers?.find(m => m._pinId === pid));
-    const labels = { confirmed: "Confirmed", disputed: "Disputed", flagged: "Flagged" };
-    toast(labels[attType] || "Attested", "#16a34a");
-  } catch (e) { console.warn("Attest failed:", e); toast("Failed to attest", "#dc2626"); }
+
+  const direction = b.matches(".vote-up-btn") ? "up" : "down";
+  migrateAttestationsToVotes(row);
+  row.votes = row.votes || [];
+  const existingIdx = row.votes.findIndex(v => v.pubkey === state.signingPublicKey);
+  const ts = Date.now();
+  const payload = encode_hex(new TextEncoder().encode(`${pid}|${direction}|${ts}`));
+  const sig = sign(payload, state.signingSecretKey);
+  const vote = { direction, pubkey: state.signingPublicKey, timestamp: ts, signature: sig };
+
+  if (existingIdx >= 0) {
+    if (row.votes[existingIdx].direction === direction) { toast("Already voted " + direction, "#f97316"); return; }
+    row.votes[existingIdx] = vote;
+  } else {
+    row.votes.push(vote);
+  }
+
+  await DB.savePin(row);
+  window._broadcast?.("new_pin", { ...row, team_id: state.currentSet });
+  window._broadcastPinVote?.(pid, direction === "up" ? 1 : -1);
+  Map.refreshPinMarkerPopup(state.markers?.find(m => m._pinId === pid));
+  toast(direction === "up" ? "Upvoted" : "Downvoted", "#16a34a");
+}
+
+async function handleFlag(b) {
+  const pid = b.dataset.pid;
+  if (!pid || !state.signingSecretKey || !state.signingPublicKey) return;
+  const row = await DB.getPin(pid).catch(() => null);
+  if (!row) return;
+
+  migrateAttestationsToVotes(row);
+  row.flags = row.flags || [];
+  if (row.flags.some(f => f.pubkey === state.signingPublicKey)) { toast("Already flagged", "#f97316"); return; }
+
+  const ts = Date.now();
+  const payload = encode_hex(new TextEncoder().encode(`${pid}|flag|${ts}`));
+  const sig = sign(payload, state.signingSecretKey);
+  row.flags.push({ pubkey: state.signingPublicKey, timestamp: ts, signature: sig });
+
+  await DB.savePin(row);
+  import("./relay.js").then(r => r.flagPin(state.currentSet, pid, state.signingPublicKey)).catch(() => {});
+  toast("Flagged for review", "#f97316");
 }
 
 async function handleAnnotationSubmit(b) {
@@ -1097,9 +1110,14 @@ document.addEventListener("click", async e => { try {
   if (b.matches(".pin-expand-btn")) { e.stopPropagation(); Map.showPinDetailModal(b.dataset.pid); return; }
   if (b.matches(".pin-route-btn")) { e.stopPropagation(); import("./map-routing.js").then(r => { if (!r.isRoutingActive()) r.toggleRouting(); r.addWaypoint(parseFloat(b.dataset.lat), parseFloat(b.dataset.lng)); state.map.closePopup(); }); return; }
 
-  if (b.matches(".attest-confirm-btn") || b.matches(".attest-dispute-btn") || b.matches(".attest-flag-btn")) {
+  if (b.matches(".vote-up-btn") || b.matches(".vote-down-btn")) {
     e.stopPropagation();
-    await handleAttest(b);
+    await handleVote(b);
+    return;
+  }
+  if (b.matches(".flag-btn")) {
+    e.stopPropagation();
+    await handleFlag(b);
     return;
   }
   if (b.matches(".ann-submit-btn")) {

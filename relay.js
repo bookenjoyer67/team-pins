@@ -772,6 +772,19 @@ export async function sendPinVote(communityId, pinId, dir) {
   }));
 }
 
+export async function flagPin(communityId, pinId, flaggerPubkey) {
+  const relayUrl = state.currentCommunity?.relay_url;
+  const conn = relayUrl ? connections.get(relayUrl) : getConn();
+  if (!conn || !isAlive(conn)) return;
+  conn.ws.send(JSON.stringify({
+    type: "pin_flag",
+    community_id: communityId,
+    pin_id: pinId,
+    by_pubkey: flaggerPubkey,
+    timestamp: Date.now(),
+  }));
+}
+
 export async function queryCommunities(bbox, search) {
   const conn = getConn();
   if (!conn || !isAlive(conn)) return [];

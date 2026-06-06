@@ -731,17 +731,17 @@ function createTrustSlider() {
   el.style.cssText = "display:none;position:absolute;bottom:42px;left:50%;transform:translateX(-50%);z-index:1000;align-items:center;gap:8px;padding:6px 12px;background:var(--bg-glass);backdrop-filter:blur(4px);border-radius:6px;box-shadow:0 1px 5px var(--shadow);font-size:12px;white-space:nowrap;";
   el.innerHTML = `
     <span style="color:var(--text-dim);">🛡</span>
-    <input id="drawer-trust-slider-input" type="range" min="0" max="10" value="0" style="width:100px;">
+    <input id="drawer-trust-slider-input" type="range" min="-20" max="20" value="-20" style="width:100px;">
     <span id="drawer-trust-slider-label" style="min-width:24px;text-align:right;font-size:11px;color:var(--text-dim);">off</span>
   `;
   state.map.getContainer().appendChild(el);
   const slider = document.getElementById("drawer-trust-slider-input");
   const label = document.getElementById("drawer-trust-slider-label");
   slider.oninput = () => {
-    const v = parseInt(slider.value, 10);
-    state.minTrustScore = v > 0 ? v / 10 : null;
-    label.textContent = v > 0 ? (v / 10).toFixed(1) : "off";
-    Map.applyTrustFilter?.();
+    const v = parseInt(slider.value, 10) / 10;
+    state.minTrustScore = v;
+    label.textContent = v.toFixed(1);
+    Map.applyTimeFilter();
   };
 }
 

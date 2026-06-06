@@ -2354,13 +2354,13 @@ export async function loadPins() {
             }
           }
           const hasAttestBtns = !isEmbed && !isAnon && state.signingSecretKey && rowData.author_pubkey !== state.signingPublicKey;
-          const attestBtns = hasAttestBtns
-            ? `<br><button class="attest-confirm-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="padding:2px 8px;border:1px solid #16a34a;background:var(--bg-card);color:#16a34a;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">✅</button><button class="attest-dispute-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="padding:2px 8px;border:1px solid #f97316;background:var(--bg-card);color:#f97316;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">⚠️</button><button class="attest-flag-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="padding:2px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">🚩</button>`
+          const voteBtns = hasAttestBtns
+            ? `<br><button class="vote-up-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="padding:2px 8px;border:1px solid #16a34a;background:var(--bg-card);color:#16a34a;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">👍</button><button class="vote-down-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="padding:2px 8px;border:1px solid #f97316;background:var(--bg-card);color:#f97316;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">👎</button><button class="flag-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="padding:2px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">🚩</button>`
             : "";
           const isTutorial = window._tutorialPids?.includes(rowData.pin_id);
            const editBtns = (isTutorial || !isOwner) ? "" : `${canEdit ? `<button class="edit-pin-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="margin-top:6px;padding:4px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:12px;">${t("edit")}</button>` : ""}${canDelete ? `<button class="delete-pin-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="margin-top:6px;padding:4px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:12px;">${t("delete")}</button>` : ""}`;
            const routeBtn = `<button class="pin-route-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="margin-top:6px;padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;">&#x1F6E3; Route</button>`;
-           return `<div style="position:relative;"><button class="pin-expand-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="position:absolute;top:2px;right:2px;padding:1px 6px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:14px;line-height:1.3;color:var(--text-dim);" title="${t("expand") || "Expand"}">↗</button><b>${escapeHtml(pinData.title)}</b>${marker._pinEmoji ? " " + marker._pinEmoji : ""}${anonBadge}${trustBadge}<br>${escapeHtml(pinData.note)}${customHtml}${mh}${r && r.ciphertext ? `<br><button class="download-media-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;background:transparent;color:#2563eb;border-radius:3px;cursor:pointer;margin-top:4px;">⬇ Download</button>` : ""}<br><small style="color:var(--text-dim)">${rt}</small>${ttlHtml}${layerBadge}${attestBtns}${editBtns ? "<br>" + editBtns : ""}<br>${routeBtn}<hr style="margin:8px 0 4px;border-color:var(--border);"><div class="annotation-thread" data-pin-id="${escapeHtml(rowData.pin_id)}" style="max-height:240px;overflow-y:auto;font-size:12px;">Loading...</div></div>`;
+           return `<div style="position:relative;"><button class="pin-expand-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="position:absolute;top:2px;right:2px;padding:1px 6px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:14px;line-height:1.3;color:var(--text-dim);" title="${t("expand") || "Expand"}">↗</button><b>${escapeHtml(pinData.title)}</b>${marker._pinEmoji ? " " + marker._pinEmoji : ""}${anonBadge}${trustBadge}<br>${escapeHtml(pinData.note)}${customHtml}${mh}${r && r.ciphertext ? `<br><button class="download-media-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;background:transparent;color:#2563eb;border-radius:3px;cursor:pointer;margin-top:4px;">⬇ Download</button>` : ""}<br><small style="color:var(--text-dim)">${rt}</small>${ttlHtml}${layerBadge}${voteBtns}${editBtns ? "<br>" + editBtns : ""}<br>${routeBtn}<hr style="margin:8px 0 4px;border-color:var(--border);"><div class="annotation-thread" data-pin-id="${escapeHtml(rowData.pin_id)}" style="max-height:240px;overflow-y:auto;font-size:12px;">Loading...</div></div>`;
         });
       })(m, pin, row);
       state.markers.push(m);
@@ -2460,10 +2460,10 @@ export function refreshPinMarkerPopup(marker) {
             }
           }
   const hasAttestBtns = !isEmbed && !isAnon && state.signingSecretKey && marker._authorPubkey !== state.signingPublicKey;
-  const attestBtns = hasAttestBtns
-    ? `<br><button class="attest-confirm-btn" data-pid="${escapeHtml(marker._pinId)}" style="padding:2px 8px;border:1px solid #16a34a;background:var(--bg-card);color:#16a34a;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">✅</button><button class="attest-dispute-btn" data-pid="${escapeHtml(marker._pinId)}" style="padding:2px 8px;border:1px solid #f97316;background:var(--bg-card);color:#f97316;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">⚠️</button><button class="attest-flag-btn" data-pid="${escapeHtml(marker._pinId)}" style="padding:2px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">🚩</button>`
+  const refreshVoteBtns = hasAttestBtns
+    ? `<br><button class="vote-up-btn" data-pid="${escapeHtml(marker._pinId)}" style="padding:2px 8px;border:1px solid #16a34a;background:var(--bg-card);color:#16a34a;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">👍</button><button class="vote-down-btn" data-pid="${escapeHtml(marker._pinId)}" style="padding:2px 8px;border:1px solid #f97316;background:var(--bg-card);color:#f97316;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">👎</button><button class="flag-btn" data-pid="${escapeHtml(marker._pinId)}" style="padding:2px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">🚩</button>`
     : "";
-  const html = `<div style="position:relative;"><button class="pin-expand-btn" data-pid="${escapeHtml(marker._pinId)}" style="position:absolute;top:2px;right:2px;padding:1px 6px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:14px;line-height:1.3;color:var(--text-dim);" title="${t("expand") || "Expand"}">↗</button><b>${escapeHtml(pinData.title || "")}</b>${marker._pinEmoji ? " " + marker._pinEmoji : ""}${anonBadge}${trustBadge}<br>${escapeHtml(pinData.note || "")}${customHtml}${mediaHtml}${r && r.ciphertext ? `<br><button class="download-media-btn" data-pid="${escapeHtml(marker._pinId)}" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;background:transparent;color:#2563eb;border-radius:3px;cursor:pointer;margin-top:4px;">⬇ Download</button>` : ""}<br><small style="color:var(--text-dim)">${rt}</small>${ttlHtml}${layerBadge}${attestBtns}${editBtns ? "<br>" + editBtns : ""}<hr style="margin:8px 0 4px;border-color:var(--border);"><div class="annotation-thread" data-pin-id="${escapeHtml(marker._pinId)}" style="max-height:240px;overflow-y:auto;font-size:12px;">Loading...</div></div>`;
+  const html = `<div style="position:relative;"><button class="pin-expand-btn" data-pid="${escapeHtml(marker._pinId)}" style="position:absolute;top:2px;right:2px;padding:1px 6px;border:1px solid var(--border);background:var(--bg-card);border-radius:3px;cursor:pointer;font-size:14px;line-height:1.3;color:var(--text-dim);" title="${t("expand") || "Expand"}">↗</button><b>${escapeHtml(pinData.title || "")}</b>${marker._pinEmoji ? " " + marker._pinEmoji : ""}${anonBadge}${trustBadge}<br>${escapeHtml(pinData.note || "")}${customHtml}${mediaHtml}${r && r.ciphertext ? `<br><button class="download-media-btn" data-pid="${escapeHtml(marker._pinId)}" style="font-size:11px;padding:2px 8px;border:1px solid #2563eb;background:transparent;color:#2563eb;border-radius:3px;cursor:pointer;margin-top:4px;">⬇ Download</button>` : ""}<br><small style="color:var(--text-dim)">${rt}</small>${ttlHtml}${layerBadge}${refreshVoteBtns}${editBtns ? "<br>" + editBtns : ""}<hr style="margin:8px 0 4px;border-color:var(--border);"><div class="annotation-thread" data-pin-id="${escapeHtml(marker._pinId)}" style="max-height:240px;overflow-y:auto;font-size:12px;">Loading...</div></div>`;
   marker.unbindPopup();
   marker.bindPopup(html);
   marker.openPopup();
@@ -2542,8 +2542,8 @@ export function showPinDetailModal(pinId) {
     : "";
 
   const hasAttestBtns = !isEmbed && !isAnon && state.signingSecretKey && marker._authorPubkey !== state.signingPublicKey;
-  const attestBtns = hasAttestBtns
-    ? `<button class="attest-confirm-btn" data-pid="${escapeHtml(pinId)}" style="padding:2px 8px;border:1px solid #16a34a;background:var(--bg-card);color:#16a34a;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">✅</button><button class="attest-dispute-btn" data-pid="${escapeHtml(pinId)}" style="padding:2px 8px;border:1px solid #f97316;background:var(--bg-card);color:#f97316;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">⚠️</button><button class="attest-flag-btn" data-pid="${escapeHtml(pinId)}" style="padding:2px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">🚩</button>`
+  const voteBtns = hasAttestBtns
+    ? `<button class="vote-up-btn" data-pid="${escapeHtml(pinId)}" style="padding:2px 8px;border:1px solid #16a34a;background:var(--bg-card);color:#16a34a;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">👍</button><button class="vote-down-btn" data-pid="${escapeHtml(pinId)}" style="padding:2px 8px;border:1px solid #f97316;background:var(--bg-card);color:#f97316;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">👎</button><button class="flag-btn" data-pid="${escapeHtml(pinId)}" style="padding:2px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">🚩</button>`
     : "";
   const rt = relativeTime(marker._createdAt);
 
@@ -2564,7 +2564,7 @@ export function showPinDetailModal(pinId) {
       <div style="font-size:11px;color:var(--text-dim);margin-top:8px;">${rt}</div>
       ${ttlHtml}
       ${layerBadge}
-      <div style="margin-top:8px;">${attestBtns ? attestBtns + "<br>" : ""}${editBtns ? editBtns : ""}
+      <div style="margin-top:8px;">${voteBtns ? voteBtns + "<br>" : ""}${editBtns ? editBtns : ""}
         ${!isEmbed && !isTutorial ? `<button class="osm-edit-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F310; Edit in OSM</button>` : ""}
         ${!isEmbed ? `<button class="pin-route-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F6E3; Route</button>` : ""}
       </div>
@@ -2795,16 +2795,11 @@ export async function savePin(lat, lng, title, note, color, media, emoji, layerI
   if (!postedAnonymously && state.signingPublicKey) pin.author_pubkey = state.signingPublicKey;
   if (postedAnonymously) pin.posted_anonymously = true;
 
-  // Creation attestation
+  // Author auto-upvote
   if (!postedAnonymously && state.signingPublicKey && state.signingSecretKey) {
-    const creationPayload = pid + "|" + "created" + "|" + pin.created_at;
-    const hexPayload = Array.from(new TextEncoder().encode(creationPayload)).map(b => b.toString(16).padStart(2, '0')).join('');
-    pin.attestations = [{
-      pubkey: state.signingPublicKey,
-      type: "created",
-      timestamp: pin.created_at,
-      signature: sign(hexPayload, state.signingSecretKey),
-    }];
+    const ts = Date.now();
+    const payload = encode_hex(new TextEncoder().encode(`${pid}|up|${ts}`));
+    pin.votes = [{ direction: "up", pubkey: state.signingPublicKey, timestamp: ts, signature: sign(payload, state.signingSecretKey) }];
   }
   const gov = {
     ttl_enabled: false, ttl_base_mins: 10080, ttl_vote_mins: 360,

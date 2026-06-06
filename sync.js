@@ -371,6 +371,16 @@ export async function handleMessage(msg, connId) {
       if (d.media && (typeof d.media.type !== "string" || typeof d.media.ciphertext !== "string" || typeof d.media.nonce !== "string" || d.media.type.length > 32)) return;
       const pinData = { ...d };
       if (!pinData.author_pubkey) delete pinData.author_pubkey;
+      // Verify vote signatures from peers
+      if (pinData.votes && Array.isArray(pinData.votes) && pinData.votes.length > 0) {
+        import("./trust.js").then(mod => {
+          const filtered = pinData.votes.filter(v => mod.verifyVoteSignature(d.pin_id, v));
+          if (filtered.length !== pinData.votes.length) {
+            console.warn("[sync] dropped", pinData.votes.length - filtered.length, "invalid vote(s) on", d.pin_id);
+            pinData.votes = filtered;
+          }
+        }).catch(() => {});
+      }
       const sid = pinData.team_id || window._pendingSet;
       if (sid) await DB.importPin({ ...pinData, team_id: sid });
       if (sid === state.currentSet) await window._loadPins();
