@@ -184,7 +184,7 @@ export function showOfflineDownloadModal(map) {
         toast(`Low storage: ${freeMB}MB free, need ~${estMB}MB`, "#f97316");
         return;
       }
-    } catch (_) {}
+    } catch (e) { console.warn("[offline]", e.message); }
 
     const ok = await confirmDialog(`Download ~${tileCount.toLocaleString()} tiles (~${estMB} MB) for offline use?`);
     if (!ok) return;

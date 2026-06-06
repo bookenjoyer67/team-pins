@@ -5,19 +5,17 @@ import init, {
   encrypt_raw_bytes, decrypt_raw_bytes,
   encrypt_with_password, decrypt_with_password,
   encrypt_bytes_with_password, decrypt_bytes_with_password,
-  compress_gzip, decompress_gzip, compress_gzip_max,
-  base64_encode, base64_decode, base64url_encode, base64url_decode,
+  compress_gzip, decompress_gzip,
+  base64_encode, base64_decode, base64url_encode,
   compress_gzip_to_base64,
-  compact_and_pack_json, compact_pack_gzip_json,
+  compact_and_pack_json,
   sign, verify,
-  generate_qr_svg, serialize_container, deserialize_container,
+  generate_qr_svg,
 } from "./core/pkg/e2e_core.js";
 import * as DB from "./db.js";
 import * as Peer from "./peer.js";
 import { state } from "./state.js";
-import { compressVideoBytes } from "./map.js";
-import { compressImageBuffer } from "./workers/media-compress.js";
-import { toast, showQRHostDialog, showQRJoinDialog, showQRAnswerDialog, showPeerPaste, showQRScanDialog, showPasswordDialog, showProgressDialog, escapeHtml, promptRoomPassword, confirmDialog, alertDialog } from "./dialogs.js";
+import { toast, showQRHostDialog, showQRJoinDialog, showQRAnswerDialog, showQRScanDialog, showPasswordDialog, showProgressDialog, escapeHtml, promptRoomPassword, confirmDialog, alertDialog } from "./dialogs.js";
 import { DeferredBoundedMap, DeferredChunkStore } from "./store-helpers.js";
 
 function recordNotification(opts) {
@@ -212,7 +210,7 @@ async function compactStoredMedia(data, onProgress, compressVideos = false) {
         savedBytes += raw.byteLength - result.buffer.byteLength;
         compressedCount++;
       }
-    } catch (_) {}
+    } catch (e) { console.warn("[sync]", e.message); }
     done++;
     onProgress?.(done, total);
     return item;
@@ -388,7 +386,7 @@ export async function handleMessage(msg, connId) {
         try {
           const dec = decrypt_pin_data(d.ciphertext, d.nonce, state.dek);
           recordNotification({ type: "pin_added", pin_id: d.pin_id, pin_title: dec?.title || "Untitled", by_pubkey: d.author_pubkey });
-        } catch (_) {}
+        } catch (e) { console.warn("[sync]", e.message); }
       }
       window._addHistory?.(sid === state.currentSet ? "Pin added (peer)" : "", d.pin_id.slice(0, 8));
       if (!msg._relay) relayToOthers(msg, connId);
@@ -1345,7 +1343,7 @@ function showShareMethodDialog(compressed, tooLarge, bgm, preview = {}, jsonPayl
     try {
       const resp = await fetch("https://tinyurl.com/api-create.php?url=" + encodeURIComponent(longUrl));
       if (resp.ok) { const t = await resp.text(); if (t && t.startsWith("http")) short = t; }
-    } catch (_) {}
+    } catch (e) { console.warn("[sync]", e.message); }
     if (short) copy(short);
     else { copy(longUrl); toast("TinyURL failed — raw URL copied", "#f97316"); }
   };
@@ -1370,7 +1368,7 @@ function showShareMethodDialog(compressed, tooLarge, bgm, preview = {}, jsonPayl
           try {
             const r = await fetch(u + "/share" + qs, { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: compressed });
             if (r.ok) { resp = r; break; }
-          } catch (_) {}
+          } catch (e) { console.warn("[sync]", e.message); }
         }
         if (resp) {
           const { id } = await resp.json();
@@ -1451,7 +1449,7 @@ export async function importSet() {
     // Detect non-piggPin formats
     const text = new TextDecoder().decode(bytes);
     if (ext === "geojson" || ext === "json") {
-      try { JSON.parse(text); await importGeoJSON(text); return; } catch (_) {}
+      try { JSON.parse(text); await importGeoJSON(text); return; } catch (e) { console.warn("[sync]", e.message); }
     }
     if (ext === "kml") {
       if (text.includes("<kml") || text.includes("<Placemark")) { await importKML(text); return; }
@@ -1670,7 +1668,7 @@ export async function exportGeoJSON() {
             pin_id: row.pin_id,
           },
         });
-      } catch (_) {}
+      } catch (e) { console.warn("[sync]", e.message); }
       done++;
       if (done % 50 === 0) prog.update(10 + Math.round(done / Math.max(total, 1) * 70), `${done}/${total}`);
     }
@@ -1687,7 +1685,7 @@ export async function exportGeoJSON() {
           drawing_id: row.drawing_id,
         };
         features.push(feature);
-      } catch (_) {}
+      } catch (e) { console.warn("[sync]", e.message); }
       done++;
       if (done % 50 === 0) prog.update(10 + Math.round(done / Math.max(total, 1) * 70), `${done}/${total}`);
     }
@@ -1746,7 +1744,7 @@ export async function exportKML() {
     <Point><coordinates>${pin.lng},${pin.lat},0</coordinates></Point>
   </Placemark>
 `;
-      } catch (_) {}
+      } catch (e) { console.warn("[sync]", e.message); }
       done++;
     }
 
@@ -1768,7 +1766,7 @@ export async function exportKML() {
     ${gkml}
   </Placemark>
 `;
-      } catch (_) {}
+      } catch (e) { console.warn("[sync]", e.message); }
       done++;
       if (done % 50 === 0) prog.update(10 + Math.round(done / Math.max(total, 1) * 70), `${done}/${total}`);
     }
@@ -1824,7 +1822,7 @@ export async function exportGPX() {
     <extensions><gpxx:WaypointExtension xmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3"><gpxx:DisplayMode>SymbolAndName</gpxx:DisplayMode></gpxx:WaypointExtension></extensions>
   </wpt>
 `;
-      } catch (_) {}
+      } catch (e) { console.warn("[sync]", e.message); }
       done++;
     }
 
@@ -1848,7 +1846,7 @@ ${geom.coordinates.map(c => `      <trkpt lat="${c[1]}" lon="${c[0]}"><ele>0</el
   </wpt>
 `;
         }
-      } catch (_) {}
+      } catch (e) { console.warn("[sync]", e.message); }
       done++;
       if (done % 50 === 0) prog.update(10 + Math.round(done / Math.max(total, 1) * 70), `${done}/${total}`);
     }

@@ -100,7 +100,7 @@ export function connect(relayUrl) {
     // Stale connection — clean up
     if (existing.reconnectTimer) clearTimeout(existing.reconnectTimer);
     registeredCommunities = existing.registeredCommunities || new Set();
-    try { existing.ws.close(); } catch (_) {}
+    try { existing.ws.close(); } catch (e) { console.warn("[relay]", e.message); }
   }
 
   const conn = { connected: false, ws: null, url, pendingLists: [], communityPeers: new Map(), reconnectTimer: null, authPubkey: null, registeredCommunities };
@@ -326,7 +326,7 @@ export function disconnect(url) {
       if (conn.reconnectTimer) clearTimeout(conn.reconnectTimer);
       conn.ws.onclose = null;
       conn.ws.onmessage = null;
-      try { conn.ws.close(); } catch (_) {}
+      try { conn.ws.close(); } catch (e) { console.warn("[relay]", e.message); }
       connections.delete(url);
     }
   } else {
@@ -334,7 +334,7 @@ export function disconnect(url) {
       if (conn.reconnectTimer) clearTimeout(conn.reconnectTimer);
       conn.ws.onclose = null;
       conn.ws.onmessage = null;
-      try { conn.ws.close(); } catch (_) {}
+      try { conn.ws.close(); } catch (e) { console.warn("[relay]", e.message); }
     }
     connections.clear();
   }
@@ -558,7 +558,7 @@ async function registerCommunityOn(conn, communityId, published) {
         team.community_wrapped_dek = wrap_dek(dk, team.community_public_key);
         await DB.saveTeam(team);
       }
-    } catch (_) {}
+    } catch (e) { console.warn("[relay]", e.message); }
   }
 
   // Compute join_wrapped_dek for open communities so new members can self-service the DEK
@@ -581,7 +581,7 @@ async function registerCommunityOn(conn, communityId, published) {
         const encrypted = encrypt_with_password(dekHex, communityId);
         joinWrappedDek = `${encrypted.ciphertext_hex}:${encrypted.nonce_hex}:${encrypted.salt_hex}`;
       }
-    } catch (_) {}
+    } catch (e) { console.warn("[relay]", e.message); }
   }
   conn.ws.send(JSON.stringify({
     type: "register_community",
@@ -733,7 +733,7 @@ export function rewrapMemberDek(communityId, targetPubkey, rewrapDek, signature)
     rewrap_dek: rewrapDek,
   };
   if (signature) msg.signature = signature;
-  try { conn.ws.send(JSON.stringify(msg)); } catch (_) {}
+  try { conn.ws.send(JSON.stringify(msg)); } catch (e) { console.warn("[relay]", e.message); }
 }
 
 export function sendAnnotationVote(annotationId, vote) {
@@ -800,7 +800,7 @@ export async function queryCommunities(bbox, search) {
           conn.ws.removeEventListener("message", handler);
           resolve(m.results || []);
         }
-      } catch (_) {}
+      } catch (e) { console.warn("[relay]", e.message); }
     };
     conn.ws.addEventListener("message", handler);
     setTimeout(() => {
@@ -828,7 +828,7 @@ export async function connectAll() {
     for (const c of communities) {
       if (c.relay_url && !urls.includes(c.relay_url)) urls.push(c.relay_url);
     }
-  } catch (_) {}
+  } catch (e) { console.warn("[relay]", e.message); }
   for (const url of urls) connect(url);
 }
 
@@ -980,7 +980,7 @@ async function handleMemberDekReady(msg) {
       } else if (dk) {
         console.log("[relay] key exchange complete for", community_id, "(not current set)");
       }
-    } catch (_) {}
+    } catch (e) { console.warn("[relay]", e.message); }
   } else {
     console.log("[relay] member_dek_ready: pubkey mismatch — msg:", member_pubkey?.slice(0,16), "vs team:", team.public_key?.slice(0,16));
   }
@@ -1061,7 +1061,7 @@ export async function claimMembership(communityId, memberPubkey, memberName, non
           conn.ws.removeEventListener("message", handler);
           resolve({ error: m.reason });
         }
-      } catch (_) {}
+      } catch (e) { console.warn("[relay]", e.message); }
     };
     conn.ws.addEventListener("message", handler);
     setTimeout(() => {
@@ -1113,7 +1113,7 @@ export async function publishLayer(communityId, layerId, name, topicTags, layerD
           conn.ws.removeEventListener("message", handler);
           resolve(true);
         }
-      } catch (_) {}
+      } catch (e) { console.warn("[relay]", e.message); }
     };
     conn.ws.addEventListener("message", handler);
     setTimeout(() => { conn.ws.removeEventListener("message", handler); resolve(false); }, 8000);
@@ -1142,7 +1142,7 @@ export async function listPublicLayers(communityId) {
           conn.ws.removeEventListener("message", handler);
           resolve(m.layers || []);
         }
-      } catch (_) {}
+      } catch (e) { console.warn("[relay]", e.message); }
     };
     conn.ws.addEventListener("message", handler);
     setTimeout(() => { conn.ws.removeEventListener("message", handler); resolve([]); }, 5000);
@@ -1167,7 +1167,7 @@ export async function subscribeLayer(communityId, layerId) {
           conn.ws.removeEventListener("message", handler);
           resolve(m);
         }
-      } catch (_) {}
+      } catch (e) { console.warn("[relay]", e.message); }
     };
     conn.ws.addEventListener("message", handler);
     setTimeout(() => { conn.ws.removeEventListener("message", handler); resolve(null); }, 15000);
@@ -1230,7 +1230,7 @@ async function handleLayerSubscribed(msg) {
     await DB.importPins((msg.pins || []).map(p => ({ ...p, team_id: communityId })));
     await DB.importDrawings((msg.drawings || []).map(d => ({ ...d, team_id: communityId })));
 
-    } catch (_) {}
+    } catch (e) { console.warn("[relay]", e.message); }
     window._loadSubscribedPins?.();
     window._renderUI?.();
 }

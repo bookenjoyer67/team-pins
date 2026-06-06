@@ -763,3 +763,6 @@ body.drawer-expanded .leaflet-control-container {
 .routing-alt-chip:hover { background: var(--bg-glass) !important; }
 .routing-step:last-child { border-bottom: none !important; }
 .routing-route-line { cursor: copy; }
+@media (max-width: 500px) {
+  #routing-panel { width: 94vw !important; right: 3vw !important; max-height: 40vh !important; }
+}

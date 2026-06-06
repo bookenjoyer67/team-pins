@@ -154,7 +154,7 @@ async function checkStorageQuota(neededBytes, label) {
         "#f97316",
       );
     }
-  } catch (_) {}
+  } catch (e) { console.warn("[map]", e.message); }
 }
 
 async function compressMedia(file, onProgress) {
@@ -189,7 +189,7 @@ async function compressMedia(file, onProgress) {
           type: result.type,
           name: result.name,
         };
-      } catch (_) {}
+      } catch (e) { console.warn("[map]", e.message); }
     }
     return {
       buffer: await file.arrayBuffer(),
@@ -261,7 +261,7 @@ export async function compressVideoBytes(bytes, mimeType, fileName, onProgress) 
     try {
       const vs = video.captureStream();
       audioTracks = vs.getAudioTracks();
-    } catch (_) {}
+    } catch (e) { console.warn("[map]", e.message); }
     const combined = audioTracks.length
       ? new MediaStream([...canvasStream.getVideoTracks(), ...audioTracks])
       : canvasStream;
@@ -678,7 +678,7 @@ export async function switchSet(sid) {
   state.markers.forEach((m) => m.remove());
   state.markers.length = 0;
   clearMarkerGrid();
-  try { window._spatialIdx?.clear(); } catch (_) {}
+  try { window._spatialIdx?.clear(); } catch (e) { console.warn("[map]", e.message); }
   state.clusterGroup?.clearLayers();
   state._markerMap = null;
   state.drawingLayers.forEach((l) => state.map.removeLayer(l));
@@ -1011,7 +1011,7 @@ export async function showCommunityDetails(communityId) {
               minLat = Math.min(minLat, pin.lat); maxLat = Math.max(maxLat, pin.lat);
               minLng = Math.min(minLng, pin.lng); maxLng = Math.max(maxLng, pin.lng);
             }
-          } catch (_) {}
+          } catch (e) { console.warn("[map]", e.message); }
         }
         if (minLat !== Infinity) bounds = [minLat, minLng, maxLat, maxLng];
       }
@@ -1047,7 +1047,7 @@ export async function showCommunityDetails(communityId) {
     const team = await DB.getTeam(c.community_id);
     let dk;
     if (team && team.wrapped_dek && team.secret_key) {
-      try { dk = unwrap_dek(team.wrapped_dek, team.secret_key); } catch (_) {}
+      try { dk = unwrap_dek(team.wrapped_dek, team.secret_key); } catch (e) { console.warn("[map]", e.message); }
     }
     if (!dk) dk = generate_dek();
     const newWrapped = wrap_dek(dk, encode_hex(kp.public));
@@ -1077,7 +1077,7 @@ export async function showCommunityDetails(communityId) {
     const team = await DB.getTeam(c.community_id);
     let dk;
     if (team && team.wrapped_dek && team.secret_key) {
-      try { dk = unwrap_dek(team.wrapped_dek, team.secret_key); } catch (_) {}
+      try { dk = unwrap_dek(team.wrapped_dek, team.secret_key); } catch (e) { console.warn("[map]", e.message); }
     }
     if (!dk) dk = generate_dek();
     const newWrapped = wrap_dek(dk, encode_hex(kp.public));
@@ -1618,7 +1618,7 @@ export function startSlideshow(pinIds, opts = {}) {
           if (mt.startsWith("image/")) mediaHtml = `<img src="${url}" style="max-width:100%;max-height:30vh;border-radius:6px;margin-top:8px;">`;
           else if (mt.startsWith("video/")) mediaHtml = `<video src="${url}" controls style="max-width:100%;max-height:30vh;border-radius:6px;margin-top:8px;"></video>`;
           else if (mt.startsWith("audio/")) mediaHtml = `<audio src="${url}" controls style="width:100%;margin-top:8px;" class="slideshow-audio"></audio>`;
-      } catch (_) {}
+      } catch (e) { console.warn("[map]", e.message); }
     }
 
     let ttlHtml = "";
@@ -2365,7 +2365,7 @@ export async function loadPins() {
       })(m, pin, row);
       state.markers.push(m);
       indexMarker(m);
-      try { window._spatialIdx?.insert(row.pin_id, pin.lat, pin.lng); } catch (_) {}
+      try { window._spatialIdx?.insert(row.pin_id, pin.lat, pin.lng); } catch (e) { console.warn("[map]", e.message); }
     } catch (err) { console.warn("[loadPins] failed to load pin:", row.pin_id, err); window._toast?.("Some pins failed to load", "#f97316"); }
   }
   if (newMarkers.length > 0) state.clusterGroup?.addLayers(newMarkers);
@@ -2430,7 +2430,7 @@ export function refreshPinMarkerPopup(marker) {
         else if (tag === "audio")
           mediaHtml = `<br><audio src="${url}" controls style="width:100%;max-width:200px;"></audio>`;
       }
-    } catch (_) {}
+    } catch (e) { console.warn("[map]", e.message); }
   }
 
   const customHtml = buildCustomDataHTML(marker._pinData, marker._customData, marker._layerId, marker._layerName, marker._schemaId);
@@ -2512,7 +2512,7 @@ export function showPinDetailModal(pinId) {
         else if (tag === "audio")
           mediaHtml = `<br><audio src="${url}" controls style="width:100%;"></audio>`;
       }
-    } catch (_) {}
+    } catch (e) { console.warn("[map]", e.message); }
   }
 
           let ttlHtml = "";
@@ -2826,7 +2826,7 @@ export async function savePin(lat, lng, title, note, color, media, emoji, layerI
   window._broadcast?.("new_pin", pin);
   await loadPins();
   window._addHistory?.(t("pinAdded"), title);
-  try { navigator.vibrate?.(20); } catch (_) {}
+  try { navigator.vibrate?.(20); } catch (e) { console.warn("[map]", e.message); }
   playPinDrop();
 }
 
@@ -2849,7 +2849,7 @@ export async function deletePin(pid) {
     await loadPins();
     window._addHistory?.(t("pinDeleted"), pid.slice(0, 8));
   } finally { state._deletingPin = false; }
-  try { navigator.vibrate?.(20); } catch (_) {}
+  try { navigator.vibrate?.(20); } catch (e) { console.warn("[map]", e.message); }
   window._toast?.("Pin deleted. Undo?", "#f97316", 5000, () => { undo(); });
 }
 
@@ -3729,7 +3729,7 @@ export function buildDrawingPopup(g, row, layer, opacity) {
       } else {
         mh = `<br><a href="#" class="dwg-attachment" data-did="${escapeHtml(row.drawing_id)}" style="font-size:12px;">${escapeHtml(row.media.name || t("attachment"))}</a>`;
       }
-    } catch (_) {}
+    } catch (e) { console.warn("[map]", e.message); }
   }
   const did = row ? escapeHtml(row.drawing_id) : "";
   const layerBadge = (layer && layer.layer_id)
@@ -3778,7 +3778,7 @@ export async function loadDrawings() {
       drawLayer._validFrom = row.valid_from !== undefined ? row.valid_from : null;
       drawLayer._validTo = row.valid_until !== undefined ? row.valid_until : null;
       drawLayer.bindPopup(buildDrawingPopup(g, row, layer, opacity));
-    } catch (_) {}
+    } catch (e) { console.warn("[map]", e.message); }
   }
   applyTimeFilter();
 }
@@ -3866,7 +3866,7 @@ export async function loadChains() {
         };
       });
       state.chainLayers.push(group);
-    } catch (_) {}
+    } catch (e) { console.warn("[map]", e.message); }
   }
 }
 
@@ -3954,7 +3954,7 @@ export async function loadSubscribedPins() {
           state.subscribedDrawingLayers.push(drawLayer);
         } catch (err) { console.warn("[loadSubscribed] drawing render failed:", err.message); }
       }
-    } catch (_) {}
+    } catch (e) { console.warn("[map]", e.message); }
   }
 }
 
@@ -4025,7 +4025,7 @@ export function showEditDrawingForm(did) {
           await updateDrawing(row, t || "Drawing", n, color, arrow);
           state.map.closePopup();
         };
-      } catch (_) {}
+      } catch (e) { console.warn("[map]", e.message); }
     })
     .catch(() => {});
 }
@@ -4052,7 +4052,7 @@ async function updateDrawing(row, title, note, color, arrow) {
     window._broadcast?.("new_drawing", row);
     await loadDrawings();
     window._addHistory?.(t("drawingEdited"), title);
-  } catch (_) {}
+  } catch (e) { console.warn("[map]", e.message); }
 }
 
 export async function downloadDrawingAttachment(did) {
@@ -4077,7 +4077,7 @@ export async function downloadDrawingAttachment(did) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  } catch (_) {}
+  } catch (e) { console.warn("[map]", e.message); }
 }
 
 export function downloadPinMedia(pinId) {
@@ -4438,53 +4438,6 @@ export function addTimeSlider() {
   };
   document.getElementById("time-from").addEventListener("keydown", e => { if (e.key === "Enter") { readTimeInputs(); applyTimeFilter(); } });
   document.getElementById("time-to").addEventListener("keydown", e => { if (e.key === "Enter") { readTimeInputs(); applyTimeFilter(); } });
-}
-
-export function addTrustFilter() {
-  const btn = L.DomUtil.create("button");
-  btn.textContent = "🛡️";
-  btn.title = "Trust filter";
-  btn.style.cssText = "position:absolute;top:326px;left:3px;z-index:1000;width:36px;height:36px;border:none;border-radius:4px;background:#6b7280;color:white;font-size:16px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;";
-  state.map.getContainer().appendChild(btn);
-
-  const container = L.DomUtil.create("div");
-  container.id = "trust-slider";
-  container.style.cssText = "display:none;position:absolute;bottom:42px;left:50%;transform:translateX(-50%);z-index:1000;align-items:center;gap:8px;padding:6px 12px;background:var(--bg-glass);backdrop-filter:blur(4px);border-radius:6px;box-shadow:0 1px 5px var(--shadow);font-size:12px;white-space:nowrap;";
-  container.innerHTML = `
-    <span style="color:var(--text-dim);">🛡️</span>
-    <input id="trust-threshold" type="range" min="-20" max="20" value="-20" style="width:80px;accent-color:#16a34a;" />
-    <span id="trust-val" style="font-size:10px;color:var(--text-dim);min-width:24px;">-2.0</span>
-    <button id="trust-reset" style="padding:3px 8px;border:1px solid var(--border);background:var(--bg-input);color:var(--text-dim);border-radius:3px;cursor:pointer;font-size:11px;">reset</button>
-  `;
-  state.map.getContainer().appendChild(container);
-
-  let visible = false;
-  btn.onclick = (e) => {
-    e.stopPropagation();
-    visible = !visible;
-    container.style.display = visible ? "flex" : "none";
-    btn.style.background = visible ? "#4b5563" : "#6b7280";
-    if (visible && state.minTrustScore) {
-      document.getElementById("trust-threshold").value = state.minTrustScore * 10;
-      document.getElementById("trust-val").textContent = state.minTrustScore.toFixed(1);
-    }
-    if (!visible) {
-      state.minTrustScore = -2;
-      applyTimeFilter();
-    }
-  };
-  document.getElementById("trust-reset").onclick = () => {
-    state.minTrustScore = -2;
-    document.getElementById("trust-threshold").value = "-20";
-    document.getElementById("trust-val").textContent = "-2.0";
-    applyTimeFilter();
-  };
-  document.getElementById("trust-threshold").oninput = (e) => {
-    const val = parseInt(e.target.value, 10) / 10;
-    state.minTrustScore = val;
-    document.getElementById("trust-val").textContent = val.toFixed(1);
-    applyTimeFilter();
-  };
 }
 
 export function generateLocationMarker(lat, lng, communityId) {
@@ -5243,7 +5196,7 @@ export async function renderChainStory(chainId) {
         if (mt.startsWith("image/")) mediaHtml = `<img src="${url}" style="max-width:100%;max-height:25vh;border-radius:6px;margin-top:8px;">`;
         else if (mt.startsWith("video/")) mediaHtml = `<video src="${url}" controls style="max-width:100%;max-height:25vh;border-radius:6px;margin-top:8px;"></video>`;
         else if (mt.startsWith("audio/")) mediaHtml = `<audio src="${url}" controls style="width:100%;margin-top:8px;"></audio>`;
-      } catch (_) {}
+      } catch (e) { console.warn("[map]", e.message); }
     }
 
     // Build branch buttons for valid branches
@@ -5340,7 +5293,7 @@ export function addSelectionTool() {
     clearSelection();
     const sw = bounds.getSouthWest(), ne = bounds.getNorthEast();
     _selectMarkers(sw.lat, sw.lng, ne.lat, ne.lng, (m) => bounds.contains(m.getLatLng()));
-    state.drawingLayers.forEach((l) => { try { const lb = l.getBounds(); if (lb && bounds.intersects(lb)) { selectedDrawings.push(l); l._origColor = l.options?.color || l._origColor; l.setStyle({ color: "#2563eb", weight: (l.options?.weight || 2) + 1 }); } } catch (_) {} });
+    state.drawingLayers.forEach((l) => { try { const lb = l.getBounds(); if (lb && bounds.intersects(lb)) { selectedDrawings.push(l); l._origColor = l.options?.color || l._origColor; l.setStyle({ color: "#2563eb", weight: (l.options?.weight || 2) + 1 }); } } catch (e) { console.warn("[map]", e.message); } });
     if (selectedPins.length + selectedDrawings.length > 0) showSelBar();
   }
   function selectionForPoly(latlngs) {
@@ -5358,7 +5311,7 @@ export function addSelectionTool() {
       const ll = m.getLatLng();
       return pointInPolygon([ll.lng, ll.lat], polyArr);
     });
-    state.drawingLayers.forEach((l) => { try { const lb = l.getBounds(); if (lb) { const c = lb.getCenter(); if (pointInPolygon([c.lng, c.lat], polyArr)) { selectedDrawings.push(l); l._origColor = l.options?.color || l._origColor; l.setStyle({ color: "#2563eb", weight: (l.options?.weight || 2) + 1 }); } } } catch (_) {} });
+    state.drawingLayers.forEach((l) => { try { const lb = l.getBounds(); if (lb) { const c = lb.getCenter(); if (pointInPolygon([c.lng, c.lat], polyArr)) { selectedDrawings.push(l); l._origColor = l.options?.color || l._origColor; l.setStyle({ color: "#2563eb", weight: (l.options?.weight || 2) + 1 }); } } } catch (e) { console.warn("[map]", e.message); } });
     if (selectedPins.length + selectedDrawings.length > 0) showSelBar();
   }
   function _selectMarkers(sw_lat, sw_lng, ne_lat, ne_lng, testFn) {
@@ -5479,7 +5432,7 @@ export async function renderAnnotationThread(pinId, threadEl) {
           if (mt.startsWith("image/")) mediaHtml = `<img src="${url}" class="ann-media-img">`;
           else if (mt.startsWith("video/")) mediaHtml = `<video src="${url}" controls class="ann-media-vid"></video>`;
           else if (mt.startsWith("audio/")) mediaHtml = `<audio src="${url}" controls class="ann-media-aud"></audio>`;
-        } catch (_) {}
+        } catch (e) { console.warn("[map]", e.message); }
       }
 
       let h = `<div class="ann-item ${typeClass}" data-ann-id="${escapeHtml(ann.annotation_id)}" style="${indent}">

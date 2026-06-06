@@ -24,8 +24,6 @@ const _freeStrokes = [];
 const _freeUndoStack = [];
 let _freeStrokeColor = "#7c3aed";
 let _freeStrokeWidth = 3;
-let _highlighting = false;
-let _snapping = false;
 let _measuring = false;
 let _lastPlacedPinId = null;
 let _pendingConnId = null;
@@ -89,10 +87,6 @@ export const state = {
   set freeStrokeColor(v) { _freeStrokeColor = v; },
   get freeStrokeWidth() { return _freeStrokeWidth; },
   set freeStrokeWidth(v) { _freeStrokeWidth = v; },
-  get highlighting() { return _highlighting; },
-  set highlighting(v) { _highlighting = v; },
-  get snapping() { return _snapping; },
-  set snapping(v) { _snapping = v; },
   get measuring() { return _measuring; },
   set measuring(v) { _measuring = v; },
   get lastPlacedPinId() { return _lastPlacedPinId; },

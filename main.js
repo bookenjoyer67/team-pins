@@ -325,7 +325,7 @@ wasmReady.then(async () => {
   if (!sigKp) {
     const legacy = localStorage.getItem("pins-signing-key");
     if (legacy) {
-      try { sigKp = JSON.parse(legacy); } catch (_) {}
+      try { sigKp = JSON.parse(legacy); } catch (e) { console.warn("[main]", e.message); }
       localStorage.removeItem("pins-signing-key");
     }
     if (!sigKp) {
@@ -350,7 +350,7 @@ wasmReady.then(async () => {
       while (b64.length % 4) b64 += "=";
       const raw = atob(b64);
       let buf;
-      try { buf = new Uint8Array(raw.split("").map(c => c.charCodeAt(0))); } catch (_) {}
+      try { buf = new Uint8Array(raw.split("").map(c => c.charCodeAt(0))); } catch (e) { console.warn("[main]", e.message); }
       if (buf && buf.length >= 19) {
         let pos = 0;
         const nlen = buf[pos++];
@@ -382,7 +382,7 @@ wasmReady.then(async () => {
         await DB.saveCommunity(c);
       }
     }
-  } catch (_) {}
+  } catch (e) { console.warn("[main]", e.message); }
 
   await Map.loadSetList();
 
@@ -429,7 +429,7 @@ wasmReady.then(async () => {
           while (b64.length % 4) b64 += "=";
           const raw = atob(b64);
           let buf;
-          try { buf = new Uint8Array(raw.split("").map(c => c.charCodeAt(0))); } catch (_) {}
+          try { buf = new Uint8Array(raw.split("").map(c => c.charCodeAt(0))); } catch (e) { console.warn("[main]", e.message); }
           let cidUuid, name, pw, restoredRelayUrl = "", inviteTokenRestore = null, focusLat = null, focusLng = null, focusZoom = 15, embeddedCommunitySk = null;
           if (buf && buf.length >= 19) {
             let pos = 0;
@@ -551,7 +551,7 @@ wasmReady.then(async () => {
     if (parts.length >= 2) {
       let b64 = parts[0].replace(/-/g, "+").replace(/_/g, "/");
       while (b64.length % 4) b64 += "=";
-      try { relayHost = atob(b64); } catch (_) {}
+      try { relayHost = atob(b64); } catch (e) { console.warn("[main]", e.message); }
       shareId = parts.slice(1).join("@");
     } else {
       shareId = raw;
@@ -587,7 +587,7 @@ wasmReady.then(async () => {
       while (b64.length % 4) b64 += "=";
       const raw = atob(b64);
       let buf;
-      try { buf = new Uint8Array(raw.split("").map(c => c.charCodeAt(0))); } catch (_) {}
+      try { buf = new Uint8Array(raw.split("").map(c => c.charCodeAt(0))); } catch (e) { console.warn("[main]", e.message); }
       let cidUuid, name, linkRelayUrl, passwordProtected, inviteToken = null, focusLat = null, focusLng = null, focusZoom = 15, embeddedCommunitySk = null;
       if (buf && buf.length >= 19) {
         let pos = 0;
@@ -1091,7 +1091,7 @@ document.addEventListener("click", async e => { try {
       try {
         const g = JSON.parse(decodeURIComponent(box.dataset.json));
         box.outerHTML = Map.geomMetrics(g);
-      } catch (_) {}
+      } catch (e) { console.warn("[main]", e.message); }
     }
     return;
   }

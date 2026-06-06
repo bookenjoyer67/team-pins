@@ -144,7 +144,7 @@ export async function showDiscoverModal() {
           try {
             const pins = await DB.getPins(tc.team_id);
             pinCount = pins ? pins.length : 0;
-          } catch (_) {}
+          } catch (e) { console.warn("[layers]", e.message); }
           localRows.push(`<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--border-light);">
             <div><span style="font-size:13px;">🗺 ${escapeHtml(name.slice(0, 30))}</span>
             <span style="font-size:10px;color:var(--text-dim);margin-left:8px;">${pinCount} pin${pinCount !== 1 ? "s" : ""}</span></div>
@@ -156,7 +156,7 @@ export async function showDiscoverModal() {
           ${localRows.join("")}
         </div>`;
       }
-    } catch (_) {}
+    } catch (e) { console.warn("[layers]", e.message); }
 
     // Section 2: Relay connect prompt
     const exampleRelay = "wss://signal.catperson.online";
@@ -226,15 +226,15 @@ export async function showDiscoverModal() {
 
       // Source 1: Relay directory (full community list)
       let relayResults = [];
-      try { if (relayConnected) relayResults = await window._relayFetchCommunityList?.() || []; } catch (_) {}
+      try { if (relayConnected) relayResults = await window._relayFetchCommunityList?.() || []; } catch (e) { console.warn("[layers]", e.message); }
 
       // Source 2: P2P gossip from connected peers
       let gossipResults = [];
-      try { gossipResults = await import("./gossip.js").then(g => g.queryPeers(bboxArr || [0, 0, 0, 0])).then(responses => { const all = []; for (const r of responses) if (r.results) all.push(...r.results); return all; }).catch(() => []); } catch (_) {}
+      try { gossipResults = await import("./gossip.js").then(g => g.queryPeers(bboxArr || [0, 0, 0, 0])).then(responses => { const all = []; for (const r of responses) if (r.results) all.push(...r.results); return all; }).catch(() => []); } catch (e) { console.warn("[layers]", e.message); }
 
       // Source 3: Relay as gossip peer
       let relayGossipResults = [];
-      try { if (bboxArr && relayConnected) relayGossipResults = await window._relayQueryCommunities?.(bboxArr, searchTerm) || []; } catch (_) {}
+      try { if (bboxArr && relayConnected) relayGossipResults = await window._relayQueryCommunities?.(bboxArr, searchTerm) || []; } catch (e) { console.warn("[layers]", e.message); }
 
       // Merge by community_id, preferring richer relay data
       const merged = new Map();
@@ -401,7 +401,7 @@ export async function showDiscoverModal() {
                         r.rewrapMemberDek(sid, public_key, myWrappedDek);
                       }).catch(() => {});
                     }
-                  } catch (_) {}
+                  } catch (e) { console.warn("[layers]", e.message); }
                 }
                 if (!myWrappedDek) {
                   const { requestMemberDek } = await import("./relay.js");

@@ -119,8 +119,8 @@ export function clearMarkerGrid() {
 }
 
 // export function for test access
-export { _queryMarkersInBbox };
-function _queryMarkersInBbox(bbox) {
+export { queryMarkersInBbox };
+function queryMarkersInBbox(bbox) {
   const [s, w, n, e] = bbox;
   const seen = new Set();
   const results = [];
@@ -162,7 +162,7 @@ export async function handleQuery(query, fromConnId) {
 
     // For the active community, use the spatial hash grid for O(k) marker queries
     if (c.community_id === state.currentSet && state.markers && state.markers.length > 0) {
-      for (const marker of _queryMarkersInBbox(query.bbox)) {
+      for (const marker of queryMarkersInBbox(query.bbox)) {
         // Age filter
         if (ageThreshold > 0 && marker._pinCreatedAt && marker._pinCreatedAt < ageThreshold) continue;
         pinCount++;
