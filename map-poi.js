@@ -4,6 +4,7 @@ let _poiLayerGroup = null;
 let _poiEnabled = false;
 let _poiQueryTimer = null;
 let _activeCategories = new Set(["food_drink", "health", "services", "outdoor", "transport"]);
+let _map = null;
 
 const CATEGORIES = [
   { id: "food_drink", label: "Food & Drink", icon: "\u{1F37D}", query: 'node[amenity~"restaurant|cafe|fast_food|pub|bar|biergarten"]({bbox});' },
@@ -35,6 +36,7 @@ function getPOIIcon(tags) {
 }
 
 export function initPOILayer(map) {
+  _map = map;
   _poiLayerGroup = L.markerClusterGroup({
     maxClusterRadius: 50,
     spiderfyOnMaxZoom: false,
@@ -173,8 +175,10 @@ export function showPOICategoryModal() {
     if (_poiEnabled) {
       togglePOIEnabled();
       _poiLayerGroup.clearLayers();
+      _map.removeLayer(_poiLayerGroup);
     } else {
       togglePOIEnabled();
+      _map.addLayer(_poiLayerGroup);
       if (_activeCategories.size > 0) queryPOIs();
     }
   };
