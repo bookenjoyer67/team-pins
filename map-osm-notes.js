@@ -1,5 +1,6 @@
 import L from "leaflet";
 import { toast, escapeHtml } from "./dialogs.js";
+import { t } from "./i18n.js";
 
 let _notesLayerGroup = null;
 let _notesEnabled = false;
@@ -90,7 +91,7 @@ export function clearNotesTimer() {
 
 export function showCreateNoteDialog(lat, lng) {
   const proxy = getProxyUrl();
-  if (!proxy) { toast("OSM proxy not configured \u2014 cannot create notes. Configure in Settings \u2192 Relay.", "#dc2626"); return; }
+  if (!proxy) { toast(t("osmProxyNeeded"), "#dc2626"); return; }
 
   const ov = document.createElement("div");
   ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;";
@@ -117,8 +118,8 @@ export function showCreateNoteDialog(lat, lng) {
 
   document.getElementById("osm-note-submit").onclick = async () => {
     const text = document.getElementById("osm-note-text").value.trim();
-    if (!text) { toast("Please enter a description", "#dc2626"); return; }
-    if (text.length < 10) { toast("Description too short (min 10 chars)", "#dc2626"); return; }
+    if (!text) { toast(t("osmNoteDesc"), "#dc2626"); return; }
+    if (text.length < 10) { toast(t("osmNoteShort"), "#dc2626"); return; }
 
     const btn = document.getElementById("osm-note-submit");
     btn.disabled = true;
@@ -132,14 +133,14 @@ export function showCreateNoteDialog(lat, lng) {
         body: new URLSearchParams({ lat, lon: lng, text }),
       });
       if (resp.ok) {
-        toast("Note submitted \u2014 thank you!", "#16a34a");
+        toast(t("osmNoteSuccess"), "#16a34a");
         clean();
         queryOSMNotes();
       } else {
-        toast("Failed to submit note. Try osm.org directly.", "#dc2626");
+        toast(t("osmNoteFail"), "#dc2626");
       }
     } catch (e) {
-      toast("Failed to submit note: " + e.message, "#dc2626");
+      toast(t("osmNoteFail"), "#dc2626");
     }
     btn.disabled = false;
     btn.textContent = "Submit Note";

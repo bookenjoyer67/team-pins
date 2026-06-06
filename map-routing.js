@@ -1,6 +1,7 @@
 import L from "leaflet";
 import { state } from "./state.js";
 import { toast, escapeHtml } from "./dialogs.js";
+import { t } from "./i18n.js";
 
 let _routingActive = false;
 let _waypoints = [];
@@ -209,7 +210,7 @@ export function exportRouteGPX() {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  toast("Route exported as GPX", "#16a34a");
+  toast(t("routeExportGpx"), "#16a34a");
 }
 
 // ─── OSRM Client ────────────────────────────────────────────────────
@@ -234,7 +235,7 @@ async function fetchAndRenderRoute() {
     const loading = document.createElement("div");
     loading.id = "routing-loading";
     loading.style.cssText = "position:absolute;top:10px;right:50px;z-index:1000;padding:8px 14px;background:var(--bg-card);border:1px solid var(--border);border-radius:6px;font-size:13px;color:var(--text);box-shadow:0 2px 8px rgba(0,0,0,0.15);";
-    loading.textContent = "\u23F3 Calculating route...";
+    loading.textContent = t("routeCalculating");
     state.map.getContainer().appendChild(loading);
 
     const resp = await fetch(url);
@@ -263,11 +264,11 @@ async function fetchAndRenderRoute() {
       localStorage.setItem("pins-routing-avoid-mw", "0");
       const cb = _panel?.querySelector("#routing-avoid-motorway");
       if (cb) cb.checked = false;
-      toast("Routing failed \u2014 check server or try different points", "#dc2626");
+      toast(t("routeFailed"), "#dc2626");;
       fetchAndRenderRoute();
       return;
     }
-    toast("Routing failed \u2014 check server or try different points", "#dc2626");
+    toast(t("routeFailed"), "#dc2626");;
     console.warn("[routing]", e.message);
   }
 }
@@ -432,7 +433,7 @@ function buildPanelHTML(route, dist, time) {
         const icon = MANEUVERS[s.maneuver?.type] || "\u25CF";
         const d = formatDistance(s.distance);
         const name = s.name || "";
-        return `<div class="routing-step" style="display:flex;align-items:flex-start;gap:6px;padding:4px 0;border-bottom:1px solid var(--border-light);font-size:12px;"><span style="flex-shrink:0;width:20px;text-align:center;">${icon}</span><span style="flex:1;color:var(--text);">${escapeHtml(name || "Unnamed road")}</span><span style="flex-shrink:0;color:var(--text-dim);font-size:11px;">${d}</span></div>`;
+        return `<div class="routing-step" style="display:flex;align-items:flex-start;gap:6px;padding:4px 0;border-bottom:1px solid var(--border-light);font-size:12px;"><span style="flex-shrink:0;width:20px;text-align:center;">${icon}</span><span style="flex:1;color:var(--text);">${escapeHtml(name || t("routeUnnamedRoad"))}</span><span style="flex-shrink:0;color:var(--text-dim);font-size:11px;">${d}</span></div>`;
       }).join("")
     : `<div style="text-align:center;color:var(--text-dim);padding:12px;">No turn-by-turn steps available</div>`;
 

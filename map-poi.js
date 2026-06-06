@@ -83,7 +83,6 @@ export async function queryPOIs() {
   }
 
   const bbox = `${bounds.getSouth()},${bounds.getWest()},${bounds.getNorth()},${bounds.getEast()}`;
-
   const parts = [];
   for (const cat of CATEGORIES) {
     if (_activeCategories.has(cat.id)) parts.push(cat.query.replace(/\{bbox\}/g, bbox));
