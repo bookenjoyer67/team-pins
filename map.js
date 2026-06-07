@@ -2910,13 +2910,17 @@ export function showEditPinForm(pid) {
       ov.style.cssText =
         "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
       const curColor = pin.color || "#2563eb";
-      const curEmoji = row.emoji || "";
-      const colorCircles = colorPresetsHTML(COLORS, curColor);
-      const editHueHtml = hueDotHTML(curColor, "edit-pin-hue");
-      const editHexHtml = hexInputHTML("edit-pin-hex", escapeHtml(curColor));
       const layerOptions = state.layers.map(l => `<option value="${l.layer_id}" ${l.layer_id === row.layer_id ? "selected" : ""}>${escapeHtml(l.name)}</option>`).join("");
       const schemaOpts = `<option value="">none</option>` + state.schemas.map(s => `<option value="${s.schema_id}" ${s.schema_id === row.schema_id ? "selected" : ""}>${escapeHtml(s.name)}</option>`).join("");
-      ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${t("editPin")}</h3><input id="edit-pin-title" placeholder="${t("title")}" value="${escapeHtml(pin.title)}" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;" /><textarea id="edit-pin-note" placeholder="${t("description")}" rows="3" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;resize:vertical;">${escapeHtml(pin.note)}</textarea><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("color")}</div><div id="edit-pin-color-picker" style="display:flex;gap:2px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">${colorCircles}${editHueHtml}${editHexHtml}</div><input type="hidden" id="edit-pin-color" value="${escapeHtml(curColor)}" /><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("emoji") || "Emoji"}</div><div style="display:flex;gap:4px;margin-bottom:8px;"><input type="text" id="edit-pin-emoji" value="${escapeHtml(curEmoji)}" placeholder="😊" maxlength="2" style="width:56px;height:42px;text-align:center;font-size:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);padding:0;box-sizing:border-box;" /><button type="button" id="edit-pin-emoji-btn" style="width:28px;height:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;padding:0;">😊</button></div><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("layer") || "Layer"}</div><select id="edit-pin-layer" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;">${layerOptions}</select><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("schema") || "Schema"}</div><select id="edit-pin-schema" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;">${schemaOpts}</select><div id="edit-schema-fields" style="margin-bottom:8px;"></div><div style="display:flex;gap:4px;margin-bottom:8px;"><div style="flex:1;"><span style="font-size:11px;color:var(--text-dim);">${t("timeFrom") || "From (year)"}</span><input id="edit-pin-time-from" type="number" placeholder="any" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div><div style="flex:1;"><span style="font-size:11px;color:var(--text-dim);">${t("timeTo") || "To (year)"}</span><input id="edit-pin-time-to" type="number" placeholder="any" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div></div><label style="font-size:12px;color:var(--text-dim);">${t("replaceMedia")}</label><input type="file" id="edit-pin-media" accept="image/*,video/*" style="font-size:12px;padding:4px;border:1px solid var(--border);border-radius:3px;width:100%;box-sizing:border-box;margin-bottom:12px;background:var(--bg-input);" /><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="edit-pin-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="edit-pin-save" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("save")}</button></div></div>`;
+
+      ov.innerHTML = buildPinFormHTML({
+        prefix: "edit-pin", title: t("editPin"),
+        titleValue: pin.title || "", note: pin.note || "", color: curColor, emoji: row.emoji,
+        layerOptions, schemaOptions: schemaOpts,
+        showRecording: false, showCancel: true,
+        showTTL: false, showAnon: false,
+        showTime: true, timeFrom: row.valid_from, timeUntil: row.valid_until,
+      });
       document.body.appendChild(ov);
       document.getElementById("edit-pin-title").focus();
 
@@ -3160,20 +3164,22 @@ export function showPinForm(lat, lng) {
   const ttlInfo = gov.ttl_enabled
     ? `<div style="font-size:10px;color:var(--text-dim);margin:4px 0;">⏳ TTL: ${gov.ttl_base_mins} min base + ${gov.ttl_vote_mins} min/vote · min ${gov.ttl_min_mins} · max ${gov.ttl_max_mins}</div>`
     : "";
-  const anonOpt = (gov.anonymous_posting === "allowed" || gov.anonymous_posting === "members_only")
-    ? `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-dim);margin-bottom:8px;cursor:pointer;"><input type="checkbox" id="pin-anonymous" /> Post anonymously</label>`
-    : "";
-  const ov = document.createElement("div");
-  ov.style.cssText =
-    "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
-  const colorCircles = colorPresetsHTML(COLORS, "#2563eb");
-  const hueHtml = hueDotHTML("#2563eb", "pin-hue");
-  const hexHtml = hexInputHTML("pin-hex", "#2563eb");
-  const layerOptions = state.layers.map(l => `<option value="${l.layer_id}" ${l.layer_id === state.activeLayerId ? "selected" : ""}>${escapeHtml(l.name)}</option>`).join("");
   const activeLayer = state.layers.find(l => l.layer_id === state.activeLayerId);
   const defaultSchemaId = activeLayer?.default_schema_id || null;
+  const layerOptions = state.layers.map(l => `<option value="${l.layer_id}" ${l.layer_id === state.activeLayerId ? "selected" : ""}>${escapeHtml(l.name)}</option>`).join("");
   const schemaOptions = `<option value="">none</option>` + state.schemas.map(s => `<option value="${s.schema_id}" ${s.schema_id === defaultSchemaId ? "selected" : ""}>${escapeHtml(s.name)}</option>`).join("");
-  ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 12px;">${t("newPin")}</h3><input id="pin-title" placeholder="${t("title")}" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;" /><textarea id="pin-note" placeholder="${t("description")}" rows="3" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;resize:vertical;"></textarea><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("color")}</div><div id="pin-color-picker" style="display:flex;gap:2px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">${colorCircles}${hueHtml}${hexHtml}</div><input type="hidden" id="pin-color" value="#2563eb" /><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("emoji") || "Emoji"}</div><div style="display:flex;gap:4px;margin-bottom:8px;"><input type="text" id="pin-emoji" placeholder="😊" maxlength="2" style="width:56px;height:42px;text-align:center;font-size:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);padding:0;box-sizing:border-box;" /><button type="button" id="pin-emoji-btn" style="width:28px;height:28px;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;padding:0;">😊</button></div><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("layer") || "Layer"}</div><select id="pin-layer" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;">${layerOptions}</select><div style="margin-bottom:8px;font-size:12px;color:var(--text-dim);">${t("schema") || "Schema"}</div><select id="pin-schema" style="width:100%;padding:6px;margin-bottom:8px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);font-size:13px;">${schemaOptions}</select><div id="schema-fields" style="margin-bottom:8px;"></div><div style="display:flex;gap:4px;margin-bottom:8px;"><div style="flex:1;"><span style="font-size:11px;color:var(--text-dim);">${t("timeFrom") || "From (year)"}</span><input id="pin-time-from" type="number" placeholder="any" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div><div style="flex:1;"><span style="font-size:11px;color:var(--text-dim);">${t("timeTo") || "To (year)"}</span><input id="pin-time-to" type="number" placeholder="any" style="width:100%;padding:4px;margin-top:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-input);color:var(--text);font-size:12px;box-sizing:border-box;" /></div></div>${ttlInfo}${anonOpt}<label style="font-size:12px;color:var(--text-dim);">${t("photoVideo")}</label><input type="file" id="pin-media" accept="image/*,video/*" style="font-size:12px;padding:4px;border:1px solid var(--border);border-radius:3px;width:100%;box-sizing:border-box;margin-bottom:12px;background:var(--bg-input);" /><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="pin-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;">${t("cancel")}</button><button id="pin-save" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">${t("save")}</button></div></div>`;
+
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:2000;display:flex;align-items:center;justify-content:center;";
+  ov.innerHTML = buildPinFormHTML({
+    prefix: "pin", title: t("newPin"),
+    titleValue: "", note: "", color: "#2563eb", emoji: "",
+    layerOptions, schemaOptions,
+    showRecording: true, showCancel: false,
+    showTTL: gov.ttl_enabled, ttlInfo,
+    showAnon: gov.anonymous_posting === "allowed" || gov.anonymous_posting === "members_only",
+    showTime: true,
+  });
   document.body.appendChild(ov);
   document.getElementById("pin-title").focus();
 
