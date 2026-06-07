@@ -80,6 +80,7 @@ const SECTIONS = [
       { id: "github", icon: "🐙", label: "GitHub", action: () => window.open("https://github.com/bookenjoyer67/team-pins", "_blank") },
       { id: "donate", icon: "💸", label: "Donate", action: showDonateModal },
       { id: "update", icon: "↻", label: "Check Updates", action: () => window._checkForUpdates?.() },
+      { id: "rotate", icon: "🔑", label: "Rotate Keys", action: () => Sync.rotateSetKeys() },
     ],
   },
 ];

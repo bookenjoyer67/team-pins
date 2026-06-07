@@ -2118,7 +2118,7 @@ export function showExportFormatModal() {
 
 export async function rotateSetKeys() {
   if (!state.currentSet || !state.dek) return;
-  if (!(await confirmDialog("Rotate encryption keys? This re-encrypts all data with a new key."))) return;
+  if (!(await confirmDialog("Rotate encryption keys? This will re-encrypt all your pins and drawings with a new encryption key. If the process fails, your old key is preserved. Only do this if you suspect your key has been compromised or for routine security rotation."))) return;
   const t = await DB.getTeam(state.currentSet);
   if (!t) return;
   const newDek = generate_dek();
