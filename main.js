@@ -1580,7 +1580,7 @@ async function pushAllLocalData() {
     }));
     const chains = await DB.getChainsByCommunity(c.community_id);
     if (pinData.length || annData.length || drawingData.length || (chains && chains.length)) {
-      await Relay.pushDelta(c.community_id, pinData, annData, drawingData, [], [], [], chains || []);
+      await Relay.pushDelta(c.community_id, pinData, annData, drawingData, [], [], [], chains || [], { _bulk: true });
     }
   }
 }

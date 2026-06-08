@@ -17,21 +17,19 @@ export function handlePushInfo(msg) {
 }
 
 export async function initPushNotifications() {
-  // Push subscription is triggered by handlePushInfo() when the VAPID
-  // key arrives from the relay after auth. Just check saved state here.
-  if (isPushEnabled()) {
-    // No-op: actual subscription happens when push_info response arrives
+  if (isPushEnabled() && _vapidPublicKey) {
+    await subscribeToPush();
   }
 }
 
 async function subscribeToPush() {
-  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
-  if (!_vapidPublicKey) return;
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+  if (!_vapidPublicKey) return false;
 
   const permission = await Notification.requestPermission();
   if (permission !== "granted") {
     toast("Notification permission denied", "#f97316");
-    return;
+    return false;
   }
 
   try {
@@ -39,7 +37,7 @@ async function subscribeToPush() {
     let subscription = await reg.pushManager.getSubscription();
     if (subscription) {
       sendSubToRelay(subscription);
-      return;
+      return true;
     }
 
     const keyBytes = urlBase64ToUint8Array(_vapidPublicKey);
@@ -49,9 +47,11 @@ async function subscribeToPush() {
     });
     sendSubToRelay(subscription);
     toast("Notifications enabled", "#16a34a");
+    return true;
   } catch (e) {
     console.warn("[push] subscribe failed:", e.message);
     toast("Push subscription failed", "#dc2626");
+    return false;
   }
 }
 
@@ -85,9 +85,12 @@ export async function togglePush() {
     localStorage.setItem("pins-push-enabled", "false");
     return false;
   } else {
-    await subscribeToPush();
-    localStorage.setItem("pins-push-enabled", "true");
-    return true;
+    const ok = await subscribeToPush();
+    if (ok) {
+      localStorage.setItem("pins-push-enabled", "true");
+      return true;
+    }
+    return false;
   }
 }
 

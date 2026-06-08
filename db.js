@@ -1,6 +1,6 @@
 // IndexedDB storage
 const DB_NAME = "team-pins";
-const DB_VERSION = 11;
+const DB_VERSION = 12;
 
 let db = null;
 let _migrationSigningPubkey = null;
@@ -71,6 +71,13 @@ function openDB() {
       }
       if (!d.objectStoreNames.contains("offline_regions")) {
         d.createObjectStore("offline_regions", { keyPath: "id" });
+      }
+      if (!d.objectStoreNames.contains("collections")) {
+        d.createObjectStore("collections", { keyPath: "collection_id" });
+      }
+      if (!d.objectStoreNames.contains("collection_pins")) {
+        const cp = d.createObjectStore("collection_pins", { keyPath: "id" });
+        cp.createIndex("collection_id", "collection_id", { unique: false });
       }
       if (oldVersion < 8 && d.objectStoreNames.contains("teams") && d.objectStoreNames.contains("communities")) {
         const teamsStore = e.target.transaction.objectStore("teams");
@@ -565,6 +572,51 @@ export async function deleteOfflineRegion(id) {
   await openDB();
   if (!db.objectStoreNames.contains("offline_regions")) return;
   return promisify(tx("offline_regions", "readwrite").delete(id));
+}
+
+// --- collections ---
+
+export async function getCollections() {
+  await openDB();
+  if (!db.objectStoreNames.contains("collections")) return [];
+  return promisify(tx("collections").getAll());
+}
+
+export async function saveCollection(collection) {
+  await openDB();
+  if (!db.objectStoreNames.contains("collections")) return;
+  return promisify(tx("collections", "readwrite").put(collection));
+}
+
+export async function deleteCollection(id) {
+  await openDB();
+  if (!db.objectStoreNames.contains("collections")) return;
+  // Also remove associated collection_pins
+  if (db.objectStoreNames.contains("collection_pins")) {
+    const pins = await promisify(tx("collection_pins").index("collection_id").getAll(id));
+    for (const p of pins) await promisify(tx("collection_pins", "readwrite").delete(p.id));
+  }
+  return promisify(tx("collections", "readwrite").delete(id));
+}
+
+export async function addPinToCollection(collection_id, pin_id, team_id) {
+  await openDB();
+  if (!db.objectStoreNames.contains("collection_pins")) return;
+  const id = collection_id + "_" + pin_id;
+  return promisify(tx("collection_pins", "readwrite").put({ id, collection_id, pin_id, team_id, added_at: Date.now() }));
+}
+
+export async function removePinFromCollection(collection_id, pin_id) {
+  await openDB();
+  if (!db.objectStoreNames.contains("collection_pins")) return;
+  const id = collection_id + "_" + pin_id;
+  return promisify(tx("collection_pins", "readwrite").delete(id));
+}
+
+export async function getCollectionPins(collection_id) {
+  await openDB();
+  if (!db.objectStoreNames.contains("collection_pins")) return [];
+  return promisify(tx("collection_pins").index("collection_id").getAll(collection_id));
 }
 
 // --- batch operations (single transaction per batch) ---

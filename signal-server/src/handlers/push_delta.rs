@@ -383,8 +383,8 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
         ctx.room.broadcast_guaranteed(&broadcast.to_string(), ctx.cid, 2000).await;
     }
 
-    // Push notify offline members
-    if ctx.state.config.push.enabled {
+    // Push notify offline members (skip if silent flag is set — bulk sync)
+    if ctx.state.config.push.enabled && !v.get("silent").and_then(|s| s.as_bool()).unwrap_or(false) {
         if let Some(ref c) = c_opt {
             let total = pin_count + dwg_count + ann_count;
             if total > 0 {

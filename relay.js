@@ -242,11 +242,6 @@ export function connect(relayUrl) {
       } else if (msg.type === "auth_ok") {
         conn.authPubkey = msg.pubkey || null;
         conn.ws.send(JSON.stringify({ type: "push_info" }));
-        conn._pushInfoTimer = setTimeout(() => {
-          if (window._handlePushInfo) {
-            window._handlePushInfo({ enabled: false, vapid_public_key: null });
-          }
-        }, 10000);
       } else if (msg.type === "push_info") {
         if (conn._pushInfoTimer) { clearTimeout(conn._pushInfoTimer); delete conn._pushInfoTimer; }
         if (window._handlePushInfo) window._handlePushInfo(msg);
@@ -476,10 +471,10 @@ async function handleDelta(msg, isSync = false) {
   window._renderUI?.();
 }
 
-async function pushDeltaOn(conn, communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains, deletedChainIds) {
+async function pushDeltaOn(conn, communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains, deletedChainIds, opts = {}) {
   if (!isAlive(conn)) return;
   try {
-    conn.ws.send(JSON.stringify({
+    const msg = {
       type: "push_delta",
       community_id: communityId,
       ts: Date.now(),
@@ -491,17 +486,19 @@ async function pushDeltaOn(conn, communityId, pins, annotations, drawings, tombs
       deleted_drawing_ids: deletedDrawingIds || [],
       chains: chains || [],
       deleted_chain_ids: deletedChainIds || [],
-    }));
+    };
+    if (opts._bulk) msg.silent = true;
+    conn.ws.send(JSON.stringify(msg));
   } catch (e) {
     queuePush({ communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains, deletedChainIds });
   }
 }
 
-export async function pushDelta(communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains = [], deletedChainIds = []) {
+export async function pushDelta(communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains = [], deletedChainIds = [], opts = {}) {
   const data = { communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains, deletedChainIds };
   const conn = getCommunityConn(communityId);
   if (conn && isAlive(conn)) {
-    await pushDeltaOn(conn, communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains, deletedChainIds);
+    await pushDeltaOn(conn, communityId, pins, annotations, drawings, tombstones, deletedPinIds, deletedDrawingIds, chains, deletedChainIds, opts);
   } else {
     queuePush(data);
   }

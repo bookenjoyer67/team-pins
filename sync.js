@@ -382,7 +382,7 @@ export async function handleMessage(msg, connId) {
       const sid = pinData.team_id || window._pendingSet;
       if (sid) await DB.importPin({ ...pinData, team_id: sid });
       if (sid === state.currentSet) await window._loadPins();
-      if (!msg._relay && d.author_pubkey && d.author_pubkey !== state.signingPublicKey && sid === state.currentSet) {
+      if (d.author_pubkey && d.author_pubkey !== state.signingPublicKey && sid === state.currentSet) {
         try {
           const dec = decrypt_pin_data(d.ciphertext, d.nonce, state.dek);
           recordNotification({ type: "pin_added", pin_id: d.pin_id, pin_title: dec?.title || "Untitled", by_pubkey: d.author_pubkey });
@@ -1439,7 +1439,7 @@ function showShareMethodDialog(compressed, tooLarge, bgm, preview = {}, jsonPayl
 
 export async function importSet() {
   const fileInput = document.createElement("input");
-  fileInput.type = "file"; fileInput.accept = ".piggpin,.txt,.geojson,.json,.kml,.gpx";
+  fileInput.type = "file"; fileInput.accept = ".piggpin,.txt,.geojson,.json,.kml,.gpx,.csv";
   fileInput.onchange = async () => {
     const file = fileInput.files[0]; if (!file) return;
     const ext = file.name.split(".").pop()?.toLowerCase();
@@ -1457,6 +1457,7 @@ export async function importSet() {
     if (ext === "gpx") {
       if (text.includes("<gpx") || text.includes("<wpt") || text.includes("<trk")) { await importGPX(text); return; }
     }
+    if (ext === "csv") { await importCSV(text); return; }
     // Fallback: try auto-detect
     if (text.trimStart().startsWith("<?xml")) {
       if (text.includes("<kml")) { await importKML(text); return; }
@@ -1911,6 +1912,58 @@ export async function importGeoJSON(text) {
     } catch (_) { skipped++; }
 
     if (i % 20 === 0) prog.update(Math.round(i / features.length * 90), `Imported ${imported} / ${features.length}`);
+  }
+
+  prog.update(100, "Done");
+  setTimeout(prog.done, 600);
+  toast(`${imported} imported, ${skipped} skipped`, "#16a34a");
+}
+
+export async function importCSV(text) {
+  if (!state.currentSet || !state.dek) return;
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) { await alertDialog("CSV must have a header row and at least one data row"); return; }
+
+  const headers = lines[0].split(",").map(h => h.trim().toLowerCase());
+  const latIdx = headers.indexOf("lat"), lngIdx = headers.indexOf("lng");
+  if (latIdx < 0 || lngIdx < 0) { await alertDialog("CSV must have 'lat' and 'lng' columns"); return; }
+
+  const titleIdx = headers.indexOf("title"), noteIdx = headers.indexOf("note");
+  const colorIdx = headers.indexOf("color"), emojiIdx = headers.indexOf("emoji");
+  const layerIdx = headers.indexOf("layer");
+
+  const dataRows = lines.slice(1);
+  const ok = await confirmDialog(`Import ${dataRows.length} row(s) into the current map? They will be encrypted with this map's key.`);
+  if (!ok) return;
+
+  const prog = showProgressDialog("Importing CSV...");
+  const activeLayerId = state.activeLayerId || (state.layers[0]?.layer_id || null);
+  let imported = 0, skipped = 0;
+
+  for (let i = 0; i < dataRows.length; i++) {
+    const cols = dataRows[i].split(",").map(c => c.trim().replace(/^"(.*)"$/, "$1"));
+    const lat = parseFloat(cols[latIdx]), lng = parseFloat(cols[lngIdx]);
+    if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) { skipped++; continue; }
+
+    const title = titleIdx >= 0 ? cols[titleIdx] || "Imported" : "Imported";
+    const note = noteIdx >= 0 ? cols[noteIdx] || "" : "";
+    const color = colorIdx >= 0 ? cols[colorIdx] || "#2563eb" : "#2563eb";
+    const emoji = emojiIdx >= 0 ? cols[emojiIdx] || "" : "";
+    const layerName = layerIdx >= 0 ? cols[layerIdx] || "" : "";
+
+    let layerId = activeLayerId;
+    if (layerName) {
+      const existing = state.layers.find(l => l.name.toLowerCase() === layerName.toLowerCase());
+      if (existing) layerId = existing.layer_id;
+    }
+
+    try {
+      const { savePin } = await import("./map.js");
+      await savePin(lat, lng, title, note, color, null, emoji, layerId, null, null);
+      imported++;
+    } catch (e) { console.warn("[sync]", e.message); skipped++; }
+
+    if (i % 20 === 0) prog.update(Math.round(i / dataRows.length * 90), `Imported ${imported} / ${dataRows.length}`);
   }
 
   prog.update(100, "Done");

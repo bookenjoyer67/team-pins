@@ -742,6 +742,331 @@ export async function switchSet(sid) {
   }
 }
 
+// ─── Map Templates ──────────────────────────────────────────────────
+
+const MAP_TEMPLATES = [
+  {
+    id: "disaster_response", name: "Disaster Response", icon: "\u{1F198}",
+    description: "Layers and schemas for field response coordination.",
+    layers: [{ name: "Shelters", color: "#16a34a" }, { name: "Hazards", color: "#dc2626" }, { name: "Supplies", color: "#2563eb" }],
+    schemas: [
+      { name: "Shelter Report", fields: [{ key: "capacity", label: "Capacity", type: "number" }, { key: "open", label: "Open", type: "boolean" }] },
+      { name: "Hazard Report", fields: [{ key: "severity", label: "Severity", type: "choice", options: ["Low","Medium","High","Critical"] }, { key: "description", label: "Description", type: "text" }] },
+    ],
+  },
+  {
+    id: "farmers_market", name: "Farmers Market Directory", icon: "\u{1F955}",
+    description: "Track vendors, products, and market locations.",
+    layers: [{ name: "Vendors", color: "#eab308" }, { name: "Markets", color: "#7c3aed" }],
+    schemas: [{ name: "Vendor Info", fields: [{ key: "products", label: "Products", type: "text" }, { key: "hours", label: "Hours", type: "text" }, { key: "organic", label: "Organic", type: "boolean" }] }],
+  },
+  {
+    id: "field_notes", name: "Field Notes", icon: "\u{1F4DD}",
+    description: "Observations, samples, and field research tracking.",
+    layers: [{ name: "Observations", color: "#ec4899" }, { name: "Samples", color: "#0891b2" }],
+    schemas: [{ name: "Observation", fields: [{ key: "date_observed", label: "Date", type: "date" }, { key: "category", label: "Category", type: "choice", options: ["Flora","Fauna","Geology","Weather","Other"] }, { key: "notes", label: "Notes", type: "text" }] }],
+  },
+  {
+    id: "event_planning", name: "Event Planning", icon: "\u{1F3AA}",
+    description: "Venues, parking, and logistics for events.",
+    layers: [{ name: "Venues", color: "#f97316" }, { name: "Parking", color: "#16a34a" }, { name: "First Aid", color: "#dc2626" }],
+    schemas: [{ name: "Venue Info", fields: [{ key: "capacity", label: "Capacity", type: "number" }, { key: "contact", label: "Contact", type: "text" }, { key: "confirmed", label: "Confirmed", type: "boolean" }] }],
+  },
+  {
+    id: "travel_log", name: "Travel Log", icon: "\u{2708}\uFE0F",
+    description: "Places to stay, eat, and visit on your travels.",
+    layers: [{ name: "Accommodation", color: "#0891b2" }, { name: "Food & Drink", color: "#eab308" }, { name: "Sights", color: "#7c3aed" }],
+    schemas: [{ name: "Review", fields: [{ key: "rating", label: "Rating", type: "number" }, { key: "visited", label: "Visited", type: "date" }, { key: "recommend", label: "Recommend", type: "boolean" }] }],
+  },
+];
+
+export async function createSetFromTemplate(templateId) {
+  const tmpl = MAP_TEMPLATES.find(t => t.id === templateId);
+  if (!tmpl) return;
+
+  const sid = generate_uuid();
+  const communityKp = generate_user_keypair();
+  const memberKp = generate_user_keypair();
+  const dk = generate_dek();
+  await DB.saveTeam({
+    team_id: sid, name: tmpl.name,
+    public_key: encode_hex(communityKp.public),
+    secret_key: encode_hex(memberKp.secret),
+    wrapped_dek: wrap_dek(dk, encode_hex(memberKp.public)),
+    community_public_key: encode_hex(communityKp.public),
+    community_secret_key: encode_hex(communityKp.secret),
+    community_wrapped_dek: wrap_dek(dk, encode_hex(communityKp.public)),
+  });
+  await DB.saveCommunity({
+    community_id: sid, name: tmpl.name, description: "", genesis_public_key: state.signingPublicKey || "",
+    genesis_created_at: Date.now(),
+    members: state.signingPublicKey ? [{ pubkey: state.signingPublicKey, display_name: state.displayName, role: "founder", joined_at: Date.now(), vouched_by: null }] : [],
+    governance: { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" },
+    bounds: null, relay_nodes: [], visibility: "local",
+  });
+
+  const layers = tmpl.layers.map(l => ({ layer_id: generate_uuid(), name: l.name, color: l.color, visible: true, opacity: 1.0 }));
+  await DB.saveLayers(sid, layers);
+
+  for (const s of tmpl.schemas) {
+    await DB.saveSchema({ schema_id: generate_uuid(), name: s.name, fields: s.fields, community_id: sid });
+  }
+
+  window._names[sid] = tmpl.name;
+  await window._loadSetList();
+  await window._switchSet(sid);
+  toast(`Created: ${tmpl.name}`, "#16a34a");
+}
+
+export function showTemplatePicker() {
+  const existing = document.getElementById("template-picker-modal");
+  if (existing) { existing.remove(); return; }
+
+  const ov = document.createElement("div");
+  ov.id = "template-picker-modal";
+  ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;";
+
+  const cards = MAP_TEMPLATES.map(t => `
+    <div class="template-card" data-id="${t.id}" style="padding:12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;margin-bottom:8px;transition:background 0.15s;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <span style="font-size:20px;">${t.icon}</span>
+        <span style="font-weight:600;font-size:14px;">${escapeHtml(t.name)}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text-dim);margin-bottom:6px;">${escapeHtml(t.description)}</div>
+      <div style="display:flex;gap:12px;font-size:11px;color:var(--text-dim);">
+        <span>${t.layers.length} layer${t.layers.length !== 1 ? "s" : ""}</span>
+        <span>${t.schemas.length} schema${t.schemas.length !== 1 ? "s" : ""}</span>
+      </div>
+    </div>
+  `).join("");
+
+  const userTemplates = JSON.parse(localStorage.getItem("pins-user-templates") || "[]");
+  const userCards = userTemplates.length > 0
+    ? `<div style="font-size:12px;color:var(--text-dim);margin:8px 0 4px;font-weight:600;">Your Templates</div>` +
+      userTemplates.map(t => `
+        <div class="template-card user-template" data-id="${t.id}" style="padding:10px 12px;border:1px solid var(--border);border-radius:6px;cursor:pointer;margin-bottom:6px;transition:background 0.15s;display:flex;align-items:center;justify-content:space-between;">
+          <div style="flex:1;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px;">
+              <span style="font-weight:600;font-size:13px;">💾 ${escapeHtml(t.name)}</span>
+            </div>
+            <div style="display:flex;gap:10px;font-size:10px;color:var(--text-dim);">
+              <span>${t.layers.length} layers</span>
+              <span>${t.schemas.length} schemas</span>
+            </div>
+          </div>
+          <button class="tmpl-delete-btn" data-id="${t.id}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;padding:0 2px;line-height:1;flex-shrink:0;">×</button>
+        </div>
+      `).join("")
+    : "";
+
+  ov.innerHTML = `<div style="background:var(--bg-card);padding:16px;border-radius:8px;min-width:380px;max-width:440px;box-shadow:0 4px 20px rgba(0,0,0,0.3);max-height:70vh;display:flex;flex-direction:column;">
+    <h3 style="margin:0 0 4px;">\u{1F4CB} New from Template</h3>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;">Choose a pre-configured map with layers and schemas.</div>
+    <div style="overflow-y:auto;flex:1;">${cards}${userCards}</div>
+    <button id="template-create-new" style="padding:6px;margin-top:6px;border:1px dashed #059669;background:transparent;color:#059669;border-radius:4px;cursor:pointer;font-size:13px;">📝 Create New Template</button>
+    <button id="template-cancel" style="padding:6px;margin-top:4px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:13px;">Cancel</button>
+  </div>`;
+  document.body.appendChild(ov);
+
+  const clean = () => ov.remove();
+  ov.onclick = (e) => { if (e.target === ov) clean(); };
+  document.getElementById("template-cancel").onclick = clean;
+
+  ov.querySelectorAll(".template-card").forEach(card => {
+    card.onmouseenter = () => card.style.background = "var(--bg-input)";
+    card.onmouseleave = () => card.style.background = "";
+    card.onclick = async (e) => {
+      if (e.target.closest(".tmpl-delete-btn")) return;
+      clean();
+      await createSetFromTemplate(card.dataset.id);
+    };
+  });
+  ov.querySelectorAll(".tmpl-delete-btn").forEach(btn => {
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      const templates = JSON.parse(localStorage.getItem("pins-user-templates") || "[]");
+      const filtered = templates.filter(t => t.id !== btn.dataset.id);
+      localStorage.setItem("pins-user-templates", JSON.stringify(filtered));
+      toast("Template deleted", "#f97316");
+      clean();
+      showTemplatePicker();
+    };
+  });
+  document.getElementById("template-create-new").onclick = () => {
+    clean();
+    showCreateTemplateModal();
+  };
+}
+
+function showSchemaFieldEditor(schema, onSave) {
+  let fields = [...(schema.fields || [])];
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3200;display:flex;align-items:center;justify-content:center;";
+
+  function render() {
+    const el = document.getElementById("sfe-fields");
+    if (!el) return;
+    const types = ["text", "number", "choice", "date", "time", "boolean"];
+    el.innerHTML = fields.map((f, i) => `
+      <div style="display:flex;gap:4px;margin-bottom:4px;align-items:center;">
+        <input class="sfe-key" data-i="${i}" value="${escapeHtml(f.key || '')}" placeholder="key" style="width:80px;padding:4px;border:1px solid var(--border);border-radius:3px;font-size:12px;background:var(--bg-input);color:var(--text);" />
+        <input class="sfe-label" data-i="${i}" value="${escapeHtml(f.label || '')}" placeholder="Label" style="flex:1;padding:4px;border:1px solid var(--border);border-radius:3px;font-size:12px;background:var(--bg-input);color:var(--text);" />
+        <select class="sfe-type" data-i="${i}" style="padding:4px;border:1px solid var(--border);border-radius:3px;font-size:11px;background:var(--bg-input);color:var(--text);">${types.map(t => `<option value="${t}" ${f.type === t ? "selected" : ""}>${t}</option>`).join("")}</select>
+        <button class="sfe-del" data-i="${i}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px;padding:0 2px;">×</button>
+      </div>
+    `).join("");
+
+    el.querySelectorAll(".sfe-key").forEach(inp => { inp.oninput = () => { fields[parseInt(inp.dataset.i)].key = inp.value.trim(); }; });
+    el.querySelectorAll(".sfe-label").forEach(inp => { inp.oninput = () => { fields[parseInt(inp.dataset.i)].label = inp.value.trim(); }; });
+    el.querySelectorAll(".sfe-type").forEach(sel => { sel.onchange = () => { fields[parseInt(sel.dataset.i)].type = sel.value; }; });
+    el.querySelectorAll(".sfe-del").forEach(btn => { btn.onclick = () => { fields.splice(parseInt(btn.dataset.i), 1); render(); }; });
+  }
+
+  ov.innerHTML = `<div style="background:var(--bg-card);padding:16px;border-radius:8px;min-width:360px;max-width:460px;max-height:70vh;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;flex-direction:column;">
+    <h3 style="margin:0 0 8px;">Schema Fields: ${escapeHtml(schema.name || "New Schema")}</h3>
+    <div id="sfe-fields" style="flex:1;overflow-y:auto;margin-bottom:8px;"></div>
+    <button id="sfe-add" style="padding:4px 8px;border:1px dashed var(--border);background:transparent;color:var(--text-dim);border-radius:3px;cursor:pointer;font-size:11px;margin-bottom:10px;">+ Add Field</button>
+    <div style="display:flex;gap:8px;">
+      <button id="sfe-save" style="flex:1;padding:7px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;font-size:13px;">Save Fields</button>
+      <button id="sfe-cancel" style="flex:1;padding:7px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:13px;">Cancel</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+
+  render();
+  const clean = () => ov.remove();
+  ov.onclick = (e) => { if (e.target === ov) clean(); };
+  document.getElementById("sfe-cancel").onclick = clean;
+  document.getElementById("sfe-add").onclick = () => { fields.push({ key: "f" + (fields.length + 1), label: "Field " + (fields.length + 1), type: "text" }); render(); };
+  document.getElementById("sfe-save").onclick = () => {
+    const validFields = fields.filter(f => f.key && f.label);
+    if (onSave) onSave(validFields);
+    clean();
+  };
+}
+
+export function showCreateTemplateModal() {
+  const existing = document.getElementById("create-template-modal");
+  if (existing) { existing.remove(); return; }
+
+  let templateLayers = [{ name: "", color: "#2563eb" }];
+  let templateSchemas = [];
+
+  const ov = document.createElement("div");
+  ov.id = "create-template-modal";
+  ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3100;display:flex;align-items:center;justify-content:center;";
+
+  function renderLayers() {
+    const el = document.getElementById("tmpl-layers-list");
+    if (!el) return;
+    el.innerHTML = templateLayers.map((l, i) => `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+        <input class="tmpl-layer-name" data-i="${i}" value="${escapeHtml(l.name)}" placeholder="Layer name" style="flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:3px;font-size:12px;background:var(--bg-input);color:var(--text);" />
+        <input type="color" class="tmpl-layer-color" data-i="${i}" value="${l.color}" style="width:24px;height:24px;border:none;border-radius:3px;cursor:pointer;padding:0;" />
+        <button class="tmpl-layer-del" data-i="${i}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:16px;padding:0 2px;">×</button>
+      </div>
+    `).join("");
+    el.querySelectorAll(".tmpl-layer-name").forEach(inp => {
+      inp.oninput = () => { templateLayers[parseInt(inp.dataset.i)].name = inp.value.trim(); };
+    });
+    el.querySelectorAll(".tmpl-layer-color").forEach(inp => {
+      inp.oninput = () => { templateLayers[parseInt(inp.dataset.i)].color = inp.value; };
+    });
+    el.querySelectorAll(".tmpl-layer-del").forEach(btn => {
+      btn.onclick = () => { if (templateLayers.length <= 1) return; templateLayers.splice(parseInt(btn.dataset.i), 1); renderLayers(); };
+    });
+  }
+
+  function renderSchemas() {
+    const el = document.getElementById("tmpl-schemas-list");
+    if (!el) return;
+    const existingSchemas = state.schemas || [];
+    el.innerHTML = `
+      ${templateSchemas.length > 0 ? templateSchemas.map((s, i) => `
+        <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;padding:4px 6px;border:1px solid var(--border);border-radius:3px;">
+          <div style="flex:1;font-size:12px;">📋 ${escapeHtml(s.name)} (${s.fields.length} field${s.fields.length !== 1 ? "s" : ""})</div>
+          <button class="tmpl-schema-edit" data-i="${i}" style="background:none;border:none;color:#2563eb;cursor:pointer;font-size:12px;padding:2px 4px;">✎</button>
+          <button class="tmpl-schema-del" data-i="${i}" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px;padding:0 2px;">×</button>
+        </div>
+      `).join("")
+      : `<div style="font-size:11px;color:var(--text-dim);padding:4px 0;">No schemas added</div>`}
+      <div style="margin-top:6px;font-size:11px;color:var(--text-dim);margin-bottom:4px;">Import existing:</div>
+      ${existingSchemas.map(s => `
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;padding:2px 0;cursor:pointer;">
+          <input type="checkbox" class="tmpl-import-schema" data-name="${escapeHtml(s.name)}" data-fields="${escapeHtml(JSON.stringify(s.fields || []))}" />
+          📋 ${escapeHtml(s.name)} (${s.fields ? s.fields.length : 0} fields)
+        </label>
+      `).join("")}
+    `;
+    el.querySelectorAll(".tmpl-schema-del").forEach(btn => {
+      btn.onclick = () => { templateSchemas.splice(parseInt(btn.dataset.i), 1); renderSchemas(); };
+    });
+    el.querySelectorAll(".tmpl-schema-edit").forEach(btn => {
+      btn.onclick = () => {
+        const s = templateSchemas[parseInt(btn.dataset.i)];
+        showSchemaFieldEditor(s, (fields) => { templateSchemas[parseInt(btn.dataset.i)].fields = fields; renderSchemas(); });
+      };
+    });
+  }
+
+  ov.innerHTML = `<div style="background:var(--bg-card);padding:16px;border-radius:8px;min-width:400px;max-width:460px;max-height:75vh;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;flex-direction:column;">
+    <h3 style="margin:0 0 8px;">📝 Create Template</h3>
+    <input id="tmpl-name" placeholder="Template name" style="width:100%;padding:6px;margin-bottom:10px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;font-size:13px;background:var(--bg-input);color:var(--text);" />
+    <div style="font-size:12px;font-weight:600;margin-bottom:4px;">📑 Layers</div>
+    <div id="tmpl-layers-list" style="margin-bottom:4px;"></div>
+    <button id="tmpl-add-layer" style="padding:4px 8px;border:1px dashed var(--border);background:transparent;color:var(--text-dim);border-radius:3px;cursor:pointer;font-size:11px;margin-bottom:10px;">+ Add Layer</button>
+    <div style="font-size:12px;font-weight:600;margin-bottom:4px;">📋 Schemas</div>
+    <div id="tmpl-schemas-list" style="margin-bottom:4px;max-height:160px;overflow-y:auto;"></div>
+    <button id="tmpl-add-schema" style="padding:4px 8px;border:1px dashed var(--border);background:transparent;color:var(--text-dim);border-radius:3px;cursor:pointer;font-size:11px;margin-bottom:10px;">+ New Schema</button>
+    <div style="display:flex;gap:8px;margin-top:4px;">
+      <button id="tmpl-save" style="flex:1;padding:7px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;font-size:13px;">Save Template</button>
+      <button id="tmpl-cancel" style="flex:1;padding:7px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:13px;">Cancel</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+
+  renderLayers();
+  renderSchemas();
+
+  const clean = () => ov.remove();
+  ov.onclick = (e) => { if (e.target === ov) clean(); };
+  document.getElementById("tmpl-cancel").onclick = clean;
+
+  document.getElementById("tmpl-add-layer").onclick = () => {
+    templateLayers.push({ name: "", color: COLORS[templateLayers.length % COLORS.length] });
+    renderLayers();
+  };
+
+  document.getElementById("tmpl-add-schema").onclick = () => {
+    const fields = [{ key: "field_1", label: "Field 1", type: "text" }];
+    const name = prompt("Schema name:");
+    if (!name) return;
+    showSchemaFieldEditor({ name, fields }, (updatedFields) => {
+      templateSchemas.push({ name, fields: updatedFields });
+      renderSchemas();
+    });
+  };
+
+  document.getElementById("tmpl-save").onclick = () => {
+    const name = document.getElementById("tmpl-name").value.trim();
+    if (!name) { toast("Template name required", "#dc2626"); return; }
+    const layers = templateLayers.filter(l => l.name).map(l => ({ name: l.name, color: l.color }));
+    if (!layers.length) { toast("At least one layer required", "#dc2626"); return; }
+    const checkboxes = ov.querySelectorAll(".tmpl-import-schema:checked");
+    const importedSchemas = Array.from(checkboxes).map(cb => ({
+      name: cb.dataset.name,
+      fields: JSON.parse(cb.dataset.fields || "[]"),
+    }));
+    const allSchemas = [...templateSchemas.filter(s => s.name), ...importedSchemas];
+    const tmpl = { id: "user_" + Date.now().toString(36), name, icon: "💾", description: "Custom map template", layers, schemas: allSchemas, isUser: true };
+    const userTemplates = JSON.parse(localStorage.getItem("pins-user-templates") || "[]");
+    userTemplates.push(tmpl);
+    localStorage.setItem("pins-user-templates", JSON.stringify(userTemplates));
+    toast(`Template saved: ${name}`, "#16a34a");
+    clean();
+  };
+}
+
 export async function createSet(name) {
   const sid = generate_uuid();
   const communityKp = generate_user_keypair();
@@ -2103,6 +2428,7 @@ export function showSetsModal() {
     <div id="sets-list" style="flex:1;overflow-y:auto;border:1px solid var(--border-light);border-radius:4px;min-height:40px;"></div>
     <button id="sets-modal-new" style="margin-top:12px;width:100%;padding:8px;border:1px dashed #9ca3af;background:transparent;color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:14px;">${t("newMap")}</button>
     <button id="sets-modal-tutorial" style="margin-top:8px;width:100%;padding:8px;border:1px dashed #2563eb;background:transparent;color:#2563eb;border-radius:4px;cursor:pointer;font-size:14px;">${t("tutorialMapName") || "Tutorial"}</button>
+    <button id="sets-modal-template" style="margin-top:8px;width:100%;padding:8px;border:1px dashed #7c3aed;background:transparent;color:#7c3aed;border-radius:4px;cursor:pointer;font-size:14px;">📋 New from Template</button>
   </div>`;
 
   document.body.appendChild(ov);
@@ -2125,6 +2451,10 @@ export function showSetsModal() {
   document.getElementById("sets-modal-tutorial").onclick = async () => {
     cleanFn();
     await createTutorial();
+  };
+  document.getElementById("sets-modal-template").onclick = async () => {
+    cleanFn();
+    showTemplatePicker();
   };
 
   renderList();
@@ -2567,6 +2897,7 @@ export function showPinDetailModal(pinId) {
       <div style="margin-top:8px;">${voteBtns ? voteBtns + "<br>" : ""}${editBtns ? editBtns : ""}
         ${!isEmbed && !isTutorial ? `<button class="osm-edit-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F310; Edit in OSM</button>` : ""}
         ${!isEmbed ? `<button class="pin-route-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F6E3; Route</button>` : ""}
+        ${!isEmbed ? `<button class="pin-collect-btn" data-pid="${escapeHtml(pinId)}" style="padding:4px 8px;border:1px solid #eab308;background:var(--bg-card);color:#eab308;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F4C1; Collect</button>` : ""}
       </div>
       <hr style="margin:12px 0 8px;border-color:var(--border);">
       <div class="annotation-thread pin-detail-thread" data-pin-id="${escapeHtml(pinId)}" style="max-height:none;overflow-y:visible;font-size:13px;">Loading...</div>
@@ -2605,6 +2936,9 @@ export function showPinDetailModal(pinId) {
         if (!r.isRoutingActive()) r.toggleRouting();
         r.addWaypoint(parseFloat(e.target.dataset.lat), parseFloat(e.target.dataset.lng));
       });
+    }
+    if (e.target.matches(".pin-collect-btn")) {
+      showCollectionPicker(e.target.dataset.pid, state.currentSet);
     }
   }, true);
 
@@ -2684,6 +3018,9 @@ export function placePin() {
   state.placingPin = !state.placingPin;
   state.map.getContainer().style.cursor = state.placingPin ? "crosshair" : "";
 }
+
+let _collectionMarkers = null;
+let _collectionBanner = null;
 
 // Undo/redo
 const _undoStack = [];
@@ -5649,6 +5986,226 @@ function showStylePicker() {
     const close = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener("click", close); } };
     document.addEventListener("click", close);
   }, 0);
+}
+
+// ─── Pin Collections ────────────────────────────────────────────────
+
+export async function showCollectionPicker(pinId, teamId) {
+  if (!pinId) return;
+  const collections = await DB.getCollections();
+
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;";
+
+  const items = collections.length > 0
+    ? collections.map(c => `<button class="coll-item" data-cid="${c.collection_id}" style="display:block;width:100%;padding:6px 10px;border:none;background:transparent;color:var(--text);cursor:pointer;font-size:13px;text-align:left;border-radius:3px;">📁 ${escapeHtml(c.name)}</button>`).join("")
+    : `<div style="text-align:center;color:var(--text-dim);padding:12px;font-size:12px;">No collections yet</div>`;
+
+  ov.innerHTML = `<div style="background:var(--bg-card);padding:12px;border-radius:8px;min-width:240px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+    <div style="font-weight:600;font-size:13px;margin-bottom:8px;">Add to Collection</div>
+    <div style="max-height:200px;overflow-y:auto;margin-bottom:8px;">${items}</div>
+    <button id="coll-new" style="display:block;width:100%;padding:6px;border:1px dashed var(--border);background:transparent;color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:12px;">+ New Collection</button>
+    <div id="coll-new-form" style="display:none;margin-top:4px;gap:4px;">
+      <input id="coll-new-name" placeholder="Collection name" style="flex:1;padding:4px 6px;border:1px solid var(--border);border-radius:3px;font-size:12px;background:var(--bg-input);color:var(--text);" />
+      <button id="coll-new-create" style="padding:4px 8px;border:none;background:#2563eb;color:white;border-radius:3px;cursor:pointer;font-size:11px;">Create</button>
+    </div>
+    <button id="coll-close" style="display:block;width:100%;padding:6px;margin-top:4px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:12px;">Cancel</button>
+  </div>`;
+  document.body.appendChild(ov);
+
+  const clean = () => ov.remove();
+  ov.onclick = (e) => { if (e.target === ov) clean(); };
+  document.getElementById("coll-close").onclick = clean;
+
+  ov.querySelectorAll(".coll-item").forEach(btn => {
+    btn.onclick = async () => {
+      await DB.addPinToCollection(btn.dataset.cid, pinId, teamId);
+      toast("Added to collection", "#16a34a");
+      clean();
+    };
+  });
+  document.getElementById("coll-new").onclick = () => {
+    document.getElementById("coll-new").style.display = "none";
+    const form = document.getElementById("coll-new-form");
+    form.style.display = "flex";
+    document.getElementById("coll-new-name").focus();
+  };
+  document.getElementById("coll-new-create").onclick = () => {
+    const name = document.getElementById("coll-new-name").value.trim();
+    if (!name) { toast("Please enter a collection name", "#dc2626"); return; }
+    clean();
+    const cid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    DB.saveCollection({ collection_id: cid, name, created_at: Date.now() }).then(() => {
+      DB.addPinToCollection(cid, pinId, teamId).then(() => {
+        toast(`Added to "${name}"`, "#16a34a");
+      });
+    });
+  };
+  document.getElementById("coll-new-name").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") document.getElementById("coll-new-create").click();
+  });
+}
+
+export function showCollectionsModal() {
+  const existing = document.getElementById("collections-modal");
+  if (existing) { existing.remove(); return; }
+
+  const ov = document.createElement("div");
+  ov.id = "collections-modal";
+  ov.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;";
+
+  DB.getCollections().then(collections => {
+    const items = collections.length === 0
+      ? `<div style="text-align:center;color:var(--text-dim);padding:20px;">No collections yet. Use 📁 Collect on any pin to start one.</div>`
+      : collections.map(c => `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);">
+        <div style="flex:1;">
+          <div style="font-weight:600;font-size:13px;">📁 ${escapeHtml(c.name)}</div>
+          <div style="font-size:11px;color:var(--text-dim);">${new Date(c.created_at).toLocaleDateString()}</div>
+        </div>
+        <button class="coll-view-btn" data-cid="${c.collection_id}" style="padding:3px 8px;border:1px solid #2563eb;color:#2563eb;background:transparent;border-radius:3px;cursor:pointer;font-size:11px;">View</button>
+        <button class="coll-delete-btn" data-cid="${c.collection_id}" style="padding:3px 8px;border:1px solid #dc2626;color:#dc2626;background:transparent;border-radius:3px;cursor:pointer;font-size:11px;">×</button>
+      </div>`).join("");
+
+    ov.innerHTML = `<div style="background:var(--bg-card);padding:16px;border-radius:8px;min-width:340px;max-width:420px;max-height:70vh;box-shadow:0 4px 20px rgba(0,0,0,0.3);display:flex;flex-direction:column;">
+      <h3 style="margin:0 0 8px;">📁 Collections</h3>
+      <div style="overflow-y:auto;flex:1;">${items}</div>
+      <button id="coll-mgr-close" style="display:block;width:100%;padding:7px;margin-top:8px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:13px;">Close</button>
+    </div>`;
+    document.body.appendChild(ov);
+
+    const clean = () => ov.remove();
+    ov.onclick = (e) => { if (e.target === ov) clean(); };
+    document.getElementById("coll-mgr-close").onclick = clean;
+    ov.querySelectorAll(".coll-delete-btn").forEach(btn => {
+      btn.onclick = async () => { await DB.deleteCollection(btn.dataset.cid); clean(); showCollectionsModal(); };
+    });
+    ov.querySelectorAll(".coll-view-btn").forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const cid = btn.dataset.cid;
+        const existing = document.getElementById("coll-view-sub");
+        if (existing) existing.remove();
+        const sub = document.createElement("div");
+        sub.id = "coll-view-sub";
+        sub.style.cssText = "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:3100;display:flex;align-items:center;justify-content:center;";
+        sub.innerHTML = `<div style="background:var(--bg-card);padding:16px;border-radius:8px;min-width:260px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+          <div style="font-weight:600;font-size:14px;margin-bottom:10px;">View Collection</div>
+          <button id="coll-overlay" style="display:block;width:100%;padding:8px;margin-bottom:6px;border:1px solid #eab308;background:transparent;color:#eab308;border-radius:4px;cursor:pointer;font-size:13px;">📍 Overlay on current map</button>
+          <button id="coll-import" style="display:block;width:100%;padding:8px;margin-bottom:6px;border:1px solid #16a34a;background:transparent;color:#16a34a;border-radius:4px;cursor:pointer;font-size:13px;">🗺 Create as new map</button>
+          <button id="coll-sub-close" style="display:block;width:100%;padding:6px;border:1px solid var(--border);background:var(--bg-card);color:var(--text-dim);border-radius:4px;cursor:pointer;font-size:12px;">Cancel</button>
+        </div>`;
+        document.body.appendChild(sub);
+        const sclean = () => sub.remove();
+        sub.onclick = (ev) => { if (ev.target === sub) sclean(); };
+        document.getElementById("coll-sub-close").onclick = sclean;
+        document.getElementById("coll-overlay").onclick = () => { sclean(); viewCollectionPins(cid); };
+        document.getElementById("coll-import").onclick = () => { sclean(); importCollectionAsMap(cid); };
+      };
+    });
+  });
+}
+
+export function closeCollectionView() {
+  if (_collectionMarkers) {
+    _collectionMarkers.forEach(m => state.map.removeLayer(m));
+    _collectionMarkers = null;
+  }
+  if (_collectionBanner) { _collectionBanner.remove(); _collectionBanner = null; }
+}
+
+export async function viewCollectionPins(collectionId) {
+  closeCollectionView();
+
+  const pins = await DB.getCollectionPins(collectionId);
+  if (!pins.length) { toast("No pins in collection", "#f97316"); return; }
+
+  const collections = await DB.getCollections();
+  const coll = collections.find(c => c.collection_id === collectionId);
+
+  _collectionBanner = document.createElement("div");
+  _collectionBanner.style.cssText = "position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:1005;padding:6px 14px;background:var(--bg-glass);backdrop-filter:blur(4px);border:1px solid #eab308;border-radius:20px;font-size:13px;display:flex;align-items:center;gap:8px;white-space:nowrap;color:var(--text);box-shadow:0 2px 8px rgba(0,0,0,0.15);";
+  _collectionBanner.innerHTML = `\u{1F4C1} ${escapeHtml(coll?.name || "Collection")} \u2014 ${pins.length} pin${pins.length !== 1 ? "s" : ""} <button id="coll-view-close" style="border:none;background:none;cursor:pointer;font-size:16px;padding:0 2px;color:var(--text-dim);line-height:1;">\u2715</button>`;
+  state.map.getContainer().appendChild(_collectionBanner);
+  document.getElementById("coll-view-close").onclick = closeCollectionView;
+
+  _collectionMarkers = [];
+  let loaded = 0;
+  for (const cp of pins) {
+    try {
+      const team = await DB.getTeam(cp.team_id);
+      if (!team) continue;
+      const dk = unwrap_dek(team.wrapped_dek, team.secret_key);
+      const pin = decrypt_pin_data(cp.ciphertext, cp.nonce, dk);
+
+      const marker = L.marker([pin.lat, pin.lng], {
+        icon: pinIcon(pin.color || "#eab308"),
+        opacity: 0.85,
+        zIndexOffset: 200,
+      }).addTo(state.map);
+
+      marker.bindPopup(`<b>${escapeHtml(pin.title || "Untitled")}</b><br>${escapeHtml((pin.note || "").slice(0, 200))}<br><small style="color:var(--text-dim);">From: ${escapeHtml(team.name || cp.team_id.slice(0, 8))}</small>`);
+      _collectionMarkers.push(marker);
+      loaded++;
+    } catch (e) { console.warn("[map]", e.message); }
+  }
+
+  toast(`Loaded ${loaded} pin(s)`, "#16a34a");
+}
+
+export async function importCollectionAsMap(collectionId) {
+  const pins = await DB.getCollectionPins(collectionId);
+  if (!pins.length) { toast("No pins in collection", "#f97316"); return; }
+  const collections = await DB.getCollections();
+  const coll = collections.find(c => c.collection_id === collectionId);
+  const name = (coll?.name || "Collection") + " (imported)";
+
+  const sid = generate_uuid();
+  const communityKp = generate_user_keypair();
+  const memberKp = generate_user_keypair();
+  const dk = generate_dek();
+  await DB.saveTeam({
+    team_id: sid, name,
+    public_key: encode_hex(communityKp.public),
+    secret_key: encode_hex(memberKp.secret),
+    wrapped_dek: wrap_dek(dk, encode_hex(memberKp.public)),
+    community_public_key: encode_hex(communityKp.public),
+    community_secret_key: encode_hex(communityKp.secret),
+    community_wrapped_dek: wrap_dek(dk, encode_hex(communityKp.public)),
+  });
+  await DB.saveCommunity({
+    community_id: sid, name, description: "", genesis_public_key: state.signingPublicKey || "",
+    genesis_created_at: Date.now(),
+    members: state.signingPublicKey ? [{ pubkey: state.signingPublicKey, display_name: state.displayName, role: "founder", joined_at: Date.now(), vouched_by: null }] : [],
+    governance: { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" },
+    bounds: null, relay_nodes: [], visibility: "local",
+  });
+  await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: "Imported", color: "#2563eb", visible: true, opacity: 1.0 }]);
+
+  const prog = showProgressDialog(`Importing ${pins.length} pins...`);
+  let imported = 0;
+  for (const cp of pins) {
+    try {
+      const team = await DB.getTeam(cp.team_id);
+      if (!team) continue;
+      const dkOld = unwrap_dek(team.wrapped_dek, team.secret_key);
+      const pin = decrypt_pin_data(cp.ciphertext, cp.nonce, dkOld);
+      const enc = encrypt_pin_data(pin.title || "Untitled", pin.note || "", pin.lat, pin.lng, pin.color || "#2563eb", dk);
+      await DB.savePin({
+        pin_id: generate_uuid(), team_id: sid, layer_id: null,
+        ciphertext: enc.ciphertext, nonce: enc.nonce, created_at: Date.now(), map_zoom: 13,
+      });
+      imported++;
+      if (imported % 10 === 0) prog.update(Math.round(imported / pins.length * 90), `${imported}/${pins.length}`);
+    } catch (e) { console.warn("[map]", e.message); }
+  }
+
+  prog.update(100, "Done");
+  setTimeout(prog.done, 600);
+
+  window._names[sid] = name;
+  await window._loadSetList();
+  await window._switchSet(sid);
+  toast(`Created: ${name} \u2014 ${imported} pins`, "#16a34a");
 }
 
 // Re-exports from extracted modules (for consumers like main.js)

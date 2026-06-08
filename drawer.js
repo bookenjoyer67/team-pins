@@ -29,6 +29,7 @@ const SECTIONS = [
       { id: "maps", icon: "🗺", label: "Maps", action: () => Map.showSetsModal() },
       { id: "layers", icon: "📑", label: "Layers", action: () => Map.showLayersModal() },
       { id: "schemas", icon: "📋", label: "Schemas", action: () => Map.showSchemaManagerModal() },
+      { id: "collections", icon: "📁", label: "Collections", action: () => Map.showCollectionsModal() },
     ],
   },
   {
@@ -74,6 +75,9 @@ const SECTIONS = [
       { id: "sound", icon: "🔊", label: "Sound",
         active: () => window._isSoundEnabled?.() || false,
         action: () => { const on = window._toggleSound?.(); toast(on ? "Sound ON" : "Sound MUTED", on ? "#16a34a" : "#9ca3af"); } },
+      { id: "push", icon: "🔔", label: "Push",
+        active: () => localStorage.getItem("pins-push-enabled") === "true",
+        action: () => { const on = window._togglePush?.(); toast(on ? "Push ON" : "Push OFF", on ? "#16a34a" : "#9ca3af"); } },
       { id: "theme", icon: "🌓", label: "Theme", action: () => window._toggleTheme?.() },
       { id: "language", icon: "🌐", label: "Language", action: showLangChooser },
       { id: "relay", icon: "⚡", label: "Relay", action: () => window._showIceDialog?.() },
