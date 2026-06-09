@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use futures_util::StreamExt;
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 use web_push::{
     ContentEncoding, HyperWebPushClient, SubscriptionInfo,
-    VapidSignatureBuilder, WebPushClient, WebPushMessageBuilder,
+    VapidSignatureBuilder, WebPushClient, WebPushMessageBuilder, WebPushMessage,
 };
 
 use crate::config::PushConfig;
@@ -222,14 +223,23 @@ pub async fn send_push_to_offline_members(
     };
     let subject = state.config.push.vapid_subject.as_deref().unwrap_or("mailto:admin@example.com");
 
-    let mut sent = 0usize;
+    let payload = serde_json::json!({
+        "title": title,
+        "body": body,
+        "tag": tag,
+        "url": url,
+        "icon": "/icon-192.png",
+    });
+    let payload_bytes = serde_json::to_vec(&payload).unwrap_or_default();
+
+    let mut send_list: Vec<(WebPushMessage, String)> = Vec::new();
+
     for member in &community.members {
-        if sent >= state.config.push.batch_max {
+        if send_list.len() >= state.config.push.batch_max {
             info!("[push] batch limit reached ({}), {} remaining", state.config.push.batch_max,
-                community.members.len().saturating_sub(sent));
+                community.members.len().saturating_sub(send_list.len()));
             break;
         }
-        // Skip online members — they get the data via WebSocket
         if is_online(room, &member.pubkey) {
             continue;
         }
@@ -238,25 +248,18 @@ pub async fn send_push_to_offline_members(
             continue;
         }
 
-        // Debounce: skip if pushed recently
-        let mut debouncer = DEBOUNCER.get().unwrap().write().await;
-        if let Some(&last) = debouncer.get(&member.pubkey) {
-            if now.saturating_sub(last) < min_interval_ms {
-                continue;
+        {
+            let mut debouncer = DEBOUNCER.get().unwrap().write().await;
+            if let Some(&last) = debouncer.get(&member.pubkey) {
+                if now.saturating_sub(last) < min_interval_ms {
+                    continue;
+                }
             }
+            debouncer.insert(member.pubkey.clone(), now);
         }
 
-        let payload = serde_json::json!({
-            "title": title,
-            "body": body,
-            "tag": tag,
-            "url": url,
-            "icon": "/icon-192.png",
-        });
-        let payload_bytes = serde_json::to_vec(&payload).unwrap_or_default();
-
         for sub in &subs {
-            if sent >= state.config.push.batch_max { break; }
+            if send_list.len() >= state.config.push.batch_max { break; }
             let sub_info = SubscriptionInfo::new(
                 sub.endpoint.as_str(),
                 sub.p256dh.as_str(),
@@ -279,28 +282,38 @@ pub async fn send_push_to_offline_members(
             };
             builder.set_vapid_signature(vapid);
 
-            let message = match builder.build() {
-                Ok(m) => m,
-                Err(e) => { warn!("[push] message build failed: {}", e); continue; }
-            };
-
-            match client.send(message).await {
-                Ok(_) => {
-                    sent += 1;
-                    debouncer.insert(member.pubkey.clone(), now);
-                    info!("[push] sent to {} ({}), total sent: {}", &member.pubkey[..usize::min(16, member.pubkey.len())], &sub.endpoint[..usize::min(40, sub.endpoint.len())], sent);
-                }
-                Err(ref e) if is_stale_push_error(e) => {
-                    warn!("[push] stale endpoint (410): {}", &sub.endpoint[..usize::min(40, sub.endpoint.len())]);
-                    state.store.remove_stale_subscription(&sub.endpoint).await;
-                }
-                Err(e) => {
-                    warn!("[push] send failed to {}: {}", &sub.endpoint[..usize::min(40, sub.endpoint.len())], e);
-                }
+            match builder.build() {
+                Ok(m) => { send_list.push((m, sub.endpoint.clone())); }
+                Err(e) => { warn!("[push] message build failed: {}", e); }
             }
         }
-        drop(debouncer);
     }
+
+    if send_list.is_empty() {
+        return;
+    }
+
+    let total = send_list.len();
+    info!("[push] sending {} notifications concurrently for community {}", total, community_id);
+
+    futures_util::stream::iter(send_list)
+        .for_each_concurrent(10, |(message, endpoint)| async move {
+            match client.send(message).await {
+                Ok(_) => {
+                    info!("[push] sent to {}", &endpoint[..usize::min(40, endpoint.len())]);
+                }
+                Err(ref e) if is_stale_push_error(e) => {
+                    warn!("[push] stale endpoint (410): {}", &endpoint[..usize::min(40, endpoint.len())]);
+                    state.store.remove_stale_subscription(&endpoint).await;
+                }
+                Err(ref e) => {
+                    warn!("[push] send failed to {}: {}", &endpoint[..usize::min(40, endpoint.len())], e);
+                }
+            }
+        })
+        .await;
+
+    info!("[push] batch complete: {} notifications dispatched", total);
 }
 
 /// Send a push notification to a single specific member pubkey (for add/remove member).
@@ -338,6 +351,8 @@ pub async fn notify_single_member(
     });
     let payload_bytes = serde_json::to_vec(&payload).unwrap_or_default();
 
+    let mut send_list: Vec<(WebPushMessage, String)> = Vec::new();
+
     for sub in &subs {
         let sub_info = SubscriptionInfo::new(
             sub.endpoint.as_str(),
@@ -360,23 +375,32 @@ pub async fn notify_single_member(
         };
         builder.set_vapid_signature(vapid);
 
-        let message = match builder.build() {
-            Ok(m) => m,
-            Err(e) => { warn!("[push] notify build failed: {}", e); continue; }
-        };
-        match client.send(message).await {
-            Ok(_) => {
-                info!("[push] notify sent to {}", &sub.endpoint[..usize::min(40, sub.endpoint.len())]);
-            }
-            Err(ref e) if is_stale_push_error(e) => {
-                warn!("[push] notify stale (410): {}", &sub.endpoint[..usize::min(40, sub.endpoint.len())]);
-                state.store.remove_stale_subscription(&sub.endpoint).await;
-            }
-            Err(e) => {
-                warn!("[push] notify failed: {}", e);
-            }
+        match builder.build() {
+            Ok(m) => { send_list.push((m, sub.endpoint.clone())); }
+            Err(e) => { warn!("[push] notify build failed: {}", e); }
         }
     }
+
+    if send_list.is_empty() {
+        return;
+    }
+
+    futures_util::stream::iter(send_list)
+        .for_each_concurrent(10, |(message, endpoint)| async move {
+            match client.send(message).await {
+                Ok(_) => {
+                    info!("[push] notify sent to {}", &endpoint[..usize::min(40, endpoint.len())]);
+                }
+                Err(ref e) if is_stale_push_error(e) => {
+                    warn!("[push] notify stale (410): {}", &endpoint[..usize::min(40, endpoint.len())]);
+                    state.store.remove_stale_subscription(&endpoint).await;
+                }
+                Err(ref e) => {
+                    warn!("[push] notify failed to {}: {}", &endpoint[..usize::min(40, endpoint.len())], e);
+                }
+            }
+        })
+        .await;
 }
 
 #[cfg(test)]
