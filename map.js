@@ -157,7 +157,7 @@ async function checkStorageQuota(neededBytes, label) {
   } catch (e) { console.warn("[map]", e.message); }
 }
 
-async function compressMedia(file, onProgress) {
+export async function compressMedia(file, onProgress) {
   if (
     !file.type.startsWith("image/") ||
     file.type.includes("gif") ||
@@ -691,7 +691,8 @@ export async function switchSet(sid) {
     // Auto-migration: only for legacy records where community_secret_key was never stored
     if (t.secret_key && !("community_secret_key" in t)) {
       const memberKp = generate_user_keypair();
-      const dk = unwrap_dek(t.wrapped_dek, t.secret_key);
+      let dk = null;
+      try { dk = unwrap_dek(t.wrapped_dek, t.secret_key); } catch (e) { console.warn("[map] migration unwrap failed for", sid, e.message); }
       if (dk) {
         t.community_secret_key = t.secret_key;
         t.community_public_key = t.public_key;
@@ -702,7 +703,8 @@ export async function switchSet(sid) {
         await DB.saveTeam(t);
       }
     }
-    state.dek = unwrap_dek(t.wrapped_dek, t.secret_key);
+    state.dek = null;
+    try { state.dek = unwrap_dek(t.wrapped_dek, t.secret_key); } catch (e) { console.warn("[map] DEK unwrap failed for", sid, e.message); }
   }
   state.currentCommunity = await DB.getCommunity(sid);
   await loadLayersForSet(sid);
@@ -3237,6 +3239,7 @@ export async function updatePin(pid, title, note, color, media, emoji, layerId, 
 }
 
 export function showEditPinForm(pid) {
+  if (window._showEditPinForm) return window._showEditPinForm(pid);
   if (!state.dek || !state.currentSet) return;
   DB.getPins(state.currentSet)
     .then((pins) => {
@@ -3490,6 +3493,7 @@ function buildPinFormHTML(opts) {
 }
 
 export function showPinForm(lat, lng) {
+  if (window._showPinForm) return window._showPinForm(lat, lng);
   const gov = {
     ttl_enabled: false, ttl_base_mins: 10080, ttl_vote_mins: 360,
     ttl_min_mins: 60, ttl_max_mins: 43200, anonymous_posting: "forbidden",

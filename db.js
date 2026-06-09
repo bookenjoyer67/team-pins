@@ -1,6 +1,6 @@
 // IndexedDB storage
 const DB_NAME = "team-pins";
-const DB_VERSION = 12;
+const DB_VERSION = 13;
 
 let db = null;
 let _migrationSigningPubkey = null;
