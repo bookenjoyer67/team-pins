@@ -6,7 +6,11 @@ const _gossipListeners = new Map(); // queryId → handler
 const _gossipMultiHandler = (resp) => {
   for (const [qid, cb] of _gossipListeners) { try { cb(resp); } catch(_) {} }
 };
-const discoveryCache = new DeferredBoundedMap(500, 600_000);  // 500 max, 10min TTL
+let _discoveryCache = null;
+function getDiscoveryCache() {
+  if (!_discoveryCache) _discoveryCache = new DeferredBoundedMap(500, 600_000);
+  return _discoveryCache;
+}  // 500 max, 10min TTL
 // Register global handler once
 if (typeof window !== "undefined") {
   window._gossipResponseHandler = _gossipMultiHandler;
@@ -46,9 +50,9 @@ export function handleCapabilityAnnounce(msg) {
   if (!msg || !msg.communities) return;
   for (const c of msg.communities) {
     const key = c.community_id;
-    const existing = discoveryCache.get(key);
+    const existing = getDiscoveryCache().get(key);
     if (!existing || existing.ts < msg.ts) {
-      discoveryCache.set(key, { ...c, ts: msg.ts, peer_id: msg.peer_id });
+      getDiscoveryCache().set(key, { ...c, ts: msg.ts, peer_id: msg.peer_id });
     }
   }
   window._renderUI?.();
@@ -212,11 +216,11 @@ export async function handleQuery(query, fromConnId) {
 }
 
 export function getDiscoveredCommunities() {
-  return discoveryCache.values().sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  return getDiscoveryCache().values().sort((a, b) => (b.ts || 0) - (a.ts || 0));
 }
 
 export function clearDiscoveryCache() {
-  discoveryCache.clear();
+  getDiscoveryCache().clear();
 }
 
 let _meshBroadcast = null;
@@ -239,7 +243,7 @@ export function notifyMapPan(lat, lng, zoom) {
     for (const r of responses) {
       if (r.results) {
         for (const disc of r.results) {
-          discoveryCache.set(disc.community_id, { ...disc, ts: Date.now() });
+          getDiscoveryCache().set(disc.community_id, { ...disc, ts: Date.now() });
         }
         window._showDiscoveryBanner?.(r.results);
       }
