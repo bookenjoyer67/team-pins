@@ -2,6 +2,7 @@ node_modules/
 target/
 *.wasm
 !dist/assets/*.wasm
+!dist/_app/immutable/assets/*.wasm
 *.apk
 src-tauri/gen/
 *.deb
