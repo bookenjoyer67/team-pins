@@ -17,7 +17,7 @@ if (typeof globalThis.localStorage === "undefined") {
 }
 
 // Load the WASM module synchronously
-const wasmPath = resolve(import.meta.dirname, "../dist/assets/e2e_core_bg-B1xls2O6.wasm");
+const wasmPath = resolve(import.meta.dirname, "../core/pkg/e2e_core_bg.wasm");
 const wasmBuffer = readFileSync(wasmPath);
 
 // Initialize the WASM module

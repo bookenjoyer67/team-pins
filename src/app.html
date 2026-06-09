@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+	<meta name="theme-color" content="#2563eb" />
+	<meta name="apple-mobile-web-app-capable" content="yes" />
+	<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+	<meta name="mobile-web-app-capable" content="yes" />
+	<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://*.tile.openstreetmap.org https://server.arcgisonline.com blob:; connect-src 'self' https: wss: https://photon.komoot.io https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://server.arcgisonline.com https://build.protomaps.com https://basemaps.cartocdn.com https://*.basemaps.cartocdn.com https://routing.openstreetmap.de https://overpass-api.de https://overpass.kumi.systems https://mqtt.meshtastic.org https://metered.ca ws://localhost:9000 ws://127.0.0.1:9000 ws://localhost:5173 ws://127.0.0.1:5173; media-src 'self' blob:; child-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'; font-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none';" />
+	<link rel="manifest" href="/manifest.json" />
+	<link rel="icon" href="/globe.svg" />
+	<link rel="apple-touch-icon" href="/icon-192.png" />
+	<link rel="stylesheet" href="/leaflet/leaflet.css" />
+	<link rel="stylesheet" href="/leaflet/leaflet.draw.css" />
+	<link rel="stylesheet" href="/leaflet/MarkerCluster.css" />
+	<link rel="stylesheet" href="/leaflet/MarkerCluster.Default.css" />
+	<script>window.process=window.process||{env:{},cwd:()=>'/',platform:'browser',version:'v0.0.0'};window.Buffer=window.Buffer||{isBuffer:()=>!1}</script>
+	%sveltekit.head%
+</head>
+<body data-sveltekit-prerender="true">
+	<script src="/leaflet/leaflet.js"></script>
+	<script src="/leaflet/leaflet.draw.js"></script>
+	<script src="/leaflet/leaflet.markercluster.js"></script>
+	<div style="display:contents">%sveltekit.body%</div>
+</body>
+</html>

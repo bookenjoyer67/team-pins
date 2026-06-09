@@ -46,4 +46,6 @@ android/local.properties
 android/.gradle/
 
 # piggpin exports
-*.piggpin
+*.piggpin.svelte-kit/
+build/
+stl-metrobus.piggpin

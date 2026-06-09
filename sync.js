@@ -1,14 +1,14 @@
 import init, {
-  generate_user_keypair, generate_dek, generate_uuid,
+  generate_user_keypair, generate_user_keypair_from_password, generate_dek, generate_uuid,
   wrap_dek, unwrap_dek, encrypt_pin_data, decrypt_pin_data,
   encrypt_geojson, decrypt_geojson, encode_hex, decode_hex,
   encrypt_raw_bytes, decrypt_raw_bytes,
   encrypt_with_password, decrypt_with_password,
   encrypt_bytes_with_password, decrypt_bytes_with_password,
-  compress_gzip, decompress_gzip,
+  compress_gzip, decompress_gzip, compress_gzip_max,
   base64_encode, base64_decode, base64url_encode,
   compress_gzip_to_base64,
-  compact_and_pack_json,
+  compact_and_pack_json, compact_pack_gzip_json, serialize_container, deserialize_container,
   sign, verify,
   generate_qr_svg,
 } from "./core/pkg/e2e_core.js";
@@ -162,7 +162,7 @@ function packHexFields(data) {
   });
 }
 
-function unpackHexFields(data) {
+export function unpackHexFields(data) {
   return walkHexFields(data, v => {
     if (/^[0-9a-fA-F]+$/.test(v) && v.length % 2 === 0) return v; // already hex (old format)
     try { return encode_hex(base64ToBytes(v)); } catch (_) { return v; }
@@ -1551,7 +1551,7 @@ export async function importFromCompressed(compressed) {
   } catch (_) { return false; }
 }
 
-async function doImport(data) {
+export async function doImport(data) {
   const sid = generate_uuid();
   if (data.keys) {
     const { public_key, secret_key, wrapped_dek, key_derivation, community_public_key, community_secret_key, community_wrapped_dek } = data.keys || {};

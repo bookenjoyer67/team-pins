@@ -28,6 +28,9 @@
     "@meshtastic/protobufs": "^2.7.18",
     "@meshtastic/transport-web-bluetooth": "^0.1.5",
     "@meshtastic/transport-web-serial": "^0.2.5",
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.64.0",
+    "@sveltejs/vite-plugin-svelte": "^7.1.2",
     "@tauri-apps/api": "^2.11.0",
     "jsqr": "^1.4.0",
     "leaflet": "^1.9.4",
@@ -37,6 +40,7 @@
     "mp4box": "^2.3.0",
     "path-browserify": "^1.0.1",
     "pmtiles": "^3.2.1",
+    "svelte": "^5.56.3",
     "ws": "^8.20.0"
   },
   "devDependencies": {

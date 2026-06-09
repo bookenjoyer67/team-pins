@@ -412,7 +412,7 @@ export async function showDiscoverModal() {
 
             const existing = await DB.getTeam(sid);
             if (!existing) {
-              await DB.saveTeam({ team_id: sid, name: result.name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: "", community_wrapped_dek: result.wrapped_dek || "" });
+               await DB.saveTeam({ team_id: sid, name: result.name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: "", community_wrapped_dek: result.wrapped_dek || "" });
               await DB.saveCommunity({
                 community_id: sid, name: result.name, description: result.description || "",
                 genesis_public_key: result.genesis_public_key || "",
