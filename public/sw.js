@@ -7,6 +7,7 @@ const TILE_MAX = 5000;
 let _tileAccess = new Map();
 
 self.addEventListener("install", (e) => {
+  self.skipWaiting();
   e.waitUntil(
     caches.open(APP_CACHE).then((cache) => {
       const valid = PRECACHE_URLS.filter((u) => u && u !== "__PRECACHE_URLS__");
@@ -14,7 +15,6 @@ self.addEventListener("install", (e) => {
       return cache.addAll(valid).catch((err) => {
         console.warn("[sw] precache addAll error:", err.message);
       });
-    }).then(() => self.skipWaiting())
     })
   );
 });
