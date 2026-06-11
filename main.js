@@ -527,6 +527,7 @@ wasmReady.then(async () => {
     }
   }
 
+  const isPicker = new URLSearchParams(location.search).get("picker") === "1";
   if (isEmbed) {
     window.addEventListener("message", (e) => {
       if (e.data?.type === "komun:identity" && e.data.displayName) {
@@ -536,10 +537,6 @@ wasmReady.then(async () => {
           window._komunPassword = e.data.communityPassword;
         }
       }
-      if (e.data?.type === "piggpin:pick-location") {
-        window._pickMode = true;
-        state.placingPin = true;
-      }
     });
     if (window.location.hash.startsWith("#community=")) {
       window._komunPassword = null;
@@ -547,6 +544,19 @@ wasmReady.then(async () => {
     try {
       window.parent.postMessage({ type: "piggpin:ready" }, "*");
     } catch (_) {}
+    if (isPicker) {
+      window._pickMode = true;
+      document.body.classList.add("picking");
+      const enable = () => {
+        if (state.currentSet && state.map) {
+          state.placingPin = true;
+          state.map.getContainer().style.cursor = "crosshair";
+        } else {
+          setTimeout(enable, 500);
+        }
+      };
+      setTimeout(enable, 1000);
+    }
   }
 
   if (window.location.hash.startsWith("#join=")) {

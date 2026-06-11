@@ -30,6 +30,7 @@ async function _doInit() {
 			return hasParam || window.self !== window.top;
 		} catch (_) { return false; }
 	})();
+	const isPicker = new URLSearchParams(location.search).get('picker') === '1';
 	window._isEmbed = isEmbed;
 	if (isEmbed) document.body.classList.add('embed');
 
@@ -116,10 +117,6 @@ async function _doInit() {
 					window._komunPassword = e.data.communityPassword;
 				}
 			}
-			if (e.data?.type === 'piggpin:pick-location') {
-				window._pickMode = true;
-				state.placingPin = true;
-			}
 		});
 		if (window.location.hash.startsWith('#community=')) {
 			window._komunPassword = null;
@@ -127,6 +124,19 @@ async function _doInit() {
 		try {
 			window.parent.postMessage({ type: 'piggpin:ready' }, '*');
 		} catch (_) {}
+		if (isPicker) {
+			window._pickMode = true;
+			document.body.classList.add('picking');
+			const enable = () => {
+				if (state.currentSet && state.map) {
+					state.placingPin = true;
+					state.map.getContainer().style.cursor = 'crosshair';
+				} else {
+					setTimeout(enable, 500);
+				}
+			};
+			setTimeout(enable, 1000);
+		}
 	}
 
 	console.log('[init] App initialized');

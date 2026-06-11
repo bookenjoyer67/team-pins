@@ -773,3 +773,14 @@ body.embed #menu-toggle { display: none !important; }
 body.embed #offline-bar { display: none !important; }
 body.embed #install-banner { display: none !important; }
 body.embed #app-loader { display: none !important; }
+/* Picker mode — bare map, crosshair cursor */
+body.embed.picking #tabs-row { display: none !important; }
+body.embed.picking #peer-list { display: none !important; }
+body.embed.picking #history-panel { display: none !important; }
+body.embed.picking #piggpin-watermark { display: none !important; }
+body.embed.picking .drawer-container { display: none !important; }
+body.embed.picking .leaflet-control-zoom { display: none !important; }
+body.embed.picking .leaflet-control-layers { display: none !important; }
+body.embed.picking .leaflet-control-attribution { font-size: 8px !important; opacity: 0.5; }
+body.embed.picking #map-container { cursor: crosshair !important; }
+body.embed.picking #map-container::after { display: none; }
