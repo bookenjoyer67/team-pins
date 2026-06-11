@@ -231,7 +231,15 @@ async function processHashJoin(hash, pendingB64) {
 			let cidUuid, name, pw, relayUrl = '', embeddedCommunitySk = null;
 			let focusLat = null, focusLng = null, focusZoom = 15;
 
-			if (buf && buf.length >= 19) {
+			if (raw.startsWith('{')) {
+				// JSON format
+				try {
+					const payload = JSON.parse(raw);
+					cidUuid = payload.cid; name = payload.n; pw = payload.pw === 'true' || payload.pw === true;
+					relayUrl = payload.r || '';
+					embeddedCommunitySk = payload.sk || null;
+				} catch (_) { continue; }
+			} else if (buf && buf.length >= 19) {
 				// Binary format
 				let pos = 0;
 				const nlen = buf[pos++];
@@ -272,14 +280,6 @@ async function processHashJoin(hash, pendingB64) {
 						if (parts.length >= 3 && !isNaN(v)) focusZoom = v;
 					}
 				}
-			} else {
-				// JSON format
-				try {
-					const payload = JSON.parse(raw);
-					cidUuid = payload.cid; name = payload.n; pw = !!payload.pw;
-					relayUrl = payload.r || '';
-					embeddedCommunitySk = payload.sk || null;
-				} catch (_) { continue; }
 			}
 
 			if (!cidUuid || !name) continue;
