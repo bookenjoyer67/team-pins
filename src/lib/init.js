@@ -238,6 +238,9 @@ async function processHashJoin(hash, pendingB64) {
 					cidUuid = payload.cid; name = payload.n; pw = payload.pw === 'true' || payload.pw === true;
 					relayUrl = payload.r || '';
 					embeddedCommunitySk = payload.sk || null;
+					if (payload.lat) focusLat = parseFloat(payload.lat);
+					if (payload.lon) focusLng = parseFloat(payload.lon);
+					if (payload.zoom) focusZoom = parseInt(payload.zoom, 10) || 15;
 				} catch (_) { continue; }
 			} else if (buf && buf.length >= 19) {
 				// Binary format
