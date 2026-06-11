@@ -117,7 +117,17 @@ function openDB() {
     };
     req.onsuccess = (e) => { db = e.target.result; resolve(db); };
     req.onerror = () => { _dbPromise = null; reject(req.error); };
-    req.onblocked = () => { _dbPromise = null; reject(new Error("Database blocked by another connection")); };
+    let _retryCount = 0;
+    req.onblocked = () => {
+      _dbPromise = null;
+      if (_retryCount < 5) {
+        _retryCount++;
+        setTimeout(() => openDB().then(resolve).catch(reject), 300 * _retryCount);
+      } else {
+        _retryCount = 0;
+        reject(new Error("Database blocked by another connection"));
+      }
+    };
 
     setTimeout(() => {
       if (!db) { _dbPromise = null; reject(new Error("Database open timed out")); }

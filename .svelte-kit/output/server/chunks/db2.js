@@ -89,9 +89,16 @@ function openDB() {
 			_dbPromise = null;
 			reject(req.error);
 		};
+		let _retryCount = 0;
 		req.onblocked = () => {
 			_dbPromise = null;
-			reject(/* @__PURE__ */ new Error("Database blocked by another connection"));
+			if (_retryCount < 5) {
+				_retryCount++;
+				setTimeout(() => openDB().then(resolve).catch(reject), 300 * _retryCount);
+			} else {
+				_retryCount = 0;
+				reject(/* @__PURE__ */ new Error("Database blocked by another connection"));
+			}
 		};
 		setTimeout(() => {
 			if (!db) {
