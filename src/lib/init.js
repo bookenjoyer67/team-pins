@@ -112,8 +112,14 @@ async function _doInit() {
 			if (e.data?.type === 'komun:identity' && e.data.displayName) {
 				state.displayName = e.data.displayName;
 				DB.saveProfile({ user_id: state.user.id, display_name: e.data.displayName });
+				if (e.data.communityPassword) {
+					window._komunPassword = e.data.communityPassword;
+				}
 			}
 		});
+		if (window.location.hash.startsWith('#community=')) {
+			window._komunPassword = null;
+		}
 		try {
 			window.parent.postMessage({ type: 'piggpin:ready' }, '*');
 		} catch (_) {}
@@ -291,22 +297,31 @@ async function processHashJoin(hash, pendingB64) {
 
 			// Join community
 			let passHash = null;
+			let plaintextPass = null;
 			if (pw) {
-				const pass = await new Promise(resolve => {
-					const ov = document.createElement('div');
-					ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;';
-					ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">${name} requires a password</h3><input id="hj-pwd" type="password" placeholder="Password" style="width:100%;padding:6px;margin-bottom:12px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);" /><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="hj-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;color:var(--text);">Cancel</button><button id="hj-ok" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">Join</button></div></div>`;
-					document.body.appendChild(ov);
-					ov.querySelector('#hj-cancel').onclick = () => { ov.remove(); resolve(null); };
-					ov.querySelector('#hj-ok').onclick = () => { ov.remove(); resolve(document.getElementById('hj-pwd').value); };
-					ov.onclick = e => { if (e.target === ov) { ov.remove(); resolve(null); } };
-					ov.querySelector('#hj-pwd').addEventListener('keydown', e => { if (e.key === 'Enter') ov.querySelector('#hj-ok').click(); });
-					ov.querySelector('#hj-pwd').focus();
-				});
-				if (!pass) { localStorage.removeItem('pending-community'); return false; }
-				const { hashCommunityPassword } = await import('../../dialogs.js');
-				passHash = await hashCommunityPassword(pass, cidUuid);
+				if (window._komunPassword) {
+					const { hashCommunityPassword } = await import('../../dialogs.js');
+					plaintextPass = window._komunPassword;
+					passHash = await hashCommunityPassword(plaintextPass, cidUuid);
+					delete window._komunPassword;
+				} else {
+					const pass = await new Promise(resolve => {
+						const ov = document.createElement('div');
+						ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:3000;display:flex;align-items:center;justify-content:center;';
+						ov.innerHTML = `<div style="background:var(--bg-card);padding:20px;border-radius:8px;min-width:300px;box-shadow:0 4px 20px rgba(0,0,0,0.3);"><h3 style="margin:0 0 8px;">${name} requires a password</h3><input id="hj-pwd" type="password" placeholder="Password" style="width:100%;padding:6px;margin-bottom:12px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;background:var(--bg-input);color:var(--text);" /><div style="display:flex;gap:8px;justify-content:flex-end;"><button id="hj-cancel" style="padding:6px 14px;border:1px solid var(--border);background:var(--border-light);border-radius:4px;cursor:pointer;color:var(--text);">Cancel</button><button id="hj-ok" style="padding:6px 14px;border:none;background:#2563eb;color:white;border-radius:4px;cursor:pointer;">Join</button></div></div>`;
+						document.body.appendChild(ov);
+						ov.querySelector('#hj-cancel').onclick = () => { ov.remove(); resolve(null); };
+						ov.querySelector('#hj-ok').onclick = () => { ov.remove(); resolve(document.getElementById('hj-pwd').value); };
+						ov.onclick = e => { if (e.target === ov) { ov.remove(); resolve(null); } };
+						ov.querySelector('#hj-pwd').addEventListener('keydown', e => { if (e.key === 'Enter') ov.querySelector('#hj-ok').click(); });
+						ov.querySelector('#hj-pwd').focus();
+					});
+					if (!pass) { localStorage.removeItem('pending-community'); return false; }
+					plaintextPass = pass;
+					passHash = await hashCommunityPassword(pass, cidUuid);
+				}
 			}
+			delete window._komunPassword;
 
 			const result = await Relay.joinCommunity(cidUuid, passHash, relayUrl);
 			if (!result || !result.public_key || !result.wrapped_dek) {
@@ -314,22 +329,32 @@ async function processHashJoin(hash, pendingB64) {
 				return false;
 			}
 
-			// Save team/community
 			const sid = result.community_id;
-			const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex } = await import('../../core/pkg/e2e_core.js');
-			const kp = generate_user_keypair();
-			const public_key = encode_hex(kp.public);
-			const secret_key = encode_hex(kp.secret);
-			let myWrappedDek = result.individually_wrapped_dek || '';
+			const isPasswordDerived = result.key_derivation === 'pbkdf2';
 
-			if (!myWrappedDek && embeddedCommunitySk) {
-				try {
-					const dk = unwrap_dek(result.wrapped_dek, embeddedCommunitySk);
-					if (dk) {
-						myWrappedDek = wrap_dek(dk, public_key);
-						Relay.rewrapMemberDek(sid, public_key, myWrappedDek);
-					}
-				} catch (_) {}
+			let public_key, secret_key, myWrappedDek;
+			if (isPasswordDerived && plaintextPass) {
+				const { generate_user_keypair_from_password, encode_hex } = await import('../../core/pkg/e2e_core.js');
+				const kp = generate_user_keypair_from_password(plaintextPass, result.community_id);
+				public_key = encode_hex(kp.public);
+				secret_key = encode_hex(kp.secret);
+				myWrappedDek = result.wrapped_dek || '';
+			} else {
+				const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex } = await import('../../core/pkg/e2e_core.js');
+				const kp = generate_user_keypair();
+				public_key = encode_hex(kp.public);
+				secret_key = encode_hex(kp.secret);
+				myWrappedDek = result.individually_wrapped_dek || '';
+
+				if (!myWrappedDek && embeddedCommunitySk) {
+					try {
+						const dk = unwrap_dek(result.wrapped_dek, embeddedCommunitySk);
+						if (dk) {
+							myWrappedDek = wrap_dek(dk, public_key);
+							Relay.rewrapMemberDek(sid, public_key, myWrappedDek);
+						}
+					} catch (_) {}
+				}
 			}
 
 			if (!myWrappedDek) {

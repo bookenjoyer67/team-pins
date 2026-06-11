@@ -532,8 +532,14 @@ wasmReady.then(async () => {
       if (e.data?.type === "komun:identity" && e.data.displayName) {
         state.displayName = e.data.displayName;
         DB.saveProfile({ user_id: state.user.id, display_name: e.data.displayName });
+        if (e.data.communityPassword) {
+          window._komunPassword = e.data.communityPassword;
+        }
       }
     });
+    if (window.location.hash.startsWith("#community=")) {
+      window._komunPassword = null;
+    }
     try {
       window.parent.postMessage({ type: "piggpin:ready" }, "*");
     } catch (_) {}
@@ -760,12 +766,20 @@ async function joinCommunityFromInvite({
   let plaintextPass = null;
 
   if (passwordProtected) {
-    const { hashCommunityPassword } = await import("./dialogs.js");
-    const pass = await promptRoomPassword("This community requires a password to join");
-    if (!pass) { localStorage.removeItem("pending-community"); return; }
-    plaintextPass = pass;
-    passHash = await hashCommunityPassword(pass, cidUuid);
+    if (window._komunPassword) {
+      const { hashCommunityPassword } = await import("./dialogs.js");
+      plaintextPass = window._komunPassword;
+      passHash = await hashCommunityPassword(plaintextPass, cidUuid);
+      delete window._komunPassword;
+    } else {
+      const { hashCommunityPassword } = await import("./dialogs.js");
+      const pass = await promptRoomPassword("This community requires a password to join");
+      if (!pass) { localStorage.removeItem("pending-community"); return; }
+      plaintextPass = pass;
+      passHash = await hashCommunityPassword(pass, cidUuid);
+    }
   }
+  delete window._komunPassword;
 
   let result;
   if (inviteToken) {
