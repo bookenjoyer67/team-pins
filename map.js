@@ -561,17 +561,6 @@ export function initMap() {
     if (!state.placingPin) return;
     state.placingPin = false;
     state.map.getContainer().style.cursor = "";
-    if (window._pickMode) {
-      window._pickMode = false;
-      try {
-        window.parent.postMessage({
-          type: "piggpin:location-picked",
-          lat: e.latlng.lat,
-          lng: e.latlng.lng,
-        }, "*");
-      } catch (_) {}
-      return;
-    }
     showPinForm(e.latlng.lat, e.latlng.lng);
   });
 
@@ -5869,6 +5858,38 @@ export function addWatermark() {
   el.textContent = "piggPin";
   el.title = "Made with piggPin";
   state.map.getContainer().appendChild(el);
+}
+
+export function addPickMarker(lat, lng) {
+  if (!state.map || !window._pickMode) return;
+  const icon = L.divIcon({
+    className: 'pick-marker',
+    html: '<div style="width:24px;height:24px;background:#2563eb;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.3);cursor:grab;"></div>',
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+  });
+  const marker = L.marker([lat, lng], { draggable: true, icon }).addTo(state.map);
+  const fmt = (v) => v.toFixed(5);
+  marker.bindTooltip(`${fmt(lat)}, ${fmt(lng)}`, {
+    permanent: true, direction: 'top', className: 'pick-tooltip'
+  }).openTooltip();
+  marker.on('dragend', () => {
+    const pos = marker.getLatLng();
+    marker.setTooltipContent(`${fmt(pos.lat)}, ${fmt(pos.lng)}`);
+    try {
+      window.parent.postMessage({
+        type: 'piggpin:location-picked',
+        lat: pos.lat,
+        lng: pos.lng,
+      }, '*');
+    } catch (_) {}
+  });
+  try {
+    window.parent.postMessage({
+      type: 'piggpin:location-picked',
+      lat, lng,
+    }, '*');
+  } catch (_) {}
 }
 
 export function reverseGeocode(lat, lng) {

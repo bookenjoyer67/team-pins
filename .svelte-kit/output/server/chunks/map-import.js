@@ -3588,17 +3588,6 @@ function initMap() {
 		if (!state.placingPin) return;
 		state.placingPin = false;
 		state.map.getContainer().style.cursor = "";
-		if (window._pickMode) {
-			window._pickMode = false;
-			try {
-				window.parent.postMessage({
-					type: "piggpin:location-picked",
-					lat: e.latlng.lat,
-					lng: e.latlng.lng
-				}, "*");
-			} catch (_) {}
-			return;
-		}
 		showPinForm(e.latlng.lat, e.latlng.lng);
 	});
 	map.on("contextmenu", (e) => {
@@ -9202,6 +9191,43 @@ function addWatermark() {
 	el.title = "Made with piggPin";
 	state.map.getContainer().appendChild(el);
 }
+function addPickMarker(lat, lng) {
+	if (!state.map || !window._pickMode) return;
+	const icon = leaflet_shim_default.divIcon({
+		className: "pick-marker",
+		html: "<div style=\"width:24px;height:24px;background:#2563eb;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.3);cursor:grab;\"></div>",
+		iconSize: [24, 24],
+		iconAnchor: [12, 12]
+	});
+	const marker = leaflet_shim_default.marker([lat, lng], {
+		draggable: true,
+		icon
+	}).addTo(state.map);
+	const fmt = (v) => v.toFixed(5);
+	marker.bindTooltip(`${fmt(lat)}, ${fmt(lng)}`, {
+		permanent: true,
+		direction: "top",
+		className: "pick-tooltip"
+	}).openTooltip();
+	marker.on("dragend", () => {
+		const pos = marker.getLatLng();
+		marker.setTooltipContent(`${fmt(pos.lat)}, ${fmt(pos.lng)}`);
+		try {
+			window.parent.postMessage({
+				type: "piggpin:location-picked",
+				lat: pos.lat,
+				lng: pos.lng
+			}, "*");
+		} catch (_) {}
+	});
+	try {
+		window.parent.postMessage({
+			type: "piggpin:location-picked",
+			lat,
+			lng
+		}, "*");
+	} catch (_) {}
+}
 function reverseGeocode(lat, lng) {
 	if (!navigator.onLine) return Promise.resolve(null);
 	const now = Date.now();
@@ -9800,4 +9826,4 @@ function showImportFromMapModal() {
 	};
 }
 //#endregion
-export { showCollectionPicker as $, geoJsonToLayer as A, loadSchemasForSet as At, pinIcon as B, deleteDrawing as C, renameLayer as Ct, downloadDrawingAttachment as D, toggleLayer as Dt, deleteSet as E, showLayersModal as Et, loadChains as F, refreshPinPopup as G, pushUndo as H, loadDrawings as I, renderChainStory as J, renameSet as K, loadPins as L, importCollectionAsMap as M, showSchemaEditorModal as Mt, initMap as N, showSchemaManagerModal as Nt, downloadPinMedia as O, buildCustomDataHTML as Ot, isMetricMode as P, showChainsModal as Q, loadSetList as R, createTutorial as S, refreshAllLayers as St, deleteSelected as T, showDiscoverModal as Tt, redo as U, placePin as V, refreshPinMarkerPopup as W, saveDrawing as X, reverseGeocode as Y, savePin as Z, closeCollectionView as _, updatePin as _t, addFreeDrawButton as a, showEditPinForm as at, createSet as b, deleteLayer as bt, addPinButton as c, showPinDetailModal as ct, addWatermark as d, showTemplatePicker as dt, showCollectionsModal as et, applyTimeFilter as f, startCurrentMapSlideshow as ft, clearSelection as g, undo as gt, canModifyDrawing as h, toggleMetricMode as ht, addDrawControl as i, showEditDrawingForm as it, geomMetrics as j, renderSchemaFieldsById as jt, generateLocationMarker as k, collectSchemaData as kt, addSelectionTool as l, showPinForm as lt, canDeletePin as m, switchSet as mt, showImportFromMapModal as n, showCreateTemplateModal as nt, addGridOverlay as o, showNarrativeChainBuilder as ot, buildDrawingPopup as p, startSlideshow as pt, renderAnnotationThread as q, addChainTool as r, showDrawingForm as rt, addMeasureButton as s, showNotificationsModal as st, importLayerFromMap as t, showCommunityDetails as tt, addTimeSlider as u, showSetsModal as ut, compressMedia as v, viewCollectionPins as vt, deletePin as w, setLayerOpacity as wt, createSetFromTemplate as x, loadLayersForSet as xt, compressVideoBytes as y, createLayer as yt, loadSubscribedPins as z };
+export { showChainsModal as $, generateLocationMarker as A, collectSchemaData as At, loadSubscribedPins as B, createTutorial as C, refreshAllLayers as Ct, deleteSet as D, showLayersModal as Dt, deleteSelected as E, showDiscoverModal as Et, isMetricMode as F, refreshPinMarkerPopup as G, placePin as H, loadChains as I, renderAnnotationThread as J, refreshPinPopup as K, loadDrawings as L, geomMetrics as M, renderSchemaFieldsById as Mt, importCollectionAsMap as N, showSchemaEditorModal as Nt, downloadDrawingAttachment as O, toggleLayer as Ot, initMap as P, showSchemaManagerModal as Pt, savePin as Q, loadPins as R, createSetFromTemplate as S, loadLayersForSet as St, deletePin as T, setLayerOpacity as Tt, pushUndo as U, pinIcon as V, redo as W, reverseGeocode as X, renderChainStory as Y, saveDrawing as Z, clearSelection as _, undo as _t, addFreeDrawButton as a, showEditDrawingForm as at, compressVideoBytes as b, createLayer as bt, addPickMarker as c, showNotificationsModal as ct, addTimeSlider as d, showSetsModal as dt, showCollectionPicker as et, addWatermark as f, showTemplatePicker as ft, canModifyDrawing as g, toggleMetricMode as gt, canDeletePin as h, switchSet as ht, addDrawControl as i, showDrawingForm as it, geoJsonToLayer as j, loadSchemasForSet as jt, downloadPinMedia as k, buildCustomDataHTML as kt, addPinButton as l, showPinDetailModal as lt, buildDrawingPopup as m, startSlideshow as mt, showImportFromMapModal as n, showCommunityDetails as nt, addGridOverlay as o, showEditPinForm as ot, applyTimeFilter as p, startCurrentMapSlideshow as pt, renameSet as q, addChainTool as r, showCreateTemplateModal as rt, addMeasureButton as s, showNarrativeChainBuilder as st, importLayerFromMap as t, showCollectionsModal as tt, addSelectionTool as u, showPinForm as ut, closeCollectionView as v, updatePin as vt, deleteDrawing as w, renameLayer as wt, createSet as x, deleteLayer as xt, compressMedia as y, viewCollectionPins as yt, loadSetList as z };

@@ -549,8 +549,8 @@ wasmReady.then(async () => {
       document.body.classList.add("picking");
       const enable = () => {
         if (state.currentSet && state.map) {
-          state.placingPin = true;
-          state.map.getContainer().style.cursor = "crosshair";
+          const center = state.map.getCenter();
+          Map.addPickMarker(center.lat, center.lng);
         } else {
           setTimeout(enable, 500);
         }
