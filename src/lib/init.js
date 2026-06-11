@@ -341,7 +341,7 @@ async function processHashJoin(hash, pendingB64) {
 			delete window._komunPassword;
 
 			const result = await Relay.joinCommunity(cidUuid, passHash, relayUrl);
-			if (!result || !result.public_key) {
+			if (!result || !result.community_id) {
 				localStorage.removeItem('pending-community');
 				return false;
 			}
@@ -382,7 +382,7 @@ async function processHashJoin(hash, pendingB64) {
 				Relay.requestMemberDek(sid, public_key);
 			}
 
-			await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || 'random', community_secret_key: embeddedCommunitySk || '', community_wrapped_dek: result.wrapped_dek || '' });
+			await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || 'random', community_secret_key: embeddedCommunitySk || '', community_wrapped_dek: result.wrapped_dek || myWrappedDek || '' });
 			await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || '', genesis_public_key: result.genesis_public_key || '', visibility: result.visibility || 'public', members: result.members || [], governance: result.governance || { contribution: 'open', validation: 'none', schema_authority: 'any_member', key_rotation: 'founder_only', fork_policy: 'allowed', join_policy: 'open' }, bounds: result.bounds || null, relay_nodes: [], relay_url: relayUrl || null });
 			await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: 'Default', color: '#2563eb', visible: true, opacity: 1.0 }]);
 			window._names[sid] = (result.name || name) + ' (← joined)';
@@ -393,8 +393,11 @@ async function processHashJoin(hash, pendingB64) {
 			const { switchSet, loadPins, loadDrawings, loadSetList } = await import('../../map.js');
 			await loadSetList();
 			await switchSet(sid);
-			await Relay.syncDelta(sid);
-			await loadPins();
+		await Relay.syncDelta(sid);
+		if (isUninitialized) {
+			await import('../../relay.js').then(r => r.publishCommunity(sid, true));
+		}
+		await loadPins();
 			await loadDrawings();
 
 			if (focusLat !== null && focusLng !== null && !isNaN(focusLat) && !isNaN(focusLng)) {

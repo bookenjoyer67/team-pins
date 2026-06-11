@@ -355,9 +355,9 @@
       "_e2e_core2.js",
       "_sync2.js",
       "_dialogs.js",
+      "_relay2.js",
       "_db2.js",
       "_map-routing2.js",
-      "_relay2.js",
       "_peer2.js"
     ],
     "css": [

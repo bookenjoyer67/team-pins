@@ -816,10 +816,11 @@ async function joinCommunityFromInvite({
   if (result && result.error === "wrong_password") { toast("Wrong password", "#dc2626"); return; }
 
   const isPasswordDerived = result && result.key_derivation === "pbkdf2";
+  const isUninitialized = !result.wrapped_dek && !result.individually_wrapped_dek;
   if (!result) {
     toast(relayUrl ? "Cannot reach community on relay — check relay URL" : "No relay connection — configure in ⚙ ICE settings", "#dc2626"); return;
   }
-  if (!result.public_key) {
+  if (!result.community_id) {
     toast("Community not found on relay", "#dc2626"); return;
   }
 
@@ -880,7 +881,7 @@ async function joinCommunityFromInvite({
 
   const existing = await DB.getTeam(sid);
   if (!existing) {
-    await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "", community_wrapped_dek: result.wrapped_dek || "" });
+    await DB.saveTeam({ team_id: sid, name: result.name || name, public_key, secret_key, wrapped_dek: myWrappedDek || result.wrapped_dek, key_derivation: result.key_derivation || "random", community_secret_key: embeddedCommunitySk || "", community_wrapped_dek: result.wrapped_dek || myWrappedDek || "" });
     await DB.saveCommunity({ community_id: sid, name: result.name || name, description: result.description || "", genesis_public_key: result.genesis_public_key || "",           visibility: result.visibility || "public", members: result.members || [], governance: result.governance || { contribution: "open", validation: "none", schema_authority: "any_member", key_rotation: "founder_only", fork_policy: "allowed", join_policy: "open" }, bounds: result.bounds || null, relay_nodes: [], relay_url: relayUrl || null });
     await DB.saveLayers(sid, [{ layer_id: generate_uuid(), name: "Default", color: "#2563eb", visible: true, opacity: 1.0 }]);
     window._names[sid] = (result.name || name) + " (← joined)";
@@ -892,6 +893,9 @@ async function joinCommunityFromInvite({
   // Caller-provided post-join hook (Block A: saveRelayToList; Block B: history.replaceState + loadSetList)
   await Map.switchSet(sid);
   await Relay.syncDelta(sid);
+  if (isUninitialized) {
+    import("./relay.js").then(r => r.publishCommunity(sid, true));
+  }
   await new Promise(r => setTimeout(r, postJoinDelay));
 
   // let caller do additional setup before loading pins
