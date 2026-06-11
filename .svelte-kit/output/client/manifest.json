@@ -1,0 +1,25 @@
+{
+  "id": "piggpin-app",
+  "name": "piggPin",
+  "short_name": "piggPin",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f3f4f6",
+  "theme_color": "#2563eb",
+  "description": "E2EE collaborative map — pins and drawings synced peer-to-peer",
+  "orientation": "any",
+  "categories": ["maps", "productivity", "utilities"],
+  "prefer_related_applications": false,
+  "shortcuts": [
+    { "name": "My Maps", "short_name": "Maps", "description": "Browse your saved maps", "url": "/?action=maps", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "New Map", "short_name": "New", "description": "Create a new map", "url": "/?action=new", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] },
+    { "name": "Join Map", "short_name": "Join", "description": "Join a peer's map session", "url": "/?action=join", "icons": [{ "src": "icon-192.png", "sizes": "192x192" }] }
+  ],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "screenshots": []
+}

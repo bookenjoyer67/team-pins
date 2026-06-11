@@ -305,19 +305,25 @@
 
 	// --- Install banner (PWA) ---
 	let installPrompt = null;
-	window.addEventListener('beforeinstallprompt', (e) => {
-		e.preventDefault();
-		installPrompt = e;
-		showInstallBanner();
-	});
-	window.addEventListener('appinstalled', () => {
-		installPrompt = null;
-		const b = document.getElementById('install-banner');
-		if (b) b.remove();
-	});
+	const _embed = (() => {
+		try { return new URLSearchParams(window.location.search).get('embed') === '1' || window.self !== window.top; }
+		catch (_) { return false; }
+	})();
+	if (!_embed) {
+		window.addEventListener('beforeinstallprompt', (e) => {
+			e.preventDefault();
+			installPrompt = e;
+			showInstallBanner();
+		});
+		window.addEventListener('appinstalled', () => {
+			installPrompt = null;
+			const b = document.getElementById('install-banner');
+			if (b) b.remove();
+		});
+	}
 
 	function showInstallBanner() {
-		if (window.matchMedia('(display-mode: standalone)').matches) return;
+		if (window._isEmbed) return;
 		if (localStorage.getItem('pins-install-dismissed')) return;
 		const existing = document.getElementById('install-banner');
 		if (existing) return;

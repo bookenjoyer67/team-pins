@@ -418,9 +418,11 @@
 				<button class="strip-btn" class:active={$measuring} onclick={toggleMeasure} title={t('measure') || 'Measure'}>📏</button>
 				<button class="strip-btn" class:active={$selectionActive} onclick={toggleSelect} title={t('select') || 'Select'}>⊞</button>
 				<button class="strip-btn" onclick={() => window._showChainsModal?.()} title={t('chains') || 'Chains'}>🔗</button>
-				<button class="strip-btn" onclick={toggleRoute} title={t('route') || 'Route'}>🛣</button>
-				<div class="sep"></div>
-				<button class="strip-btn" onclick={showSocial} title="Social">🌐</button>
+			<button class="strip-btn" onclick={toggleRoute} title={t('route') || 'Route'}>🛣</button>
+			{#if !window._isEmbed}
+			<div class="sep"></div>
+			<button class="strip-btn" onclick={showSocial} title="Social">🌐</button>
+			{/if}
 			{/if}
 			<button class="collapse-tri" onclick={() => stripMinimal.update(v => !v)} title={$stripMinimal ? 'Show tools' : 'Hide tools'}>
 				{$stripMinimal ? '▶' : '▼'}
@@ -444,12 +446,14 @@
 					<button class="sec-header" onclick={(e) => e.currentTarget.parentElement.classList.toggle('collapsed')}>
 						<span>Data</span><span class="arr">▼</span>
 					</button>
-					<div class="sec-body">
-						<button class="item" onclick={() => window._showSetsModal?.()}>🗺 Maps</button>
-						<button class="item" onclick={() => window._showLayersModal?.()}>📑 Layers</button>
-						<button class="item" onclick={() => window._showSchemaManagerModal?.()}>📋 Schemas</button>
-						<button class="item" onclick={() => window._showCollectionsModal?.()}>📁 Collections</button>
-					</div>
+				<div class="sec-body">
+					{#if !window._isEmbed}
+					<button class="item" onclick={() => window._showSetsModal?.()}>🗺 Maps</button>
+					{/if}
+					<button class="item" onclick={() => window._showLayersModal?.()}>📑 Layers</button>
+					<button class="item" onclick={() => window._showSchemaManagerModal?.()}>📋 Schemas</button>
+					<button class="item" onclick={() => window._showCollectionsModal?.()}>📁 Collections</button>
+				</div>
 				</div>
 				<!-- TOOLS -->
 				<div class="section">
@@ -479,37 +483,48 @@
 						<button class="item" onclick={() => window._showOfflineDownloadModal?.($map)}>📥 Offline</button>
 					</div>
 				</div>
-				<!-- SHARE -->
-				<div class="section">
-					<button class="sec-header" onclick={(e) => e.currentTarget.parentElement.classList.toggle('collapsed')}>
-						<span>Share</span><span class="arr">▼</span>
-					</button>
-					<div class="sec-body">
-						<button class="item" onclick={() => window._showHostModal?.()}>📡 Host</button>
-						<button class="item" onclick={() => window._showJoinModal?.()}>🤝 Join</button>
-						<button class="item" onclick={() => window._showDiscoverModal?.()}>🔍 Discover</button>
-						<button class="item" onclick={() => window._exportMap?.()}>📤 Export</button>
-						<button class="item" onclick={() => window._importMap?.()}>📥 Import</button>
-						<button class="item" onclick={() => window._shareMap?.()}>↗ Share</button>
-					</div>
+			<!-- SHARE -->
+			{#if window._isEmbed}
+			<div class="section">
+				<button class="sec-header" onclick={(e) => e.currentTarget.parentElement.classList.toggle('collapsed')}>
+					<span>Share</span><span class="arr">▼</span>
+				</button>
+				<div class="sec-body">
+					<button class="item" onclick={() => window._exportMap?.()}>📤 Export</button>
 				</div>
-				<!-- SETTINGS -->
-				<div class="section">
-					<button class="sec-header" onclick={(e) => e.currentTarget.parentElement.classList.toggle('collapsed')}>
-						<span>Settings</span><span class="arr">▼</span>
-					</button>
-					<div class="sec-body">
-						<button class="item" onclick={() => { const on = window._toggleSound?.(); window._svelteToast?.(on ? 'Sound ON' : 'Sound MUTED', on ? '#16a34a' : '#9ca3af'); }}>🔊 Sound</button>
-						<button class="item" onclick={() => { const on = window._togglePush?.(); window._svelteToast?.(on ? 'Push ON' : 'Push OFF', on ? '#16a34a' : '#9ca3af'); }}>🔔 Push</button>
-						<button class="item" onclick={() => { document.body.classList.toggle('dark'); localStorage.setItem('pins-theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }}>🌓 Theme</button>
-						<button class="item" onclick={() => window._showLangChooser?.()}>🌐 Language</button>
-						<button class="item" onclick={() => window._showIceServerDialog?.((servers) => { import('../../../../peer.js').then(p => p.setIceServers(servers)); })}>⚡ Relay</button>
-						<button class="item" onclick={() => window._rotateKeys?.()}>🔑 Rotate Keys</button>
-						<button class="item" onclick={() => window.open('https://github.com/bookenjoyer67/team-pins', '_blank')}>🐙 GitHub</button>
-						<button class="item" onclick={() => window._showDonateModal?.()}>💸 Donate</button>
-						<button class="item" onclick={() => window._checkForUpdates?.()}>↻ Check Updates</button>
-					</div>
+			</div>
+			{:else}
+			<div class="section">
+				<button class="sec-header" onclick={(e) => e.currentTarget.parentElement.classList.toggle('collapsed')}>
+					<span>Share</span><span class="arr">▼</span>
+				</button>
+				<div class="sec-body">
+					<button class="item" onclick={() => window._showHostModal?.()}>📡 Host</button>
+					<button class="item" onclick={() => window._showJoinModal?.()}>🤝 Join</button>
+					<button class="item" onclick={() => window._showDiscoverModal?.()}>🔍 Discover</button>
+					<button class="item" onclick={() => window._exportMap?.()}>📤 Export</button>
+					<button class="item" onclick={() => window._importMap?.()}>📥 Import</button>
+					<button class="item" onclick={() => window._shareMap?.()}>↗ Share</button>
 				</div>
+			</div>
+			<!-- SETTINGS -->
+			<div class="section">
+				<button class="sec-header" onclick={(e) => e.currentTarget.parentElement.classList.toggle('collapsed')}>
+					<span>Settings</span><span class="arr">▼</span>
+				</button>
+				<div class="sec-body">
+					<button class="item" onclick={() => { const on = window._toggleSound?.(); window._svelteToast?.(on ? 'Sound ON' : 'Sound MUTED', on ? '#16a34a' : '#9ca3af'); }}>🔊 Sound</button>
+					<button class="item" onclick={() => { const on = window._togglePush?.(); window._svelteToast?.(on ? 'Push ON' : 'Push OFF', on ? '#16a34a' : '#9ca3af'); }}>🔔 Push</button>
+					<button class="item" onclick={() => { document.body.classList.toggle('dark'); localStorage.setItem('pins-theme', document.body.classList.contains('dark') ? 'dark' : 'light'); }}>🌓 Theme</button>
+					<button class="item" onclick={() => window._showLangChooser?.()}>🌐 Language</button>
+					<button class="item" onclick={() => window._showIceServerDialog?.((servers) => { import('../../../../peer.js').then(p => p.setIceServers(servers)); })}>⚡ Relay</button>
+					<button class="item" onclick={() => window._rotateKeys?.()}>🔑 Rotate Keys</button>
+					<button class="item" onclick={() => window.open('https://github.com/bookenjoyer67/team-pins', '_blank')}>🐙 GitHub</button>
+					<button class="item" onclick={() => window._showDonateModal?.()}>💸 Donate</button>
+					<button class="item" onclick={() => window._checkForUpdates?.()}>↻ Check Updates</button>
+				</div>
+			</div>
+			{/if}
 			</div>
 		</div>
 	{/if}

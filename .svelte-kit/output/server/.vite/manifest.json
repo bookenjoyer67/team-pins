@@ -1,0 +1,412 @@
+{
+  ".svelte-kit/generated/server/internal.js": {
+    "file": "internal.js",
+    "name": "internal",
+    "src": ".svelte-kit/generated/server/internal.js",
+    "isEntry": true,
+    "imports": [
+      "_internal2.js",
+      "_internal.js"
+    ]
+  },
+  "_db2.js": {
+    "file": "chunks/db2.js",
+    "name": "db"
+  },
+  "_dialogs.js": {
+    "file": "chunks/dialogs.js",
+    "name": "dialogs",
+    "imports": [
+      "_e2e_core2.js",
+      "_i18n.js",
+      "_state.js"
+    ],
+    "dynamicImports": [
+      "_dialogs4.js",
+      "_peer2.js"
+    ]
+  },
+  "_dialogs4.js": {
+    "file": "chunks/dialogs4.js",
+    "name": "dialogs"
+  },
+  "_e2e_core2.js": {
+    "file": "chunks/e2e_core2.js",
+    "name": "e2e_core"
+  },
+  "_exports.js": {
+    "file": "chunks/exports.js",
+    "name": "exports",
+    "imports": [
+      "_index-server.js"
+    ]
+  },
+  "_gossip2.js": {
+    "file": "chunks/gossip2.js",
+    "name": "gossip",
+    "imports": [
+      "_db2.js",
+      "_state.js",
+      "_store-helpers.js"
+    ]
+  },
+  "_helpers.js": {
+    "file": "chunks/helpers.js",
+    "name": "helpers",
+    "imports": [
+      "_dialogs.js"
+    ]
+  },
+  "_i18n.js": {
+    "file": "chunks/i18n.js",
+    "name": "i18n"
+  },
+  "_index-server.js": {
+    "file": "chunks/index-server.js",
+    "name": "index-server"
+  },
+  "_internal.js": {
+    "file": "chunks/internal.js",
+    "name": "internal"
+  },
+  "_internal2.js": {
+    "file": "chunks/internal2.js",
+    "name": "internal",
+    "imports": [
+      "_index-server.js",
+      "_internal.js"
+    ]
+  },
+  "_leaflet-shim.js": {
+    "file": "chunks/leaflet-shim.js",
+    "name": "leaflet-shim"
+  },
+  "_map-import.js": {
+    "file": "chunks/map-import.js",
+    "name": "map-import",
+    "imports": [
+      "_e2e_core2.js",
+      "_db2.js",
+      "_dialogs.js",
+      "_gossip2.js",
+      "_helpers.js",
+      "_i18n.js",
+      "_leaflet-shim.js",
+      "_map-routing2.js",
+      "_state.js",
+      "_trust2.js"
+    ],
+    "dynamicImports": [
+      "_relay2.js",
+      "_gossip2.js",
+      "_e2e_core2.js",
+      "_map-import.js",
+      "_map-routing2.js"
+    ]
+  },
+  "_map-routing2.js": {
+    "file": "chunks/map-routing2.js",
+    "name": "map-routing",
+    "imports": [
+      "_dialogs.js",
+      "_i18n.js",
+      "_leaflet-shim.js",
+      "_state.js"
+    ]
+  },
+  "_peer2.js": {
+    "file": "chunks/peer2.js",
+    "name": "peer",
+    "imports": [
+      "_e2e_core2.js"
+    ]
+  },
+  "_relay2.js": {
+    "file": "chunks/relay2.js",
+    "name": "relay",
+    "imports": [
+      "_e2e_core2.js",
+      "_db2.js",
+      "_dialogs.js",
+      "_state.js"
+    ],
+    "dynamicImports": [
+      "_gossip2.js",
+      "_e2e_core2.js"
+    ]
+  },
+  "_shared.js": {
+    "file": "chunks/shared.js",
+    "name": "shared",
+    "imports": [
+      "_index-server.js"
+    ]
+  },
+  "_state.js": {
+    "file": "chunks/state.js",
+    "name": "state"
+  },
+  "_state3.js": {
+    "file": "chunks/state3.js",
+    "name": "state",
+    "imports": [
+      "_i18n.js",
+      "_state.js"
+    ]
+  },
+  "_store-helpers.js": {
+    "file": "chunks/store-helpers.js",
+    "name": "store-helpers",
+    "imports": [
+      "_e2e_core2.js"
+    ]
+  },
+  "_sync2.js": {
+    "file": "chunks/sync2.js",
+    "name": "sync",
+    "imports": [
+      "_e2e_core2.js",
+      "_db2.js",
+      "_dialogs.js",
+      "_peer2.js",
+      "_state.js",
+      "_store-helpers.js"
+    ],
+    "dynamicImports": [
+      "_gossip2.js",
+      "_e2e_core2.js",
+      "_trust2.js",
+      "_dialogs.js",
+      "_relay2.js",
+      "_map-import.js"
+    ]
+  },
+  "_trust2.js": {
+    "file": "chunks/trust2.js",
+    "name": "trust",
+    "imports": [
+      "_e2e_core2.js",
+      "_state.js"
+    ]
+  },
+  "_utils.js": {
+    "file": "chunks/utils.js",
+    "name": "utils",
+    "imports": [
+      "_shared.js"
+    ]
+  },
+  "core/pkg/e2e_core.js": {
+    "file": "chunks/e2e_core.js",
+    "name": "e2e_core",
+    "src": "core/pkg/e2e_core.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_e2e_core2.js"
+    ]
+  },
+  "db.js": {
+    "file": "chunks/db.js",
+    "name": "db",
+    "src": "db.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_db2.js"
+    ]
+  },
+  "dialogs.js": {
+    "file": "chunks/dialogs2.js",
+    "name": "dialogs",
+    "src": "dialogs.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_dialogs.js"
+    ]
+  },
+  "gossip.js": {
+    "file": "chunks/gossip.js",
+    "name": "gossip",
+    "src": "gossip.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_gossip2.js"
+    ]
+  },
+  "map-import.js": {
+    "file": "chunks/map-import2.js",
+    "name": "map-import",
+    "src": "map-import.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_map-import.js"
+    ]
+  },
+  "map-routing.js": {
+    "file": "chunks/map-routing.js",
+    "name": "map-routing",
+    "src": "map-routing.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_map-routing2.js"
+    ]
+  },
+  "map.js": {
+    "file": "chunks/map.js",
+    "name": "map",
+    "src": "map.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_dialogs.js",
+      "_map-import.js"
+    ]
+  },
+  "node_modules/@sveltejs/kit/src/runtime/app/server/remote/index.js": {
+    "file": "remote-entry.js",
+    "name": "remote-entry",
+    "src": "node_modules/@sveltejs/kit/src/runtime/app/server/remote/index.js",
+    "isEntry": true,
+    "imports": [
+      "_utils.js",
+      "_internal.js",
+      "_shared.js"
+    ]
+  },
+  "node_modules/@sveltejs/kit/src/runtime/components/svelte-5/error.svelte": {
+    "file": "entries/fallbacks/error.svelte.js",
+    "name": "entries/fallbacks/error.svelte",
+    "src": "node_modules/@sveltejs/kit/src/runtime/components/svelte-5/error.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index-server.js",
+      "_internal2.js",
+      "_internal.js",
+      "_exports.js",
+      "_shared.js"
+    ]
+  },
+  "node_modules/@sveltejs/kit/src/runtime/server/index.js": {
+    "file": "index.js",
+    "name": "index",
+    "src": "node_modules/@sveltejs/kit/src/runtime/server/index.js",
+    "isEntry": true,
+    "imports": [
+      "_index-server.js",
+      "_internal2.js",
+      "_utils.js",
+      "_internal.js",
+      "_exports.js",
+      "_shared.js"
+    ]
+  },
+  "peer.js": {
+    "file": "chunks/peer.js",
+    "name": "peer",
+    "src": "peer.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_peer2.js"
+    ]
+  },
+  "relay.js": {
+    "file": "chunks/relay.js",
+    "name": "relay",
+    "src": "relay.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_relay2.js"
+    ]
+  },
+  "src/lib/stores/dialogs.js": {
+    "file": "chunks/dialogs3.js",
+    "name": "dialogs",
+    "src": "src/lib/stores/dialogs.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_dialogs4.js"
+    ]
+  },
+  "src/routes/+layout.js": {
+    "file": "entries/pages/_layout.js",
+    "name": "entries/pages/_layout",
+    "src": "src/routes/+layout.js",
+    "isEntry": true
+  },
+  "src/routes/+layout.svelte": {
+    "file": "entries/pages/_layout.svelte.js",
+    "name": "entries/pages/_layout.svelte",
+    "src": "src/routes/+layout.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index-server.js",
+      "_e2e_core2.js",
+      "_db2.js",
+      "_helpers.js",
+      "_leaflet-shim.js",
+      "_peer2.js",
+      "_relay2.js",
+      "_state.js",
+      "_state3.js",
+      "_dialogs4.js",
+      "_sync2.js"
+    ],
+    "dynamicImports": [
+      "_state.js",
+      "_map-import.js",
+      "_e2e_core2.js",
+      "_sync2.js",
+      "_dialogs.js",
+      "_db2.js",
+      "_map-routing2.js",
+      "_relay2.js",
+      "_peer2.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_layout.BL-JwniY.css"
+    ]
+  },
+  "src/routes/+page.svelte": {
+    "file": "entries/pages/_page.svelte.js",
+    "name": "entries/pages/_page.svelte",
+    "src": "src/routes/+page.svelte",
+    "isEntry": true,
+    "imports": [
+      "_index-server.js",
+      "_leaflet-shim.js",
+      "_state.js",
+      "_state3.js"
+    ],
+    "dynamicImports": [
+      "_map-import.js"
+    ],
+    "css": [
+      "_app/immutable/assets/_page.DV2hPiWQ.css"
+    ]
+  },
+  "state.js": {
+    "file": "chunks/state2.js",
+    "name": "state",
+    "src": "state.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_state.js"
+    ]
+  },
+  "sync.js": {
+    "file": "chunks/sync.js",
+    "name": "sync",
+    "src": "sync.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_sync2.js"
+    ]
+  },
+  "trust.js": {
+    "file": "chunks/trust.js",
+    "name": "trust",
+    "src": "trust.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_trust2.js"
+    ]
+  }
+}

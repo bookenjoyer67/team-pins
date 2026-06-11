@@ -53,6 +53,7 @@ const isEmbed = (() => {
   } catch (_) { return false; }
 })();
 window._isEmbed = isEmbed;
+if (isEmbed) document.body.classList.add('embed');
 
 if ("serviceWorker" in navigator) {
   let swRefreshing = false;
@@ -253,9 +254,11 @@ function toggleTheme() {
 }
 initTheme();
 
-window.addEventListener("beforeinstallprompt", e => { console.log("[pwa] beforeinstallprompt fired"); e.preventDefault(); installPrompt = e; localStorage.removeItem("pins-install-dismissed"); renderUI(); showInstallBanner(); });
-console.log("[pwa] listening for beforeinstallprompt, supported:", "BeforeInstallPromptEvent" in window);
-window.addEventListener("appinstalled", () => { installPrompt = null; localStorage.setItem("pins-install-dismissed", Date.now()); renderUI(); });
+if (!isEmbed) {
+  window.addEventListener("beforeinstallprompt", e => { console.log("[pwa] beforeinstallprompt fired"); e.preventDefault(); installPrompt = e; localStorage.removeItem("pins-install-dismissed"); renderUI(); showInstallBanner(); });
+  console.log("[pwa] listening for beforeinstallprompt, supported:", "BeforeInstallPromptEvent" in window);
+  window.addEventListener("appinstalled", () => { installPrompt = null; localStorage.setItem("pins-install-dismissed", Date.now()); renderUI(); });
+}
 menuBtn.onclick = () => {
   topBar.classList.toggle("hidden");
   menuBtn.textContent = topBar.classList.contains("hidden") ? "☰" : "✕";
@@ -283,9 +286,7 @@ const wasmReady = init();
 
 Map.initMap();
 window._drawerActive = true;
-if (!isEmbed) {
-  Map.addPinButton();
-}
+Map.addPinButton();
 if (isEmbed) Map.addWatermark();
 
 initDrawer();
@@ -512,16 +513,30 @@ wasmReady.then(async () => {
       }
     }, 500);
 
-  if (isIOS()) setTimeout(showInstallBanner, 2000);
+  if (!isEmbed) {
+    if (isIOS()) setTimeout(showInstallBanner, 2000);
 
-  if (isMobile() && !isIOS()) {
-    setTimeout(showInstallBanner, 10000);
+    if (isMobile() && !isIOS()) {
+      setTimeout(showInstallBanner, 10000);
 
-    const onEngage = () => {
-      showInstallBanner();
-      document.removeEventListener("click", onEngage);
-    };
-    document.addEventListener("click", onEngage);
+      const onEngage = () => {
+        showInstallBanner();
+        document.removeEventListener("click", onEngage);
+      };
+      document.addEventListener("click", onEngage);
+    }
+  }
+
+  if (isEmbed) {
+    window.addEventListener("message", (e) => {
+      if (e.data?.type === "komun:identity" && e.data.displayName) {
+        state.displayName = e.data.displayName;
+        DB.saveProfile({ user_id: state.user.id, display_name: e.data.displayName });
+      }
+    });
+    try {
+      window.parent.postMessage({ type: "piggpin:ready" }, "*");
+    } catch (_) {}
   }
 
   if (window.location.hash.startsWith("#join=")) {
@@ -867,12 +882,12 @@ document.addEventListener("keydown", e => {
     if (key === "f" && !e.ctrlKey && !e.metaKey) { e.preventDefault(); window._slideshowToggleFullscreen?.(); return; }
   }
 
-  if (key === "n" || key === "N") { if (!isEmbed) { Map.placePin(); e.preventDefault(); } }
+  if (key === "n" || key === "N") { Map.placePin(); e.preventDefault(); }
   if (key === "Escape") { state.map?.closePopup(); Map.clearSelection?.(); e.preventDefault(); }
-  if (key === "Delete" || key === "Backspace") { if (!isEmbed) { Map.deleteSelected?.(); e.preventDefault(); } }
+  if (key === "Delete" || key === "Backspace") { Map.deleteSelected?.(); e.preventDefault(); }
   if (key === "d" && !e.ctrlKey && !e.metaKey) { toggleTheme(); e.preventDefault(); }
-  if (e.ctrlKey && key === "z") { if (!isEmbed) { Map.undo?.(); e.preventDefault(); } }
-  if (e.ctrlKey && (e.code === "KeyY" || (key === "z" && e.shiftKey))) { if (!isEmbed) { Map.redo?.(); e.preventDefault(); } }
+  if (e.ctrlKey && key === "z") { Map.undo?.(); e.preventDefault(); }
+  if (e.ctrlKey && (e.code === "KeyY" || (key === "z" && e.shiftKey))) { Map.redo?.(); e.preventDefault(); }
 });
 
 function wireGlobals() {

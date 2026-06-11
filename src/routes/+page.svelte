@@ -8,7 +8,9 @@
 </script>
 
 <MapContainer />
+{#if !window._isEmbed}
 <TopBar />
+{/if}
 <Drawer />
 <PeerList />
 <HistoryPanel />

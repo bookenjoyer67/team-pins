@@ -420,7 +420,7 @@ export function initMap() {
   state.map = map;
 
   // Streetview button — positioned right below the layer toggle
-  if (!window._isEmbed) {
+  {
     const svBtn = L.DomUtil.create("button", "leaflet-control");
     svBtn.textContent = "🚶";
     svBtn.title = `${t("streetView")}`;
@@ -2658,13 +2658,12 @@ export async function loadPins() {
           const layerBadge = marker._layerName
             ? `<br><span class="layer-badge" style="border-color:${marker._layerColor};">📑 ${escapeHtml(marker._layerName)}</span>`
             : "";
-          const isEmbed = window._isEmbed || false;
           const isAnon = marker._postedAnonymously;
           const isOwner = !isAnon && rowData.author_pubkey && rowData.author_pubkey === state.signingPublicKey;
           const myRole = state.myRole;
           const canModerate = myRole === "maintainer" || myRole === "founder";
-          const canEdit = !isEmbed && !isAnon && (isOwner || canModerate) && myRole !== "reader";
-          const canDelete = !isEmbed && !isAnon && (isOwner || canModerate) && myRole !== "reader";
+          const canEdit = !isAnon && (isOwner || canModerate) && myRole !== "reader";
+          const canDelete = !isAnon && (isOwner || canModerate) && myRole !== "reader";
           const anonBadge = isAnon ? `<br><span style="font-size:10px;color:var(--text-muted);">anonymous</span>` : "";
           const trustBadge = marker._pinTrustLevel && marker._pinTrustLevel !== "neutral"
             ? `<span style="font-size:9px;color:${marker._pinTrustColor || "#9ca3af"};margin-left:4px;">${marker._pinTrustLevel}</span>`
@@ -2685,7 +2684,7 @@ export async function loadPins() {
               ttlHtml = `<br><small style="color:var(--text-dim);">⏳ Expires in ${h > 0 ? h + "h " : ""}${m}m · ✅ ${up} ⚠️🚩 ${down}</small>`;
             }
           }
-          const hasAttestBtns = !isEmbed && !isAnon && state.signingSecretKey && rowData.author_pubkey !== state.signingPublicKey;
+          const hasAttestBtns = !isAnon && state.signingSecretKey && rowData.author_pubkey !== state.signingPublicKey;
           const voteBtns = hasAttestBtns
             ? `<br><button class="vote-up-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="padding:2px 8px;border:1px solid #16a34a;background:var(--bg-card);color:#16a34a;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">👍</button><button class="vote-down-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="padding:2px 8px;border:1px solid #f97316;background:var(--bg-card);color:#f97316;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">👎</button><button class="flag-btn" data-pid="${escapeHtml(rowData.pin_id)}" style="padding:2px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">🚩</button>`
             : "";
@@ -2728,15 +2727,14 @@ export function refreshPinMarkerPopup(marker) {
     ttl_min_mins: 60, ttl_max_mins: 43200,
     ...(state.currentCommunity?.governance || {}),
   };
-  const isEmbed = window._isEmbed || false;
   const isAnon = marker._postedAnonymously;
   const isOwner = !isAnon && rowData.author_pubkey && rowData.author_pubkey === state.signingPublicKey;
   const myRole = state.myRole;
   const canModerate = myRole === "maintainer" || myRole === "founder";
-  const canEdit = !isEmbed && !isAnon && (isOwner || canModerate) && myRole !== "reader";
-  const canDelete = !isEmbed && !isAnon && (isOwner || canModerate) && myRole !== "reader";
+  const canEdit = !isAnon && (isOwner || canModerate) && myRole !== "reader";
+  const canDelete = !isAnon && (isOwner || canModerate) && myRole !== "reader";
   const isTutorial = window._tutorialPids?.includes(marker._pinId);
-  const editBtns = (isEmbed || isAnon || !isOwner || isTutorial) ? "" : `<button class="edit-pin-btn" data-pid="${escapeHtml(marker._pinId)}" style="margin-top:6px;padding:4px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:12px;">Edit</button> <button class="delete-pin-btn" data-pid="${escapeHtml(marker._pinId)}" style="margin-top:6px;padding:4px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:12px;">Delete</button>`;
+  const editBtns = (isAnon || !isOwner || isTutorial) ? "" : `<button class="edit-pin-btn" data-pid="${escapeHtml(marker._pinId)}" style="margin-top:6px;padding:4px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:12px;">Edit</button> <button class="delete-pin-btn" data-pid="${escapeHtml(marker._pinId)}" style="margin-top:6px;padding:4px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:12px;">Delete</button>`;
   const anonBadge = isAnon ? `<br><span style="font-size:10px;color:var(--text-muted);">anonymous</span>` : "";
   const trust = (marker._pinTrustLevel != null) ? { level: marker._pinTrustLevel, color: marker._pinTrustColor } : pinTrustIndicator(marker._pinData || {}, state.signingPublicKey);
   const trustBadge = trust?.level && trust.level !== "neutral"
@@ -2791,7 +2789,7 @@ export function refreshPinMarkerPopup(marker) {
               ttlHtml = `<br><small style="color:var(--text-dim);">⏳ Pending · ✅ ${up} ⚠️🚩 ${down}</small>`;
             }
           }
-  const hasAttestBtns = !isEmbed && !isAnon && state.signingSecretKey && marker._authorPubkey !== state.signingPublicKey;
+  const hasAttestBtns = !isAnon && state.signingSecretKey && marker._authorPubkey !== state.signingPublicKey;
   const refreshVoteBtns = hasAttestBtns
     ? `<br><button class="vote-up-btn" data-pid="${escapeHtml(marker._pinId)}" style="padding:2px 8px;border:1px solid #16a34a;background:var(--bg-card);color:#16a34a;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">👍</button><button class="vote-down-btn" data-pid="${escapeHtml(marker._pinId)}" style="padding:2px 8px;border:1px solid #f97316;background:var(--bg-card);color:#f97316;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">👎</button><button class="flag-btn" data-pid="${escapeHtml(marker._pinId)}" style="padding:2px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">🚩</button>`
     : "";
@@ -2813,15 +2811,14 @@ export function showPinDetailModal(pinId) {
     ttl_min_mins: 60, ttl_max_mins: 43200,
     ...(state.currentCommunity?.governance || {}),
   };
-  const isEmbed = window._isEmbed || false;
   const isAnon = marker._postedAnonymously;
   const isOwner = !isAnon && marker._authorPubkey && marker._authorPubkey === state.signingPublicKey;
   const myRole = state.myRole;
   const canModerate = myRole === "maintainer" || myRole === "founder";
-  const canEdit = !isEmbed && !isAnon && (isOwner || canModerate) && myRole !== "reader";
-  const canDelete = !isEmbed && !isAnon && (isOwner || canModerate) && myRole !== "reader";
+  const canEdit = !isAnon && (isOwner || canModerate) && myRole !== "reader";
+  const canDelete = !isAnon && (isOwner || canModerate) && myRole !== "reader";
   const isTutorial = window._tutorialPids?.includes(pinId);
-  const editBtns = (isEmbed || isAnon || !isOwner || isTutorial) ? "" : `<button class="edit-pin-btn" data-pid="${escapeHtml(pinId)}" style="margin-top:6px;padding:4px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:12px;">${t("edit")}</button> <button class="delete-pin-btn" data-pid="${escapeHtml(pinId)}" style="margin-top:6px;padding:4px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:12px;">${t("delete")}</button>`;
+  const editBtns = (isAnon || !isOwner || isTutorial) ? "" : `<button class="edit-pin-btn" data-pid="${escapeHtml(pinId)}" style="margin-top:6px;padding:4px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:12px;">${t("edit")}</button> <button class="delete-pin-btn" data-pid="${escapeHtml(pinId)}" style="margin-top:6px;padding:4px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:12px;">${t("delete")}</button>`;
   const mediaUrls = [];
   let mediaHtml = "";
   const r = marker._media;
@@ -2873,7 +2870,7 @@ export function showPinDetailModal(pinId) {
     ? `<br><span class="layer-badge" style="border-color:${marker._layerColor};">📑 ${escapeHtml(marker._layerName)}</span>`
     : "";
 
-  const hasAttestBtns = !isEmbed && !isAnon && state.signingSecretKey && marker._authorPubkey !== state.signingPublicKey;
+  const hasAttestBtns = !isAnon && state.signingSecretKey && marker._authorPubkey !== state.signingPublicKey;
   const voteBtns = hasAttestBtns
     ? `<button class="vote-up-btn" data-pid="${escapeHtml(pinId)}" style="padding:2px 8px;border:1px solid #16a34a;background:var(--bg-card);color:#16a34a;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">👍</button><button class="vote-down-btn" data-pid="${escapeHtml(pinId)}" style="padding:2px 8px;border:1px solid #f97316;background:var(--bg-card);color:#f97316;border-radius:3px;cursor:pointer;font-size:11px;margin-right:4px;">👎</button><button class="flag-btn" data-pid="${escapeHtml(pinId)}" style="padding:2px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:11px;">🚩</button>`
     : "";
@@ -2897,9 +2894,9 @@ export function showPinDetailModal(pinId) {
       ${ttlHtml}
       ${layerBadge}
       <div style="margin-top:8px;">${voteBtns ? voteBtns + "<br>" : ""}${editBtns ? editBtns : ""}
-        ${!isEmbed && !isTutorial ? `<button class="osm-edit-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F310; Edit in OSM</button>` : ""}
-        ${!isEmbed ? `<button class="pin-route-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F6E3; Route</button>` : ""}
-        ${!isEmbed ? `<button class="pin-collect-btn" data-pid="${escapeHtml(pinId)}" style="padding:4px 8px;border:1px solid #eab308;background:var(--bg-card);color:#eab308;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F4C1; Collect</button>` : ""}
+        ${!isTutorial ? `<button class="osm-edit-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F310; Edit in OSM</button>` : ""}
+        <button class="pin-route-btn" data-lat="${pinData.lat}" data-lng="${pinData.lng}" style="padding:4px 8px;border:1px solid #7c3aed;background:var(--bg-card);color:#7c3aed;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F6E3; Route</button>
+        <button class="pin-collect-btn" data-pid="${escapeHtml(pinId)}" style="padding:4px 8px;border:1px solid #eab308;background:var(--bg-card);color:#eab308;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px;">&#x1F4C1; Collect</button>
       </div>
       <hr style="margin:12px 0 8px;border-color:var(--border);">
       <div class="annotation-thread pin-detail-thread" data-pin-id="${escapeHtml(pinId)}" style="max-height:none;overflow-y:visible;font-size:13px;">Loading...</div>
@@ -2965,8 +2962,6 @@ export function clearSelection() {
 }
 
 export function canDeletePin(markerOrRow) {
-  const isEmbed = window._isEmbed || false;
-  if (isEmbed) return false;
   const isAnon = markerOrRow?.posted_anonymously || markerOrRow?._postedAnonymously;
   if (isAnon) return false;
   const authorPubkey = markerOrRow?.author_pubkey || markerOrRow?._authorPubkey;
@@ -2977,8 +2972,6 @@ export function canDeletePin(markerOrRow) {
 }
 
 export function canModifyDrawing(row) {
-  const isEmbed = window._isEmbed || false;
-  if (isEmbed) return false;
   const isAnon = row?.posted_anonymously;
   if (isAnon) return false;
   const isOwner = row?.author_pubkey && row.author_pubkey === state.signingPublicKey;
@@ -3804,7 +3797,6 @@ export function showPinForm(lat, lng) {
 }
 
 export function addDrawControl() {
-  if (window._isEmbed) return;
   const toolbar = L.DomUtil.create("div");
   toolbar.style.cssText =
     "position:absolute;top:175px;right:8px;z-index:1000;display:flex;flex-direction:column;gap:2px;";
@@ -4110,13 +4102,12 @@ export function buildDrawingPopup(g, row, layer, opacity) {
   const layerBadge = (layer && layer.layer_id)
     ? `<span class="layer-badge" style="border-color:${layer.color};">📑 ${escapeHtml(layer.name)}</span><br>`
     : "";
-  const isEmbed = window._isEmbed || false;
   const isAnon = row?.posted_anonymously;
   const isOwner = !isAnon && row?.author_pubkey && row.author_pubkey === state.signingPublicKey;
   const myRole = state.myRole;
   const canModerate = myRole === "maintainer" || myRole === "founder";
-  const canEdit = !isEmbed && !isAnon && (isOwner || canModerate) && myRole !== "reader";
-  const canDelete = !isEmbed && !isAnon && (isOwner || canModerate) && myRole !== "reader";
+  const canEdit = !isAnon && (isOwner || canModerate) && myRole !== "reader";
+  const canDelete = !isAnon && (isOwner || canModerate) && myRole !== "reader";
   const anonBadge = isAnon ? `<br><span style="font-size:10px;color:var(--text-muted);">anonymous</span>` : "";
   const editBtns = (!canEdit && !canDelete) ? "" : `${canEdit ? `<button class="edit-dwg-btn" data-did="${did}" style="margin-top:6px;padding:4px 8px;border:1px solid #2563eb;background:var(--bg-card);color:#2563eb;border-radius:3px;cursor:pointer;font-size:12px;">${t("edit")}</button>` : ""}${canDelete ? `<button class="delete-dwg-btn" data-did="${did}" style="margin-top:6px;padding:4px 8px;border:1px solid #dc2626;background:var(--bg-card);color:#dc2626;border-radius:3px;cursor:pointer;font-size:12px;">${t("delete")}</button>` : ""}`;
   return `<b>${title}</b>${anonBadge}<br>${n}${mins}${mh}<br>${layerBadge}${editBtns}`;
@@ -4476,8 +4467,6 @@ export function downloadPinMedia(pinId) {
 }
 
 export function addPinButton() {
-  const isEmbed = window._isEmbed || false;
-
   if (!window._drawerActive) {
     const searchInput = L.DomUtil.create("input");
   searchInput.type = "text";
@@ -4534,8 +4523,6 @@ export function addPinButton() {
   state.map.getContainer().appendChild(osmSearch);
   }
 
-  if (isEmbed) return;
-
   if (!window._drawerActive) {
     const btn = L.DomUtil.create("button");
     btn.textContent = "📌";
@@ -4570,7 +4557,7 @@ export function addPinButton() {
     }
   }
 
-  if (!isEmbed && !window._drawerActive) {
+  if (!window._drawerActive) {
     const svBtn = L.DomUtil.create("button");
     svBtn.textContent = "🚶";
     svBtn.title = `${t("streetView")}`;
@@ -4589,7 +4576,6 @@ export function addPinButton() {
 }
 
 export function addFreeDrawButton() {
-  if (window._isEmbed) return;
   initFreeDraw(showDrawingForm);
   _addFreeDraw();
 }

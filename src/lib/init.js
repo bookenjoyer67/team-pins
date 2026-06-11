@@ -23,6 +23,16 @@ export function initApp() {
 }
 
 async function _doInit() {
+	// Embed mode detection
+	const isEmbed = (() => {
+		try {
+			const hasParam = new URLSearchParams(window.location.search).get('embed') === '1';
+			return hasParam || window.self !== window.top;
+		} catch (_) { return false; }
+	})();
+	window._isEmbed = isEmbed;
+	if (isEmbed) document.body.classList.add('embed');
+
 	// Theme
 	const saved = localStorage.getItem('pins-theme');
 	if (saved === 'dark' || (!saved && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -95,6 +105,19 @@ async function _doInit() {
 
 	// Map list (needed for drawer)
 	await loadMaps();
+
+	// Embed postMessage handshake
+	if (isEmbed) {
+		window.addEventListener('message', (e) => {
+			if (e.data?.type === 'komun:identity' && e.data.displayName) {
+				state.displayName = e.data.displayName;
+				DB.saveProfile({ user_id: state.user.id, display_name: e.data.displayName });
+			}
+		});
+		try {
+			window.parent.postMessage({ type: 'piggpin:ready' }, '*');
+		} catch (_) {}
+	}
 
 	console.log('[init] App initialized');
 }
