@@ -116,6 +116,10 @@ async function _doInit() {
 					window._komunPassword = e.data.communityPassword;
 				}
 			}
+			if (e.data?.type === 'piggpin:pick-location') {
+				window._pickMode = true;
+				state.placingPin = true;
+			}
 		});
 		if (window.location.hash.startsWith('#community=')) {
 			window._komunPassword = null;

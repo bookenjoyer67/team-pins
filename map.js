@@ -561,6 +561,17 @@ export function initMap() {
     if (!state.placingPin) return;
     state.placingPin = false;
     state.map.getContainer().style.cursor = "";
+    if (window._pickMode) {
+      window._pickMode = false;
+      try {
+        window.parent.postMessage({
+          type: "piggpin:location-picked",
+          lat: e.latlng.lat,
+          lng: e.latlng.lng,
+        }, "*");
+      } catch (_) {}
+      return;
+    }
     showPinForm(e.latlng.lat, e.latlng.lng);
   });
 
