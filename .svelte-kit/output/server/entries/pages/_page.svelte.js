@@ -219,12 +219,16 @@ function _page($$renderer) {
 		TopBar($$renderer, {});
 	} else $$renderer.push("<!--[-1-->");
 	$$renderer.push(`<!--]--> `);
-	Drawer($$renderer, {});
-	$$renderer.push(`<!----> `);
-	PeerList($$renderer, {});
-	$$renderer.push(`<!----> `);
-	HistoryPanel($$renderer, {});
-	$$renderer.push(`<!----> `);
+	if (!window._pickMode) {
+		$$renderer.push("<!--[0-->");
+		Drawer($$renderer, {});
+		$$renderer.push(`<!----> `);
+		PeerList($$renderer, {});
+		$$renderer.push(`<!----> `);
+		HistoryPanel($$renderer, {});
+		$$renderer.push(`<!---->`);
+	} else $$renderer.push("<!--[-1-->");
+	$$renderer.push(`<!--]--> `);
 	ToastContainer($$renderer, {});
 	$$renderer.push(`<!---->`);
 }

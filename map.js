@@ -4469,6 +4469,7 @@ export function downloadPinMedia(pinId) {
 export function addPinButton() {
   if (!window._drawerActive) {
     const searchInput = L.DomUtil.create("input");
+  searchInput.className = "map-floating-btn";
   searchInput.type = "text";
   searchInput.id = "filter-input";
   searchInput.placeholder = `${t("filterPins")}`;
@@ -4485,6 +4486,7 @@ export function addPinButton() {
   state.map.getContainer().appendChild(searchInput);
 
   const osmSearch = L.DomUtil.create("input");
+  osmSearch.className = "map-floating-btn";
   osmSearch.type = "text";
   osmSearch.id = "osm-search";
   osmSearch.placeholder = `${t("searchPlaces")}`;
@@ -4525,6 +4527,7 @@ export function addPinButton() {
 
   if (!window._drawerActive) {
     const btn = L.DomUtil.create("button");
+    btn.className = "map-floating-btn";
     btn.textContent = "📌";
     btn.title = `${t("createPin")}`;
     btn.style.cssText =
@@ -4543,6 +4546,7 @@ export function addPinButton() {
 
   if (!window._drawerActive) {
     const fsBtn = L.DomUtil.create("button");
+    fsBtn.className = "map-floating-btn";
     fsBtn.textContent = "⛶";
     fsBtn.title = `${t("fullscreen")}`;
     fsBtn.style.cssText =
@@ -4559,6 +4563,7 @@ export function addPinButton() {
 
   if (!window._drawerActive) {
     const svBtn = L.DomUtil.create("button");
+    svBtn.className = "map-floating-btn";
     svBtn.textContent = "🚶";
     svBtn.title = `${t("streetView")}`;
     svBtn.style.cssText =

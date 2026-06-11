@@ -7748,6 +7748,7 @@ function downloadPinMedia(pinId) {
 function addPinButton() {
 	if (!window._drawerActive) {
 		const searchInput = leaflet_shim_default.DomUtil.create("input");
+		searchInput.className = "map-floating-btn";
 		searchInput.type = "text";
 		searchInput.id = "filter-input";
 		searchInput.placeholder = `${t("filterPins")}`;
@@ -7761,6 +7762,7 @@ function addPinButton() {
 		};
 		state.map.getContainer().appendChild(searchInput);
 		const osmSearch = leaflet_shim_default.DomUtil.create("input");
+		osmSearch.className = "map-floating-btn";
 		osmSearch.type = "text";
 		osmSearch.id = "osm-search";
 		osmSearch.placeholder = `${t("searchPlaces")}`;
@@ -7796,6 +7798,7 @@ function addPinButton() {
 	}
 	if (!window._drawerActive) {
 		const btn = leaflet_shim_default.DomUtil.create("button");
+		btn.className = "map-floating-btn";
 		btn.textContent = "📌";
 		btn.title = `${t("createPin")}`;
 		btn.style.cssText = "position:absolute;top:95px;right:8px;z-index:1000;width:36px;height:36px;border:none;border-radius:6px;background:var(--accent,#2563eb);color:white;font-size:18px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.25);display:flex;align-items:center;justify-content:center;transition:background 0.15s;";
@@ -7810,6 +7813,7 @@ function addPinButton() {
 	}
 	if (!window._drawerActive) {
 		const fsBtn = leaflet_shim_default.DomUtil.create("button");
+		fsBtn.className = "map-floating-btn";
 		fsBtn.textContent = "⛶";
 		fsBtn.title = `${t("fullscreen")}`;
 		fsBtn.style.cssText = "position:absolute;top:108px;left:8px;z-index:1000;width:36px;height:36px;border:none;border-radius:4px;background:#6b7280;color:white;font-size:18px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;";
@@ -7821,6 +7825,7 @@ function addPinButton() {
 	}
 	if (!window._drawerActive) {
 		const svBtn = leaflet_shim_default.DomUtil.create("button");
+		svBtn.className = "map-floating-btn";
 		svBtn.textContent = "🚶";
 		svBtn.title = `${t("streetView")}`;
 		svBtn.style.cssText = "position:absolute;top:150px;left:8px;z-index:1000;width:32px;height:32px;border:none;border-radius:4px;background:#059669;color:white;font-size:16px;cursor:pointer;box-shadow:0 1px 5px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;";

@@ -11,7 +11,9 @@
 {#if !window._isEmbed}
 <TopBar />
 {/if}
+{#if !window._pickMode}
 <Drawer />
 <PeerList />
 <HistoryPanel />
+{/if}
 <ToastContainer />

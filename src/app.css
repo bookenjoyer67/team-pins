@@ -280,3 +280,29 @@ body.drawer-expanded .leaflet-control-container { padding-right: 168px; }
 	.popout-menu { min-width: 180px; }
 	.popout-item { padding: 10px 14px; border-radius: 6px; }
 }
+/* Picker mode — bare map with draggable pin */
+body.embed.picking #tabs-row { display: none !important; }
+body.embed.picking #top-bar { display: none !important; }
+body.embed.picking #menu-toggle { display: none !important; }
+body.embed.picking #peer-list { display: none !important; }
+body.embed.picking #history-panel { display: none !important; }
+body.embed.picking #piggpin-watermark { display: none !important; }
+body.embed.picking .drawer-container { display: none !important; }
+body.embed.picking .leaflet-control-layers { display: none !important; }
+body.embed.picking .leaflet-control-attribution { font-size: 0px !important; }
+body.embed.picking .leaflet-control-zoom { opacity: 0.7; }
+body.embed.picking .map-floating-btn { display: none !important; }
+body.embed.picking #map-container { height: 100% !important; cursor: grab !important; }
+body.embed.picking #map-container::after { display: none; }
+.pick-tooltip {
+	background: var(--bg-card) !important;
+	border: 1px solid #2563eb !important;
+	color: var(--text) !important;
+	font-size: 12px !important;
+	padding: 4px 8px !important;
+	box-shadow: 0 2px 6px rgba(0,0,0,0.2) !important;
+	border-radius: 4px !important;
+}
+.pick-tooltip::before { border-top-color: #2563eb !important; }
+.pick-marker { cursor: grab !important; }
+.pick-marker:active { cursor: grabbing !important; }
