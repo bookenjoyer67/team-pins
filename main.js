@@ -819,7 +819,7 @@ async function joinCommunityFromInvite({
   if (!result) {
     toast(relayUrl ? "Cannot reach community on relay — check relay URL" : "No relay connection — configure in ⚙ ICE settings", "#dc2626"); return;
   }
-  if (!result.public_key || !result.wrapped_dek) {
+  if (!result.public_key) {
     toast("Community not found on relay", "#dc2626"); return;
   }
 
@@ -835,12 +835,15 @@ async function joinCommunityFromInvite({
     secret_key = encode_hex(kp.secret);
     myWrappedDek = result.wrapped_dek;
   } else {
-    const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex, decrypt_with_password, decode_hex } = await import("./core/pkg/e2e_core.js");
+    const { generate_user_keypair, generate_dek, wrap_dek, unwrap_dek, encode_hex, decrypt_with_password, decode_hex } = await import("./core/pkg/e2e_core.js");
     const kp = generate_user_keypair();
     public_key = encode_hex(kp.public);
     secret_key = encode_hex(kp.secret);
 
-    if (embeddedCommunitySk && !myWrappedDek) {
+    if (isUninitialized) {
+      const dek = generate_dek();
+      myWrappedDek = wrap_dek(dek, public_key);
+    } else if (embeddedCommunitySk && !myWrappedDek) {
       try {
         const dk = unwrap_dek(result.wrapped_dek, embeddedCommunitySk);
         if (dk) {

@@ -341,7 +341,7 @@ async function processHashJoin(hash, pendingB64) {
 			delete window._komunPassword;
 
 			const result = await Relay.joinCommunity(cidUuid, passHash, relayUrl);
-			if (!result || !result.public_key || !result.wrapped_dek) {
+			if (!result || !result.public_key) {
 				localStorage.removeItem('pending-community');
 				return false;
 			}
@@ -350,6 +350,7 @@ async function processHashJoin(hash, pendingB64) {
 			const isPasswordDerived = result.key_derivation === 'pbkdf2';
 
 			let public_key, secret_key, myWrappedDek;
+			const isUninitialized = !result.wrapped_dek && !result.individually_wrapped_dek;
 			if (isPasswordDerived && plaintextPass) {
 				const { generate_user_keypair_from_password, encode_hex } = await import('../../core/pkg/e2e_core.js');
 				const kp = generate_user_keypair_from_password(plaintextPass, result.community_id);
@@ -357,13 +358,16 @@ async function processHashJoin(hash, pendingB64) {
 				secret_key = encode_hex(kp.secret);
 				myWrappedDek = result.wrapped_dek || '';
 			} else {
-				const { generate_user_keypair, wrap_dek, unwrap_dek, encode_hex } = await import('../../core/pkg/e2e_core.js');
+				const { generate_user_keypair, generate_dek, wrap_dek, unwrap_dek, encode_hex } = await import('../../core/pkg/e2e_core.js');
 				const kp = generate_user_keypair();
 				public_key = encode_hex(kp.public);
 				secret_key = encode_hex(kp.secret);
 				myWrappedDek = result.individually_wrapped_dek || '';
 
-				if (!myWrappedDek && embeddedCommunitySk) {
+				if (isUninitialized) {
+					const dek = generate_dek();
+					myWrappedDek = wrap_dek(dek, public_key);
+				} else if (!myWrappedDek && embeddedCommunitySk) {
 					try {
 						const dk = unwrap_dek(result.wrapped_dek, embeddedCommunitySk);
 						if (dk) {
