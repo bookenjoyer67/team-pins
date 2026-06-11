@@ -40,7 +40,7 @@ async function _doInit() {
 	}
 
 	// Service worker
-	if ('serviceWorker' in navigator) {
+	if ('serviceWorker' in navigator && !isEmbed) {
 		navigator.serviceWorker.register('/sw.js').catch(err => {
 			console.warn('[pwa] SW unavailable — expected on dev HTTP:', err.message);
 		});

@@ -55,7 +55,7 @@ const isEmbed = (() => {
 window._isEmbed = isEmbed;
 if (isEmbed) document.body.classList.add('embed');
 
-if ("serviceWorker" in navigator) {
+if ("serviceWorker" in navigator && !isEmbed) {
   let swRefreshing = false;
   navigator.serviceWorker.register("/sw.js").then(reg => {
     window._swReg = reg;
