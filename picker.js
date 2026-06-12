@@ -75,13 +75,17 @@ function pushRelayPin() {
         return;
     }
     try {
-        const enc = encrypt_pin_data(_pinTitle, _pinNote, _currentLat, _currentLng, "#2563eb", state.dek);
+        const gov = state.currentCommunity?.governance || {};
+        const kind = _customData.kind || 'resource';
+        const emoji = (gov.post_kind_emoji || {})[kind] || '';
+        const color = (gov.post_kind_color || {})[kind] || '#2563eb';
+        const enc = encrypt_pin_data(_pinTitle, _pinNote, _currentLat, _currentLng, color, state.dek);
         const layer = state.layers[0];
         const pin = {
             pin_id: _pickerPinId, community_id: state.currentSet,
             ciphertext: enc.ciphertext, nonce: enc.nonce,
             author_pubkey: state.signingPublicKey, created_at: Date.now(),
-            layer_id: layer?.layer_id || "", emoji: "",
+            layer_id: layer?.layer_id || "", emoji,
             schema_id: layer?.default_schema_id || "",
         };
         const keys = Object.keys(_customData);
