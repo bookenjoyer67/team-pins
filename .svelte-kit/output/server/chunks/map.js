@@ -1,3 +1,74 @@
-import { m as toast, r as escapeHtml } from "./dialogs.js";
-import { $ as showChainsModal, A as generateLocationMarker, At as collectSchemaData, B as loadSubscribedPins, C as createTutorial, Ct as refreshAllLayers, D as deleteSet, Dt as showLayersModal, E as deleteSelected, Et as showDiscoverModal, F as isMetricMode, G as refreshPinMarkerPopup, H as placePin, I as loadChains, J as renderAnnotationThread, K as refreshPinPopup, L as loadDrawings, M as geomMetrics, Mt as renderSchemaFieldsById, N as importCollectionAsMap, Nt as showSchemaEditorModal, O as downloadDrawingAttachment, Ot as toggleLayer, P as initMap, Pt as showSchemaManagerModal, Q as savePin, R as loadPins, S as createSetFromTemplate, St as loadLayersForSet, T as deletePin, Tt as setLayerOpacity, U as pushUndo, V as pinIcon, W as redo, X as reverseGeocode, Y as renderChainStory, Z as saveDrawing, _ as clearSelection, _t as undo, a as addFreeDrawButton, at as showEditDrawingForm, b as compressVideoBytes, bt as createLayer, c as addPickMarker, ct as showNotificationsModal, d as addTimeSlider, dt as showSetsModal, et as showCollectionPicker, f as addWatermark, ft as showTemplatePicker, g as canModifyDrawing, gt as toggleMetricMode, h as canDeletePin, ht as switchSet, i as addDrawControl, it as showDrawingForm, j as geoJsonToLayer, jt as loadSchemasForSet, k as downloadPinMedia, kt as buildCustomDataHTML, l as addPinButton, lt as showPinDetailModal, m as buildDrawingPopup, mt as startSlideshow, n as showImportFromMapModal, nt as showCommunityDetails, o as addGridOverlay, ot as showEditPinForm, p as applyTimeFilter, pt as startCurrentMapSlideshow, q as renameSet, r as addChainTool, rt as showCreateTemplateModal, s as addMeasureButton, st as showNarrativeChainBuilder, t as importLayerFromMap, tt as showCollectionsModal, u as addSelectionTool, ut as showPinForm, v as closeCollectionView, vt as updatePin, w as deleteDrawing, wt as renameLayer, x as createSet, xt as deleteLayer, y as compressMedia, yt as viewCollectionPins, z as loadSetList } from "./map-import.js";
-export { addChainTool, addDrawControl, addFreeDrawButton, addGridOverlay, addMeasureButton, addPickMarker, addPinButton, addSelectionTool, addTimeSlider, addWatermark, applyTimeFilter, buildCustomDataHTML, buildDrawingPopup, canDeletePin, canModifyDrawing, clearSelection, closeCollectionView, collectSchemaData, compressMedia, compressVideoBytes, createLayer, createSet, createSetFromTemplate, createTutorial, deleteDrawing, deleteLayer, deletePin, deleteSelected, deleteSet, downloadDrawingAttachment, downloadPinMedia, escapeHtml, generateLocationMarker, geoJsonToLayer, geomMetrics, importCollectionAsMap, importLayerFromMap, initMap, isMetricMode, loadChains, loadDrawings, loadLayersForSet, loadPins, loadSchemasForSet, loadSetList, loadSubscribedPins, pinIcon, placePin, pushUndo, redo, refreshAllLayers, refreshPinMarkerPopup, refreshPinPopup, renameLayer, renameSet, renderAnnotationThread, renderChainStory, renderSchemaFieldsById, reverseGeocode, saveDrawing, savePin, setLayerOpacity, showChainsModal, showCollectionPicker, showCollectionsModal, showCommunityDetails, showCreateTemplateModal, showDiscoverModal, showDrawingForm, showEditDrawingForm, showEditPinForm, showImportFromMapModal, showLayersModal, showNarrativeChainBuilder, showNotificationsModal, showPinDetailModal, showPinForm, showSchemaEditorModal, showSchemaManagerModal, showSetsModal, showTemplatePicker, startCurrentMapSlideshow, startSlideshow, switchSet, toast, toggleLayer, toggleMetricMode, undo, updatePin, viewCollectionPins };
+//#region map.js
+function addPickMarker(lat, lng) {
+	if (!state.map) {
+		console.warn("[piggpin] addPickMarker: map not ready");
+		return;
+	}
+	if (!window._pickMode) {
+		console.warn("[piggpin] addPickMarker: not in pick mode");
+		return;
+	}
+	console.log("[piggpin] pick: placing marker at", lat, lng);
+	const icon = L.divIcon({
+		className: "pick-marker",
+		html: "<div style=\"width:24px;height:24px;background:#2563eb;border:3px solid white;border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,0.3);cursor:grab;\"></div>",
+		iconSize: [24, 24],
+		iconAnchor: [12, 12]
+	});
+	const marker = L.marker([lat, lng], {
+		draggable: true,
+		icon
+	}).addTo(state.map);
+	const fmt = (v) => v.toFixed(5);
+	marker.bindTooltip(`${fmt(lat)}, ${fmt(lng)}`, {
+		permanent: true,
+		direction: "top",
+		className: "pick-tooltip"
+	}).openTooltip();
+	let pickPinData = null;
+	if (state.dek) try {
+		const enc = encrypt_pin_data("Pin", "", lat, lng, "#2563eb", state.dek);
+		pickPinData = {
+			pin_id: generate_uuid(),
+			community_id: state.currentSet,
+			ciphertext: enc.ciphertext,
+			nonce: enc.nonce,
+			author_pubkey: state.signingPublicKey,
+			created_at: Date.now(),
+			layer_id: state.layers[0]?.layer_id || "",
+			emoji: "📌"
+		};
+		DB.savePin(pickPinData).catch((e) => console.warn("[piggpin] pick pin save failed:", e));
+	} catch (e) {
+		pickPinData = null;
+	}
+	marker.on("dragend", () => {
+		const pos = marker.getLatLng();
+		marker.setTooltipContent(`${fmt(pos.lat)}, ${fmt(pos.lng)}`);
+		console.log("[piggpin] pick: sending drag coords", pos.lat, pos.lng);
+		try {
+			window.parent.postMessage({
+				type: "piggpin:location-picked",
+				lat: pos.lat,
+				lng: pos.lng
+			}, "*");
+		} catch (_) {}
+	});
+	try {
+		console.log("[piggpin] pick: sending initial coords", lat, lng);
+		window.parent.postMessage({
+			type: "piggpin:location-picked",
+			lat,
+			lng
+		}, "*");
+	} catch (_) {}
+	if (pickPinData) {
+		window._broadcast?.("new_pin", {
+			...pickPinData,
+			team_id: state.currentSet
+		});
+		window._relayPushDelta?.(state.currentSet, [pickPinData], [], [], [], [], [], [], {});
+	}
+}
+//#endregion
+export { addPickMarker };

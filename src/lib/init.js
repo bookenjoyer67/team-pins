@@ -128,7 +128,7 @@ async function _doInit() {
 			window._pickMode = true;
 			document.body.classList.add('picking');
 			const enable = () => {
-				if (state.currentSet && state.map) {
+				if (state.currentSet && state.map && state.dek) {
 					const center = state.map.getCenter();
 					import('../../map.js').then(m => m.addPickMarker(center.lat, center.lng));
 				} else {

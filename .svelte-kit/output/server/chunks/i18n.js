@@ -2351,10 +2351,5 @@ function getLang() {
 function getSupported() {
 	return supported;
 }
-function getTutorialPin(index) {
-	const arr = translations[_lang]?.tutorial || translations.en?.tutorial;
-	if (arr && index >= 0 && index < arr.length) return arr[index];
-	return null;
-}
 //#endregion
-export { t as a, setLang as i, getSupported as n, getTutorialPin as r, getLang as t };
+export { t as i, getSupported as n, setLang as r, getLang as t };

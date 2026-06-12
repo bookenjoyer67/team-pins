@@ -140,18 +140,6 @@ async function deletePin(pinId) {
 	await openDB();
 	return promisify(tx("pins", "readwrite").delete(pinId));
 }
-async function updatePinLayerId(pinId, layerId) {
-	await openDB();
-	const store = db.transaction("pins", "readwrite").objectStore("pins");
-	const pin = await promisify(store.get(pinId));
-	if (!pin) return;
-	pin.layer_id = layerId;
-	return promisify(store.put(pin));
-}
-async function getPinsByLayer(teamId, layerId) {
-	await openDB();
-	return (await promisify(tx("pins").index("team_id").getAll(teamId))).filter((p) => p.layer_id === layerId);
-}
 async function getDrawings(teamId) {
 	await openDB();
 	return promisify(tx("drawings").index("team_id").getAll(teamId));
@@ -168,77 +156,13 @@ async function deleteDrawing(drawingId) {
 	await openDB();
 	return promisify(tx("drawings", "readwrite").delete(drawingId));
 }
-async function updateDrawingLayerId(drawingId, layerId) {
-	await openDB();
-	const store = db.transaction("drawings", "readwrite").objectStore("drawings");
-	const drawing = await promisify(store.get(drawingId));
-	if (!drawing) return;
-	drawing.layer_id = layerId;
-	return promisify(store.put(drawing));
-}
 async function getTeam(teamId) {
 	await openDB();
 	return promisify(tx("teams").get(teamId));
 }
-async function getAllTeams() {
-	await openDB();
-	return promisify(tx("teams").getAll());
-}
 async function saveTeam(team) {
 	await openDB();
 	return promisify(tx("teams", "readwrite").put(team));
-}
-async function renameTeam(teamId, newName) {
-	await openDB();
-	const store = db.transaction("teams", "readwrite").objectStore("teams");
-	const team = await promisify(store.get(teamId));
-	if (!team) return;
-	team.name = newName;
-	return promisify(store.put(team));
-}
-async function deleteTeam(teamId) {
-	await openDB();
-	const txn = db.transaction([
-		"teams",
-		"pins",
-		"drawings",
-		"settings",
-		"layers",
-		"schemas",
-		"communities",
-		"annotations",
-		"tombstones",
-		"subscribed_layers",
-		"layer_deks",
-		"chains",
-		"offline_regions"
-	], "readwrite");
-	const pinKeys = await promisify(txn.objectStore("pins").index("team_id").getAllKeys(teamId));
-	for (const key of pinKeys) {
-		const annKeys = await promisify(txn.objectStore("annotations").index("pin_id").getAllKeys(key));
-		for (const ak of annKeys) {
-			const tomKeys = await promisify(txn.objectStore("tombstones").index("target_id").getAllKeys(ak));
-			for (const tk of tomKeys) txn.objectStore("tombstones").delete(tk);
-			txn.objectStore("annotations").delete(ak);
-		}
-		txn.objectStore("pins").delete(key);
-	}
-	const drawingKeys = await promisify(txn.objectStore("drawings").index("team_id").getAllKeys(teamId));
-	for (const key of drawingKeys) txn.objectStore("drawings").delete(key);
-	txn.objectStore("teams").delete(teamId);
-	txn.objectStore("settings").delete(teamId);
-	txn.objectStore("layers").delete(teamId);
-	txn.objectStore("communities").delete(teamId);
-	const chainKeys = await promisify(txn.objectStore("chains").index("community_id").getAllKeys(teamId));
-	for (const key of chainKeys) txn.objectStore("chains").delete(key);
-	if (txn.objectStoreNames.contains("schemas")) try {
-		const schemaKeys = await promisify(txn.objectStore("schemas").index("team_id").getAllKeys(teamId));
-		for (const key of schemaKeys) txn.objectStore("schemas").delete(key);
-	} catch (_) {}
-	return new Promise((resolve, reject) => {
-		txn.oncomplete = resolve;
-		txn.onerror = () => reject(txn.error);
-	});
 }
 async function getCommunity(communityId) {
 	await openDB();
@@ -264,10 +188,6 @@ async function getAnnotation(annotationId) {
 	await openDB();
 	return promisify(tx("annotations").get(annotationId));
 }
-async function deleteAnnotation(annotationId) {
-	await openDB();
-	return promisify(tx("annotations", "readwrite").delete(annotationId));
-}
 async function getAnnotationsByCommunity(communityId) {
 	await openDB();
 	return promisify(tx("annotations").index("community_id").getAll(communityId));
@@ -275,20 +195,6 @@ async function getAnnotationsByCommunity(communityId) {
 async function saveTombstone(tombstone) {
 	await openDB();
 	return promisify(tx("tombstones", "readwrite").put(tombstone));
-}
-async function getTombstoneTargetIds(annotationIds) {
-	if (!annotationIds || !annotationIds.length) return /* @__PURE__ */ new Set();
-	await openDB();
-	const all = await promisify(tx("tombstones").getAll());
-	const idSet = new Set(annotationIds);
-	const tombstoned = /* @__PURE__ */ new Set();
-	for (const t of all) if (idSet.has(t.target_id)) tombstoned.add(t.target_id);
-	return tombstoned;
-}
-async function getLayers(teamId) {
-	await openDB();
-	const result = await promisify(tx("layers").get(teamId));
-	return result ? result.layers : null;
 }
 async function saveLayers(teamId, layersArray) {
 	await openDB();
@@ -306,11 +212,6 @@ async function saveSchema(schema) {
 	await openDB();
 	if (!db.objectStoreNames.contains("schemas")) return;
 	return promisify(tx("schemas", "readwrite").put(schema));
-}
-async function deleteSchema(schemaId) {
-	await openDB();
-	if (!db.objectStoreNames.contains("schemas")) return;
-	return promisify(tx("schemas", "readwrite").delete(schemaId));
 }
 async function getProfile() {
 	await openDB();
@@ -381,10 +282,6 @@ async function getSubscribedLayer(layerId) {
 	await openDB();
 	return promisify(tx("subscribed_layers").get(layerId));
 }
-async function getAllSubscribedLayers() {
-	await openDB();
-	return promisify(tx("subscribed_layers").getAll());
-}
 function upgradeChain(chain) {
 	if (!chain) return chain;
 	if (chain.pin_entries && Array.isArray(chain.pin_entries) && chain.pin_entries.length > 0) chain.pin_ids = chain.pin_entries.map((e) => e.pin_id);
@@ -414,10 +311,6 @@ async function saveChain(chain) {
 	normalized.updated_at = Date.now();
 	return promisify(tx("chains", "readwrite").put(normalized));
 }
-async function getChain(chainId) {
-	await openDB();
-	return upgradeChain(await promisify(tx("chains").get(chainId)));
-}
 async function getChainsByCommunity(communityId) {
 	await openDB();
 	return (await promisify(tx("chains").index("community_id").getAll(communityId))).map(upgradeChain);
@@ -425,42 +318,6 @@ async function getChainsByCommunity(communityId) {
 async function deleteChain(chainId) {
 	await openDB();
 	return promisify(tx("chains", "readwrite").delete(chainId));
-}
-async function getCollections() {
-	await openDB();
-	if (!db.objectStoreNames.contains("collections")) return [];
-	return promisify(tx("collections").getAll());
-}
-async function saveCollection(collection) {
-	await openDB();
-	if (!db.objectStoreNames.contains("collections")) return;
-	return promisify(tx("collections", "readwrite").put(collection));
-}
-async function deleteCollection(id) {
-	await openDB();
-	if (!db.objectStoreNames.contains("collections")) return;
-	if (db.objectStoreNames.contains("collection_pins")) {
-		const pins = await promisify(tx("collection_pins").index("collection_id").getAll(id));
-		for (const p of pins) await promisify(tx("collection_pins", "readwrite").delete(p.id));
-	}
-	return promisify(tx("collections", "readwrite").delete(id));
-}
-async function addPinToCollection(collection_id, pin_id, team_id) {
-	await openDB();
-	if (!db.objectStoreNames.contains("collection_pins")) return;
-	const id = collection_id + "_" + pin_id;
-	return promisify(tx("collection_pins", "readwrite").put({
-		id,
-		collection_id,
-		pin_id,
-		team_id,
-		added_at: Date.now()
-	}));
-}
-async function getCollectionPins(collection_id) {
-	await openDB();
-	if (!db.objectStoreNames.contains("collection_pins")) return [];
-	return promisify(tx("collection_pins").index("collection_id").getAll(collection_id));
 }
 async function importPins(pins) {
 	if (!pins.length) return;
@@ -498,4 +355,4 @@ async function deleteDrawings(drawingIds) {
 	return Promise.all(ops);
 }
 //#endregion
-export { saveSchema as $, getPinsByLayer as A, importPin as B, getCommunity as C, getLayers as D, getKnownPeers as E, getSubscribedLayer as F, saveChain as G, renameTeam as H, getTeam as I, saveDrawing as J, saveCollection as K, getTombstoneTargetIds as L, getSchemas as M, getSettings as N, getPin as O, getSigningKey as P, saveProfile as Q, importDrawing as R, getCollections as S, getDrawings as T, saveAnnotation as U, importPins as V, saveAnnotations as W, saveLayers as X, saveKnownPeer as Y, savePin as Z, getAnnotationsByCommunity as _, deleteDrawing as a, setMigrationSigningPubkey as at, getChainsByCommunity as b, deletePins as c, getAllCommunities as d, saveSettings as et, getAllDrawings as f, getAnnotation as g, getAllTeams as h, deleteCollection as i, saveTombstone as it, getProfile as j, getPins as k, deleteSchema as l, getAllSubscribedLayers as m, deleteAnnotation as n, saveSubscribedLayer as nt, deleteDrawings as o, updateDrawingLayerId as ot, getAllPins as p, saveCommunity as q, deleteChain as r, saveTeam as rt, deletePin as s, updatePinLayerId as st, addPinToCollection as t, saveSigningKey as tt, deleteTeam as u, getAnnotationsByPin as v, getDrawing as w, getCollectionPins as x, getChain as y, importDrawings as z };
+export { saveAnnotations as A, saveSigningKey as B, getSubscribedLayer as C, importPin as D, importDrawings as E, saveLayers as F, saveTeam as H, savePin as I, saveProfile as L, saveCommunity as M, saveDrawing as N, importPins as O, saveKnownPeer as P, saveSchema as R, getSigningKey as S, importDrawing as T, saveTombstone as U, saveSubscribedLayer as V, setMigrationSigningPubkey as W, getPin as _, deletePins as a, getSchemas as b, getAllPins as c, getAnnotationsByPin as d, getChainsByCommunity as f, getKnownPeers as g, getDrawings as h, deletePin as i, saveChain as j, saveAnnotation as k, getAnnotation as l, getDrawing as m, deleteDrawing as n, getAllCommunities as o, getCommunity as p, deleteDrawings as r, getAllDrawings as s, deleteChain as t, getAnnotationsByCommunity as u, getPins as v, getTeam as w, getSettings as x, getProfile as y, saveSettings as z };

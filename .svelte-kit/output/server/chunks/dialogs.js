@@ -1,6 +1,6 @@
-import { j as generate_qr_svg } from "./e2e_core2.js";
+import { O as generate_qr_svg } from "./e2e_core2.js";
 import { t as state } from "./state.js";
-import { a as t } from "./i18n.js";
+import { i as t } from "./i18n.js";
 import jsQR from "jsqr";
 //#region qr.js
 function createScanner(onDetected, onError) {
@@ -116,9 +116,6 @@ function promptRoomPassword(title) {
 }
 function showPasswordDialog(title, cb, checkboxLabel) {
 	getStore().then((m) => m.promptPassword(title, checkboxLabel)).then((result) => cb(result, checkboxLabel ? result !== null : void 0));
-}
-function promptSetPassword(currentLabel) {
-	return getStore().then((m) => m.promptSetPassword(currentLabel || "Set community password"));
 }
 function showQRAnswerDialog(title, answer, qrSvg) {
 	getStore().then((m) => m.showQRAnswer(title, answer, qrSvg));
@@ -297,4 +294,4 @@ function showQRJoinDialog(callbacks) {
 	});
 }
 //#endregion
-export { promptRoomPassword as a, showPeerPaste as c, showQRHostDialog as d, showQRJoinDialog as f, hashCommunityPassword as i, showProgressDialog as l, toast as m, confirmDialog as n, promptSetPassword as o, showQRScanDialog as p, escapeHtml as r, showPasswordDialog as s, alertDialog as t, showQRAnswerDialog as u };
+export { promptRoomPassword as a, showProgressDialog as c, showQRJoinDialog as d, showQRScanDialog as f, hashCommunityPassword as i, showQRAnswerDialog as l, confirmDialog as n, showPasswordDialog as o, toast as p, escapeHtml as r, showPeerPaste as s, alertDialog as t, showQRHostDialog as u };

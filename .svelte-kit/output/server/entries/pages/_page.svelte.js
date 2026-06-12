@@ -1,7 +1,6 @@
 import { G as attr, K as escape_html, a as attr_class, c as ensure_array_like, f as store_get, h as html, m as unsubscribe_stores, n as onDestroy, o as attr_style, p as stringify } from "../../chunks/index-server.js";
 import { a as freeDrawing, o as measuring, s as placingPin } from "../../chunks/state.js";
-import { i as lang, o as t } from "../../chunks/state3.js";
-import "../../chunks/leaflet-shim.js";
+import { a as lang, s as t } from "../../chunks/leaflet-shim.js";
 //#region src/lib/components/map/MapContainer.svelte
 function MapContainer($$renderer, $$props) {
 	$$renderer.component(($$renderer) => {
