@@ -95,7 +95,7 @@ function signalSdpToDesc(signal) {
 	const raw = atob(signal.sdp);
 	let sdpText;
 	try {
-		const bytes = Uint8Array.from(raw.split("").map((c) => c.charCodeAt(0)));
+		const bytes = new TextEncoder().encode(raw);
 		sdpText = new TextDecoder().decode(decompress_gzip(bytes));
 	} catch (_) {
 		sdpText = raw;

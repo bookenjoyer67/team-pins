@@ -1725,9 +1725,7 @@ async function importFromHash(urlCode) {
 		let b64 = urlCode.replace(/-/g, "+").replace(/_/g, "/");
 		while (b64.length % 4) b64 += "=";
 		const bin = atob(b64);
-		const bytes = new Uint8Array(bin.length);
-		for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-		const data = decompress_gzip(bytes);
+		const data = decompress_gzip(new TextEncoder().encode(bin));
 		if (!data || data.length < 1) throw new Error("empty");
 		if (data[0] === 1) {
 			if (data.length < 30) throw new Error("invalid encrypted");
