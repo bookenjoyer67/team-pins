@@ -1,4 +1,4 @@
-import { f as compress_gzip_to_base64, m as decompress_gzip } from "./e2e_core2.js";
+import { f as compress_gzip_to_base64, h as decompress_gzip } from "./e2e_core2.js";
 //#region peer.js
 var defaultConfig = { iceServers: [
 	{ urls: "stun:stun.freeswitch.org:3478" },

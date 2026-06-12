@@ -3,11 +3,12 @@ import "../../chunks/e2e_core2.js";
 import "../../chunks/db2.js";
 import "../../chunks/peer2.js";
 import "../../chunks/state.js";
-import "../../chunks/dialogs.js";
 import "../../chunks/sync2.js";
 import "../../chunks/relay2.js";
-import { n as state$1, s as t } from "../../chunks/leaflet-shim.js";
+import { o as t, t as state$1 } from "../../chunks/state3.js";
 import { i as dialogs, n as cancelDialog } from "../../chunks/dialogs4.js";
+import "../../chunks/leaflet-shim.js";
+import { t as COLORS } from "../../chunks/helpers.js";
 new TextDecoder();
 new TextEncoder();
 //#endregion
@@ -259,18 +260,6 @@ function PinDetailModal($$renderer, $$props) {
 		}
 	});
 }
-//#endregion
-//#region helpers.js
-var COLORS = [
-	"#ef4444",
-	"#f97316",
-	"#eab308",
-	"#16a34a",
-	"#2563eb",
-	"#7c3aed",
-	"#ec4899",
-	"#6b7280"
-];
 //#endregion
 //#region src/lib/components/map/PinForm.svelte
 function PinForm($$renderer, $$props) {

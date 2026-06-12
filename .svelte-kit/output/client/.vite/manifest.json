@@ -1,6 +1,6 @@
 {
   ".svelte-kit/generated/client-optimized/app.js": {
-    "file": "_app/immutable/entry/app.Ba7to0tS.js",
+    "file": "_app/immutable/entry/app.1cWyAkJK.js",
     "name": "entry/app",
     "src": ".svelte-kit/generated/client-optimized/app.js",
     "isEntry": true,
@@ -16,41 +16,41 @@
     ]
   },
   ".svelte-kit/generated/client-optimized/nodes/0.js": {
-    "file": "_app/immutable/nodes/0.CRLY-Rfh.js",
+    "file": "_app/immutable/nodes/0.UUrcMZdF.js",
     "name": "nodes/0",
     "src": ".svelte-kit/generated/client-optimized/nodes/0.js",
     "isEntry": true,
     "imports": [
       "_ByPWl-Qi.js",
       "_BcgnSMxp.js",
-      "_9qaPKZC1.js",
-      "_ATBI-Lh8.js",
-      "_Bcewah97.js",
+      "_BEpytv0C.js",
+      "_B1MKqRyd.js",
+      "_BBdV91mH.js",
       "_CLh1dx0m.js",
       "_Bse9PeMV.js",
       "_DXLwiZ0H.js",
-      "_BwX2EYH4.js",
-      "_CAT2eY6u.js",
-      "_tS7rQMRp.js",
+      "_DLrj19aL.js",
+      "_C03gqNer.js",
+      "_DLy9WGAE.js",
       "_Ts0_UT6m.js",
       "_BGAVTRI8.js",
-      "_BoAutkRC.js"
+      "_DSsZuwcw.js"
     ],
     "dynamicImports": [
-      "map.js",
+      "map-import.js",
       "_Ts0_UT6m.js",
-      "_9qaPKZC1.js",
-      "_BoAutkRC.js",
-      "_l5JmAu8S.js",
-      "_tS7rQMRp.js",
+      "_BEpytv0C.js",
+      "_DSsZuwcw.js",
+      "_Do-qNzPy.js",
+      "_DLy9WGAE.js",
       "_BGAVTRI8.js",
-      "map-routing.js",
-      "_ATBI-Lh8.js",
+      "_BBO7BzlG.js",
+      "_B1MKqRyd.js",
       "map-schemas.js",
-      "_CAT2eY6u.js",
-      "sounds.js",
+      "_C03gqNer.js",
+      "_Cfcd-euX.js",
       "push-sub.js",
-      "map-offline.js",
+      "_LcRlOpyR.js",
       "mesh.js"
     ],
     "css": [
@@ -61,18 +61,18 @@
     ]
   },
   ".svelte-kit/generated/client-optimized/nodes/1.js": {
-    "file": "_app/immutable/nodes/1.C8mbEUxm.js",
+    "file": "_app/immutable/nodes/1.BL7eZwRA.js",
     "name": "nodes/1",
     "src": ".svelte-kit/generated/client-optimized/nodes/1.js",
     "isEntry": true,
     "imports": [
-      "_-1Dr8i-U.js",
+      "_DXf506ds.js",
       "_Bse9PeMV.js",
       "_DXLwiZ0H.js"
     ]
   },
   ".svelte-kit/generated/client-optimized/nodes/2.js": {
-    "file": "_app/immutable/nodes/2.BJYo7OXQ.js",
+    "file": "_app/immutable/nodes/2.B6--uWDd.js",
     "name": "nodes/2",
     "src": ".svelte-kit/generated/client-optimized/nodes/2.js",
     "isEntry": true,
@@ -81,40 +81,51 @@
       "_CLh1dx0m.js",
       "_Bse9PeMV.js",
       "_DXLwiZ0H.js",
-      "_BwX2EYH4.js",
+      "_DLrj19aL.js",
       "_Ts0_UT6m.js"
     ],
     "dynamicImports": [
-      "map.js",
-      "freeDraw.js",
-      "_CAT2eY6u.js"
+      "map-import.js",
+      "_CN3h_Iac.js",
+      "_C03gqNer.js"
     ],
     "css": [
       "_app/immutable/assets/2.DV2hPiWQ.css"
     ]
   },
-  "_-1Dr8i-U.js": {
-    "file": "_app/immutable/chunks/-1Dr8i-U.js",
-    "name": "client",
+  "_B1MKqRyd.js": {
+    "file": "_app/immutable/chunks/B1MKqRyd.js",
+    "name": "db",
     "imports": [
-      "_Bse9PeMV.js"
+      "_ByPWl-Qi.js"
     ]
   },
-  "_9qaPKZC1.js": {
-    "file": "_app/immutable/chunks/9qaPKZC1.js",
+  "_BBO7BzlG.js": {
+    "file": "_app/immutable/chunks/BBO7BzlG.js",
+    "name": "map-routing",
+    "imports": [
+      "_ByPWl-Qi.js",
+      "_Do-qNzPy.js",
+      "_CzoXcWn6.js",
+      "_CLh1dx0m.js",
+      "_Ts0_UT6m.js"
+    ]
+  },
+  "_BBdV91mH.js": {
+    "file": "_app/immutable/chunks/BBdV91mH.js",
+    "name": "helpers",
+    "imports": [
+      "_Do-qNzPy.js"
+    ]
+  },
+  "_BEpytv0C.js": {
+    "file": "_app/immutable/chunks/BEpytv0C.js",
     "name": "e2e_core",
     "imports": [
       "_ByPWl-Qi.js"
     ],
     "assets": [
       "_app/immutable/assets/e2e_core_bg.B1xls2O6.wasm"
-    ]
-  },
-  "_ATBI-Lh8.js": {
-    "file": "_app/immutable/chunks/ATBI-Lh8.js",
-    "name": "db",
-    "imports": [
-      "_ByPWl-Qi.js"
     ]
   },
   "_BGAVTRI8.js": {
@@ -124,38 +135,9 @@
       "_ByPWl-Qi.js"
     ]
   },
-  "_Bcewah97.js": {
-    "file": "_app/immutable/chunks/Bcewah97.js",
-    "name": "helpers",
-    "imports": [
-      "_l5JmAu8S.js"
-    ]
-  },
   "_BcgnSMxp.js": {
     "file": "_app/immutable/chunks/BcgnSMxp.js",
     "name": "preload-helper"
-  },
-  "_BoAutkRC.js": {
-    "file": "_app/immutable/chunks/BoAutkRC.js",
-    "name": "sync",
-    "imports": [
-      "_ByPWl-Qi.js",
-      "_BcgnSMxp.js",
-      "_9qaPKZC1.js",
-      "_ATBI-Lh8.js",
-      "_l5JmAu8S.js",
-      "_CAT2eY6u.js",
-      "_Ts0_UT6m.js",
-      "_DC4GWejO.js"
-    ],
-    "dynamicImports": [
-      "gossip.js",
-      "_9qaPKZC1.js",
-      "trust.js",
-      "_l5JmAu8S.js",
-      "_tS7rQMRp.js",
-      "map.js"
-    ]
   },
   "_Bse9PeMV.js": {
     "file": "_app/immutable/chunks/Bse9PeMV.js",
@@ -164,45 +146,154 @@
       "_ByPWl-Qi.js"
     ]
   },
-  "_BwX2EYH4.js": {
-    "file": "_app/immutable/chunks/BwX2EYH4.js",
-    "name": "state",
-    "imports": [
-      "_CIbWaJms.js",
-      "_Bse9PeMV.js",
-      "_Ts0_UT6m.js"
-    ]
-  },
   "_ByPWl-Qi.js": {
     "file": "_app/immutable/chunks/ByPWl-Qi.js",
-    "name": "rolldown-runtime"
+    "name": "chunk"
   },
-  "_CAT2eY6u.js": {
-    "file": "_app/immutable/chunks/CAT2eY6u.js",
+  "_C03gqNer.js": {
+    "file": "_app/immutable/chunks/C03gqNer.js",
     "name": "peer",
     "imports": [
       "_ByPWl-Qi.js",
-      "_9qaPKZC1.js"
+      "_BEpytv0C.js"
     ]
-  },
-  "_CIbWaJms.js": {
-    "file": "_app/immutable/chunks/CIbWaJms.js",
-    "name": "i18n"
   },
   "_CLh1dx0m.js": {
     "file": "_app/immutable/chunks/CLh1dx0m.js",
     "name": "leaflet-shim"
   },
-  "_DC4GWejO.js": {
-    "file": "_app/immutable/chunks/DC4GWejO.js",
-    "name": "store-helpers",
+  "_CN3h_Iac.js": {
+    "file": "_app/immutable/chunks/CN3h_Iac.js",
+    "name": "freeDraw",
     "imports": [
-      "_9qaPKZC1.js"
+      "_ByPWl-Qi.js",
+      "_BEpytv0C.js",
+      "_BBdV91mH.js",
+      "_CzoXcWn6.js",
+      "_CLh1dx0m.js",
+      "_Cfcd-euX.js",
+      "_Ts0_UT6m.js"
+    ]
+  },
+  "_CY_j8L8R.js": {
+    "file": "_app/immutable/chunks/CY_j8L8R.js",
+    "name": "trust",
+    "imports": [
+      "_ByPWl-Qi.js",
+      "_BEpytv0C.js",
+      "_Ts0_UT6m.js"
+    ]
+  },
+  "_Cfcd-euX.js": {
+    "file": "_app/immutable/chunks/Cfcd-euX.js",
+    "name": "sounds",
+    "imports": [
+      "_ByPWl-Qi.js"
+    ]
+  },
+  "_CzoXcWn6.js": {
+    "file": "_app/immutable/chunks/CzoXcWn6.js",
+    "name": "i18n"
+  },
+  "_DLrj19aL.js": {
+    "file": "_app/immutable/chunks/DLrj19aL.js",
+    "name": "state",
+    "imports": [
+      "_CzoXcWn6.js",
+      "_Bse9PeMV.js",
+      "_Ts0_UT6m.js"
+    ]
+  },
+  "_DLy9WGAE.js": {
+    "file": "_app/immutable/chunks/DLy9WGAE.js",
+    "name": "relay",
+    "imports": [
+      "_ByPWl-Qi.js",
+      "_BcgnSMxp.js",
+      "_BEpytv0C.js",
+      "_B1MKqRyd.js",
+      "_Do-qNzPy.js",
+      "_Ts0_UT6m.js"
+    ],
+    "dynamicImports": [
+      "_DZ2Pxhw3.js",
+      "_BEpytv0C.js"
+    ]
+  },
+  "_DSsZuwcw.js": {
+    "file": "_app/immutable/chunks/DSsZuwcw.js",
+    "name": "sync",
+    "imports": [
+      "_ByPWl-Qi.js",
+      "_BcgnSMxp.js",
+      "_BEpytv0C.js",
+      "_B1MKqRyd.js",
+      "_Do-qNzPy.js",
+      "_C03gqNer.js",
+      "_Ts0_UT6m.js",
+      "_Pk_pSrNB.js"
+    ],
+    "dynamicImports": [
+      "_DZ2Pxhw3.js",
+      "_BEpytv0C.js",
+      "_CY_j8L8R.js",
+      "_Do-qNzPy.js",
+      "_DLy9WGAE.js",
+      "map-import.js"
     ]
   },
   "_DXLwiZ0H.js": {
     "file": "_app/immutable/chunks/DXLwiZ0H.js",
     "name": "disclose-version"
+  },
+  "_DXf506ds.js": {
+    "file": "_app/immutable/chunks/DXf506ds.js",
+    "name": "client",
+    "imports": [
+      "_Bse9PeMV.js"
+    ]
+  },
+  "_DZ2Pxhw3.js": {
+    "file": "_app/immutable/chunks/DZ2Pxhw3.js",
+    "name": "gossip",
+    "imports": [
+      "_ByPWl-Qi.js",
+      "_B1MKqRyd.js",
+      "_Ts0_UT6m.js",
+      "_Pk_pSrNB.js"
+    ]
+  },
+  "_Do-qNzPy.js": {
+    "file": "_app/immutable/chunks/Do-qNzPy.js",
+    "name": "dialogs",
+    "imports": [
+      "_ByPWl-Qi.js",
+      "_BcgnSMxp.js",
+      "_BEpytv0C.js",
+      "_CzoXcWn6.js",
+      "_Ts0_UT6m.js"
+    ],
+    "dynamicImports": [
+      "_BGAVTRI8.js",
+      "_C03gqNer.js"
+    ]
+  },
+  "_LcRlOpyR.js": {
+    "file": "_app/immutable/chunks/LcRlOpyR.js",
+    "name": "map-offline",
+    "imports": [
+      "_ByPWl-Qi.js",
+      "_B1MKqRyd.js",
+      "_Do-qNzPy.js",
+      "_Ts0_UT6m.js"
+    ]
+  },
+  "_Pk_pSrNB.js": {
+    "file": "_app/immutable/chunks/Pk_pSrNB.js",
+    "name": "store-helpers",
+    "imports": [
+      "_BEpytv0C.js"
+    ]
   },
   "_Ts0_UT6m.js": {
     "file": "_app/immutable/chunks/Ts0_UT6m.js",
@@ -211,157 +302,117 @@
       "_ByPWl-Qi.js"
     ]
   },
-  "_l5JmAu8S.js": {
-    "file": "_app/immutable/chunks/l5JmAu8S.js",
-    "name": "dialogs",
-    "imports": [
-      "_ByPWl-Qi.js",
-      "_BcgnSMxp.js",
-      "_9qaPKZC1.js",
-      "_CIbWaJms.js",
-      "_Ts0_UT6m.js"
-    ],
-    "dynamicImports": [
-      "_BGAVTRI8.js",
-      "_CAT2eY6u.js"
-    ]
-  },
-  "_tS7rQMRp.js": {
-    "file": "_app/immutable/chunks/tS7rQMRp.js",
-    "name": "relay",
-    "imports": [
-      "_ByPWl-Qi.js",
-      "_BcgnSMxp.js",
-      "_9qaPKZC1.js",
-      "_ATBI-Lh8.js",
-      "_l5JmAu8S.js",
-      "_Ts0_UT6m.js"
-    ],
-    "dynamicImports": [
-      "gossip.js",
-      "_9qaPKZC1.js"
-    ]
-  },
   "core/pkg/e2e_core_bg.wasm": {
     "file": "_app/immutable/assets/e2e_core_bg.B1xls2O6.wasm",
     "src": "core/pkg/e2e_core_bg.wasm"
   },
-  "freeDraw.js": {
-    "file": "_app/immutable/chunks/DjpCPJNQ.js",
-    "name": "freeDraw",
-    "src": "freeDraw.js",
+  "map-import.js": {
+    "file": "_app/immutable/chunks/CxuqUgjW.js",
+    "name": "map-import",
+    "src": "map-import.js",
     "isDynamicEntry": true,
     "imports": [
-      "_9qaPKZC1.js",
-      "_Bcewah97.js",
-      "_CIbWaJms.js",
+      "_ByPWl-Qi.js",
+      "_BcgnSMxp.js",
+      "_BEpytv0C.js",
+      "_B1MKqRyd.js",
+      "_Do-qNzPy.js",
+      "_CN3h_Iac.js",
+      "_DZ2Pxhw3.js",
+      "_BBdV91mH.js",
+      "_CzoXcWn6.js",
       "_CLh1dx0m.js",
-      "sounds.js",
-      "_Ts0_UT6m.js"
-    ]
-  },
-  "gossip.js": {
-    "file": "_app/immutable/chunks/DXJfyq15.js",
-    "name": "gossip",
-    "src": "gossip.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_ATBI-Lh8.js",
+      "_LcRlOpyR.js",
+      "_BBO7BzlG.js",
+      "map-schemas.js",
+      "_Cfcd-euX.js",
       "_Ts0_UT6m.js",
-      "_DC4GWejO.js"
-    ]
-  },
-  "map-offline.js": {
-    "file": "_app/immutable/chunks/DZwH7W2X.js",
-    "name": "map-offline",
-    "src": "map-offline.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_ATBI-Lh8.js",
-      "_l5JmAu8S.js",
-      "_Ts0_UT6m.js"
-    ]
-  },
-  "map-routing.js": {
-    "file": "_app/immutable/chunks/C-erZ-_T.js",
-    "name": "map-routing",
-    "src": "map-routing.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_l5JmAu8S.js",
-      "_CIbWaJms.js",
-      "_CLh1dx0m.js",
-      "_Ts0_UT6m.js"
+      "_CY_j8L8R.js"
+    ],
+    "dynamicImports": [
+      "_DLy9WGAE.js",
+      "_DZ2Pxhw3.js",
+      "_BEpytv0C.js",
+      "map-import.js",
+      "node_modules/maplibre-gl/dist/maplibre-gl.js",
+      "node_modules/pmtiles/dist/index.js",
+      "_BBO7BzlG.js"
     ]
   },
   "map-schemas.js": {
-    "file": "_app/immutable/chunks/CmBfjpvC.js",
+    "file": "_app/immutable/chunks/B4owZ2yB.js",
     "name": "map-schemas",
     "src": "map-schemas.js",
     "isDynamicEntry": true,
     "imports": [
-      "_l5JmAu8S.js",
-      "_CIbWaJms.js",
+      "_BEpytv0C.js",
+      "_B1MKqRyd.js",
+      "_Do-qNzPy.js",
+      "_CzoXcWn6.js",
       "_Ts0_UT6m.js"
     ]
   },
   "map.js": {
-    "file": "_app/immutable/chunks/CBV69UCE.js",
+    "file": "_app/immutable/chunks/BcculCtF.js",
     "name": "map",
     "src": "map.js",
-    "isDynamicEntry": true
+    "isDynamicEntry": true,
+    "imports": [
+      "_Do-qNzPy.js",
+      "map-import.js",
+      "map-schemas.js"
+    ]
   },
   "mesh.js": {
-    "file": "_app/immutable/chunks/CYG-0RmH.js",
+    "file": "_app/immutable/chunks/CLtSlhLa.js",
     "name": "mesh",
     "src": "mesh.js",
     "isDynamicEntry": true,
     "imports": [
       "_ByPWl-Qi.js",
       "_BcgnSMxp.js",
-      "_l5JmAu8S.js",
+      "_Do-qNzPy.js",
       "_CLh1dx0m.js",
       "_Ts0_UT6m.js",
-      "_DC4GWejO.js",
-      "_BoAutkRC.js"
+      "_Pk_pSrNB.js",
+      "_DSsZuwcw.js"
     ],
     "dynamicImports": [
-      "gossip.js"
+      "_DZ2Pxhw3.js"
     ]
   },
   "node_modules/@sveltejs/kit/src/runtime/client/entry.js": {
-    "file": "_app/immutable/entry/start.i9ny2zUB.js",
+    "file": "_app/immutable/entry/start.BEWkG8zA.js",
     "name": "entry/start",
     "src": "node_modules/@sveltejs/kit/src/runtime/client/entry.js",
     "isEntry": true,
     "imports": [
-      "_-1Dr8i-U.js"
+      "_DXf506ds.js"
     ]
   },
+  "node_modules/maplibre-gl/dist/maplibre-gl.js": {
+    "file": "_app/immutable/chunks/DCWE6aTN.js",
+    "name": "maplibre-gl",
+    "src": "node_modules/maplibre-gl/dist/maplibre-gl.js",
+    "isDynamicEntry": true,
+    "imports": [
+      "_ByPWl-Qi.js"
+    ]
+  },
+  "node_modules/pmtiles/dist/index.js": {
+    "file": "_app/immutable/chunks/CH2yYhPT.js",
+    "name": "dist",
+    "src": "node_modules/pmtiles/dist/index.js",
+    "isDynamicEntry": true
+  },
   "push-sub.js": {
-    "file": "_app/immutable/chunks/D-MNovFW.js",
+    "file": "_app/immutable/chunks/DUrVoPqZ.js",
     "name": "push-sub",
     "src": "push-sub.js",
     "isDynamicEntry": true,
     "imports": [
-      "_l5JmAu8S.js",
-      "_tS7rQMRp.js"
-    ]
-  },
-  "sounds.js": {
-    "file": "_app/immutable/chunks/DvNY6M9L.js",
-    "name": "sounds",
-    "src": "sounds.js",
-    "isDynamicEntry": true
-  },
-  "trust.js": {
-    "file": "_app/immutable/chunks/BI8oeZPa.js",
-    "name": "trust",
-    "src": "trust.js",
-    "isDynamicEntry": true,
-    "imports": [
-      "_9qaPKZC1.js",
-      "_Ts0_UT6m.js"
+      "_Do-qNzPy.js",
+      "_DLy9WGAE.js"
     ]
   },
   "zig-core/pkg/spatial.wasm": {

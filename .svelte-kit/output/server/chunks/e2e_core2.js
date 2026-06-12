@@ -328,6 +328,24 @@ function compress_gzip_to_base64(data) {
 	}
 }
 /**
+* @param {string} geojson_json
+* @returns {string}
+*/
+function compute_geometry(geojson_json) {
+	let deferred2_0;
+	let deferred2_1;
+	try {
+		const ptr0 = passStringToWasm0(geojson_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+		const len0 = WASM_VECTOR_LEN;
+		const ret = wasm.compute_geometry(ptr0, len0);
+		deferred2_0 = ret[0];
+		deferred2_1 = ret[1];
+		return getStringFromWasm0(ret[0], ret[1]);
+	} finally {
+		wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+	}
+}
+/**
 * @param {string} hex
 * @returns {Uint8Array}
 */
@@ -351,6 +369,23 @@ function decompress_gzip(data) {
 	var v2 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
 	wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
 	return v2;
+}
+/**
+* @param {string} ciphertext_hex
+* @param {string} nonce_hex
+* @param {Uint8Array} dek
+* @returns {any}
+*/
+function decrypt_annotation(ciphertext_hex, nonce_hex, dek) {
+	const ptr0 = passStringToWasm0(ciphertext_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+	const len0 = WASM_VECTOR_LEN;
+	const ptr1 = passStringToWasm0(nonce_hex, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+	const len1 = WASM_VECTOR_LEN;
+	const ptr2 = passArray8ToWasm0(dek, wasm.__wbindgen_malloc);
+	const len2 = WASM_VECTOR_LEN;
+	const ret = wasm.decrypt_annotation(ptr0, len0, ptr1, len1, ptr2, len2);
+	if (ret[2]) throw takeFromExternrefTable0(ret[1]);
+	return takeFromExternrefTable0(ret[0]);
 }
 /**
 * @param {string} ciphertext_hex
@@ -498,6 +533,24 @@ function deserialize_container(binary) {
 		return getStringFromWasm0(ptr2, len2);
 	} finally {
 		wasm.__wbindgen_free(deferred3_0, deferred3_1, 1);
+	}
+}
+/**
+* @param {string} points_json
+* @returns {string}
+*/
+function detect_freehand_shape(points_json) {
+	let deferred2_0;
+	let deferred2_1;
+	try {
+		const ptr0 = passStringToWasm0(points_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+		const len0 = WASM_VECTOR_LEN;
+		const ret = wasm.detect_freehand_shape(ptr0, len0);
+		deferred2_0 = ret[0];
+		deferred2_1 = ret[1];
+		return getStringFromWasm0(ret[0], ret[1]);
+	} finally {
+		wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
 	}
 }
 /**
@@ -701,6 +754,26 @@ function sign(payload_hex, secret_key_hex) {
 		return getStringFromWasm0(ptr3, len3);
 	} finally {
 		wasm.__wbindgen_free(deferred4_0, deferred4_1, 1);
+	}
+}
+/**
+* Takes a JSON array of [lng, lat] pairs and returns simplified [lng, lat] pairs.
+* @param {string} path_json
+* @param {number} tolerance
+* @returns {string}
+*/
+function simplify_freehand(path_json, tolerance) {
+	let deferred2_0;
+	let deferred2_1;
+	try {
+		const ptr0 = passStringToWasm0(path_json, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+		const len0 = WASM_VECTOR_LEN;
+		const ret = wasm.simplify_freehand(ptr0, len0, tolerance);
+		deferred2_0 = ret[0];
+		deferred2_1 = ret[1];
+		return getStringFromWasm0(ret[0], ret[1]);
+	} finally {
+		wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
 	}
 }
 /**
@@ -1227,4 +1300,4 @@ async function __wbg_init(module_or_path) {
 	return __wbg_finalize_init(instance, module);
 }
 //#endregion
-export { generate_user_keypair as A, encrypt_geojson as C, generate_dek as D, encrypt_with_password as E, unwrap_dek as F, verify as I, wrap_dek as L, generate_uuid as M, serialize_container as N, generate_qr_svg as O, sign as P, encrypt_bytes_with_password as S, encrypt_raw_bytes as T, decrypt_pin_data as _, base64_encode as a, deserialize_container as b, compact_and_pack_json as c, compress_gzip_max as d, compress_gzip_to_base64 as f, decrypt_geojson as g, decrypt_bytes_with_password as h, base64_decode as i, generate_user_keypair_from_password as j, generate_signing_keypair as k, compact_pack_gzip_json as l, decompress_gzip as m, Store as n, base64url_decode as o, decode_hex as p, __wbg_init as r, base64url_encode as s, ChunkStore as t, compress_gzip as u, decrypt_raw_bytes as v, encrypt_pin_data as w, encode_hex as x, decrypt_with_password as y };
+export { generate_dek as A, verify as B, detect_freehand_shape as C, encrypt_pin_data as D, encrypt_geojson as E, generate_uuid as F, serialize_container as I, sign as L, generate_signing_keypair as M, generate_user_keypair as N, encrypt_raw_bytes as O, generate_user_keypair_from_password as P, simplify_freehand as R, deserialize_container as S, encrypt_bytes_with_password as T, wrap_dek as V, decrypt_bytes_with_password as _, base64_encode as a, decrypt_raw_bytes as b, compact_and_pack_json as c, compress_gzip_max as d, compress_gzip_to_base64 as f, decrypt_annotation as g, decompress_gzip as h, base64_decode as i, generate_qr_svg as j, encrypt_with_password as k, compact_pack_gzip_json as l, decode_hex as m, Store as n, base64url_decode as o, compute_geometry as p, __wbg_init as r, base64url_encode as s, ChunkStore as t, compress_gzip as u, decrypt_geojson as v, encode_hex as w, decrypt_with_password as x, decrypt_pin_data as y, unwrap_dek as z };

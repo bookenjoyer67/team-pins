@@ -1,7 +1,7 @@
-import { F as unwrap_dek, I as verify, L as wrap_dek, x as encode_hex } from "./e2e_core2.js";
-import { C as getSubscribedLayer, D as importPin, E as importDrawings, H as saveTeam, M as saveCommunity, O as importPins, T as importDrawing, U as saveTombstone, V as saveSubscribedLayer, _ as getPin, a as deletePins, i as deletePin, j as saveChain, k as saveAnnotation, l as getAnnotation, m as getDrawing, o as getAllCommunities, p as getCommunity, r as deleteDrawings, t as deleteChain, w as getTeam } from "./db2.js";
+import { B as verify, V as wrap_dek, w as encode_hex, z as unwrap_dek } from "./e2e_core2.js";
+import { B as importPin, C as getCommunity, F as getSubscribedLayer, G as saveChain, I as getTeam, O as getPin, R as importDrawing, U as saveAnnotation, V as importPins, c as deletePins, d as getAllCommunities, g as getAnnotation, it as saveTombstone, nt as saveSubscribedLayer, o as deleteDrawings, q as saveCommunity, r as deleteChain, rt as saveTeam, s as deletePin, w as getDrawing, z as importDrawings } from "./db2.js";
 import { t as state } from "./state.js";
-import { p as toast } from "./dialogs.js";
+import { m as toast } from "./dialogs.js";
 //#region relay.js
 var connections = /* @__PURE__ */ new Map();
 var lastSyncTimestamps = /* @__PURE__ */ new Map();
@@ -802,6 +802,10 @@ function getSavedRelayUrls() {
 	if (!raw) return [];
 	return raw.split(",").map((u) => u.trim().replace(/\/$/, "")).filter(Boolean);
 }
+function saveRelayUrls(urls) {
+	const unique = [...new Set(urls.map((u) => u.trim().replace(/\/$/, "")).filter(Boolean))];
+	localStorage.setItem("pins-relay-urls", unique.join(","));
+}
 async function connectAll() {
 	const urls = getSavedRelayUrls();
 	try {
@@ -924,6 +928,70 @@ async function handleMemberDekReady(msg) {
 			console.warn("[relay]", e.message);
 		}
 	} else console.log("[relay] member_dek_ready: pubkey mismatch — msg:", member_pubkey?.slice(0, 16), "vs team:", team.public_key?.slice(0, 16));
+}
+async function addMember(communityId, pubkey, displayName, role) {
+	if (!state.signingSecretKey) return;
+	const { sign, encode_hex } = await import("./e2e_core.js");
+	const ts = Date.now();
+	const signature = sign(encode_hex(new TextEncoder().encode(communityId + "|" + pubkey + "|" + role + "|" + ts)), state.signingSecretKey);
+	const conn = getConn();
+	if (!conn || !isAlive(conn)) return;
+	conn.ws.send(JSON.stringify({
+		type: "add_member",
+		community_id: communityId,
+		pubkey,
+		display_name: displayName,
+		role,
+		signature,
+		timestamp: ts
+	}));
+}
+async function removeMember(communityId, pubkey) {
+	const conn = getConn();
+	if (!conn || !isAlive(conn)) return;
+	conn.ws.send(JSON.stringify({
+		type: "remove_member",
+		community_id: communityId,
+		pubkey
+	}));
+}
+async function createInviteToken(communityId, role, expiry, maxUses) {
+	if (!state.signingSecretKey) return null;
+	const { sign, generate_uuid, encode_hex } = await import("./e2e_core.js");
+	const nonce = generate_uuid();
+	const signature = sign(encode_hex(new TextEncoder().encode(communityId + "|" + nonce + "|" + role + "|" + expiry + "|" + maxUses)), state.signingSecretKey);
+	const conn = getConn();
+	if (!conn || !isAlive(conn)) return null;
+	conn.ws.send(JSON.stringify({
+		type: "create_token",
+		community_id: communityId,
+		nonce,
+		role,
+		expiry,
+		max_uses: maxUses,
+		signature
+	}));
+	return {
+		nonce,
+		role,
+		expiry,
+		maxUses,
+		signature,
+		communityId
+	};
+}
+async function updateGovernance(communityId, governance) {
+	if (!state.signingSecretKey) return;
+	const { sign, encode_hex } = await import("./e2e_core.js");
+	const signature = sign(encode_hex(new TextEncoder().encode(communityId + "|" + JSON.stringify(governance))), state.signingSecretKey);
+	const conn = getConn();
+	if (!conn || !isAlive(conn)) return;
+	conn.ws.send(JSON.stringify({
+		type: "update_governance",
+		community_id: communityId,
+		governance,
+		signature
+	}));
 }
 async function publishLayer(communityId, layerId, name, topicTags, layerDekWrapped) {
 	const conn = getConn();
@@ -1098,4 +1166,4 @@ async function handleSubscribedSync(msg) {
 	window._renderUI?.();
 }
 //#endregion
-export { unpublishCommunity as C, syncSubscribedLayers as S, rewrapMemberDek as _, fetchCommunityList as a, subscribeLayer as b, getSavedRelayUrls as c, listPublicLayers as d, publishCommunity as f, requestMemberDek as g, queryCommunities as h, disconnect as i, isRelayConnected as l, pushDelta as m, connectAll as n, flagPin as o, publishLayer as p, deleteCommunity as r, getCommunityPeers as s, connect as t, joinCommunity as u, sendAnnotationVote as v, syncDelta as x, sendPinVote as y };
+export { sendPinVote as C, unpublishCommunity as D, syncSubscribedLayers as E, updateGovernance as O, sendAnnotationVote as S, syncDelta as T, queryCommunities as _, deleteCommunity as a, rewrapMemberDek as b, flagPin as c, isRelayConnected as d, joinCommunity as f, pushDelta as g, publishLayer as h, createInviteToken as i, getCommunityPeers as l, publishCommunity as m, connect as n, disconnect as o, listPublicLayers as p, connectAll as r, fetchCommunityList as s, addMember as t, getSavedRelayUrls as u, removeMember as v, subscribeLayer as w, saveRelayUrls as x, requestMemberDek as y };

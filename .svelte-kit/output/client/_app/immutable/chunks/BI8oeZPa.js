@@ -1,1 +1,0 @@
-import{I as e,S as t}from"./9qaPKZC1.js";import"./Ts0_UT6m.js";function n(n,r){if(!r.signature||!r.pubkey||!r.direction||!r.timestamp)return!1;let i=`${n}|${r.direction}|${r.timestamp}`;return e(t(new TextEncoder().encode(i)),r.signature,r.pubkey)}export{n as verifyVoteSignature};

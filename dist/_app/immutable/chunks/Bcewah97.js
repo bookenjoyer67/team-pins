@@ -1,1 +1,0 @@
-import"./l5JmAu8S.js";var e=[`#ef4444`,`#f97316`,`#eab308`,`#16a34a`,`#2563eb`,`#7c3aed`,`#ec4899`,`#6b7280`];function t(e){let t=e.trim();return t.startsWith(`#`)&&(t=t.slice(1)),/^[0-9a-fA-F]{6}$/.test(t)?`#`+t.toLowerCase():null}export{t as n,e as t};
