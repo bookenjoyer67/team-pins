@@ -1,6 +1,6 @@
 import { state } from './state.js';
 import L from 'leaflet';
-import { encrypt_pin_data, generate_uuid } from './core/pkg/e2e_core.js';
+import { encrypt_pin_data, encrypt_raw_bytes, generate_uuid } from './core/pkg/e2e_core.js';
 import * as DB from './db.js';
 
 let _pinTitle = '';
@@ -9,6 +9,7 @@ let _pickerPinId = '';
 let _currentLat = null;
 let _currentLng = null;
 let _schemaCreated = false;
+let _customData = {};
 
 export function init() {
     if (!isPicker()) return;
@@ -20,6 +21,10 @@ export function init() {
         if (e.data?.type === 'komun:pin-details') {
             if (e.data.title !== undefined) _pinTitle = e.data.title;
             if (e.data.body !== undefined) _pinNote = e.data.body;
+            if (e.data.kind !== undefined) _customData.kind = e.data.kind;
+            if (e.data.category !== undefined) _customData.category = e.data.category;
+            if (e.data.urgency !== undefined) _customData.urgency = e.data.urgency;
+            if (e.data.contact !== undefined) _customData.contact = e.data.contact;
         }
         if (e.data?.type === 'komun:submit') {
             pushRelayPin();
@@ -78,6 +83,12 @@ function pushRelayPin() {
             layer_id: layer?.layer_id || "", emoji: "",
             schema_id: layer?.default_schema_id || "",
         };
+        const keys = Object.keys(_customData);
+        if (keys.length > 0) {
+            const json = new TextEncoder().encode(JSON.stringify(_customData));
+            const cenc = encrypt_raw_bytes(json, state.dek);
+            pin.custom_data = { ciphertext: cenc.ciphertext, nonce: cenc.nonce, mime_type: 'application/json' };
+        }
         DB.savePin(pin).catch(e => console.warn('[picker] save failed:', e));
         window._relayPushDelta?.(state.currentSet, [pin], [], [], [], [], [], [], {});
         console.log('[picker] pin pushed to relay at', _currentLat, _currentLng, 'title:', _pinTitle);
