@@ -358,10 +358,10 @@ async function processHashJoin(hash, pendingB64) {
 
 				if (isUninitialized) {
 					const dek = generate_dek();
-					myWrappedDek = wrap_dek(dek, communityKp.public);
+					myWrappedDek = wrap_dek(dek, public_key);
 				} else {
 					try {
-						const dk = unwrap_dek(result.wrapped_dek, communityKp.secret);
+						const dk = unwrap_dek(result.wrapped_dek, secret_key);
 						if (dk) myWrappedDek = result.wrapped_dek;
 					} catch (_) {}
 				}
