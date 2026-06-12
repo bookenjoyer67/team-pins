@@ -19,6 +19,10 @@ function getCommunityConn(communityId) {
       if (conn && isAlive(conn)) return conn;
     }
   }
+  // fallback — any alive relay connection
+  for (const conn of connections.values()) {
+    if (isAlive(conn)) return conn;
+  }
   return null;
 }
 

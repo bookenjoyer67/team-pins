@@ -350,8 +350,23 @@ async function processHashJoin(hash, pendingB64) {
 				public_key = encode_hex(kp.public);
 				secret_key = encode_hex(kp.secret);
 				myWrappedDek = result.wrapped_dek || '';
+			} else if (embeddedCommunitySk) {
+				const { generate_user_keypair_from_password, generate_dek, wrap_dek, unwrap_dek, encode_hex } = await import('../../core/pkg/e2e_core.js');
+				const communityKp = generate_user_keypair_from_password(embeddedCommunitySk, sid);
+				public_key = encode_hex(communityKp.public);
+				secret_key = encode_hex(communityKp.secret);
+
+				if (isUninitialized) {
+					const dek = generate_dek();
+					myWrappedDek = wrap_dek(dek, communityKp.public);
+				} else {
+					try {
+						const dk = unwrap_dek(result.wrapped_dek, communityKp.secret);
+						if (dk) myWrappedDek = result.wrapped_dek;
+					} catch (_) {}
+				}
 			} else {
-				const { generate_user_keypair, generate_dek, wrap_dek, unwrap_dek, encode_hex } = await import('../../core/pkg/e2e_core.js');
+				const { generate_user_keypair, generate_dek, wrap_dek, encode_hex } = await import('../../core/pkg/e2e_core.js');
 				const kp = generate_user_keypair();
 				public_key = encode_hex(kp.public);
 				secret_key = encode_hex(kp.secret);
@@ -360,14 +375,6 @@ async function processHashJoin(hash, pendingB64) {
 				if (isUninitialized) {
 					const dek = generate_dek();
 					myWrappedDek = wrap_dek(dek, public_key);
-				} else if (!myWrappedDek && embeddedCommunitySk) {
-					try {
-						const dk = unwrap_dek(result.wrapped_dek, embeddedCommunitySk);
-						if (dk) {
-							myWrappedDek = wrap_dek(dk, public_key);
-							Relay.rewrapMemberDek(sid, public_key, myWrappedDek);
-						}
-					} catch (_) {}
 				}
 			}
 

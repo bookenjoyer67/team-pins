@@ -828,8 +828,25 @@ async function joinCommunityFromInvite({
     public_key = encode_hex(kp.public);
     secret_key = encode_hex(kp.secret);
     myWrappedDek = result.wrapped_dek;
+  } else if (embeddedCommunitySk) {
+    const { generate_user_keypair_from_password, generate_dek, wrap_dek, unwrap_dek, encode_hex } = await import("./core/pkg/e2e_core.js");
+    const communityKp = generate_user_keypair_from_password(embeddedCommunitySk, sid);
+    public_key = encode_hex(communityKp.public);
+    secret_key = encode_hex(communityKp.secret);
+
+    if (isUninitialized) {
+      const dek = generate_dek();
+      myWrappedDek = wrap_dek(dek, communityKp.public);
+    } else {
+      try {
+        const dk = unwrap_dek(result.wrapped_dek, communityKp.secret);
+        if (dk) myWrappedDek = result.wrapped_dek;
+      } catch (e) {
+        console.warn(logTag, "SK unwrap fallback failed:", e.message);
+      }
+    }
   } else {
-    const { generate_user_keypair, generate_dek, wrap_dek, unwrap_dek, encode_hex, decrypt_with_password, decode_hex } = await import("./core/pkg/e2e_core.js");
+    const { generate_user_keypair, generate_dek, wrap_dek, encode_hex, decrypt_with_password, decode_hex } = await import("./core/pkg/e2e_core.js");
     const kp = generate_user_keypair();
     public_key = encode_hex(kp.public);
     secret_key = encode_hex(kp.secret);
@@ -837,18 +854,6 @@ async function joinCommunityFromInvite({
     if (isUninitialized) {
       const dek = generate_dek();
       myWrappedDek = wrap_dek(dek, public_key);
-    } else if (embeddedCommunitySk && !myWrappedDek) {
-      try {
-        const dk = unwrap_dek(result.wrapped_dek, embeddedCommunitySk);
-        if (dk) {
-          myWrappedDek = wrap_dek(dk, public_key);
-          import("./relay.js").then(r => {
-            r.rewrapMemberDek(sid, public_key, myWrappedDek);
-          }).catch(e => { console.warn("DEK rewrap failed:", e); });
-        }
-      } catch (e) {
-        console.warn(logTag, "SK unwrap fallback failed:", e.message);
-      }
     }
 
     if (!myWrappedDek && result.join_wrapped_dek) {
