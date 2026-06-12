@@ -5,17 +5,24 @@ import * as DB from './db.js';
 
 let _pinTitle = '';
 let _pinNote = '';
+let _pickerPinId = '';
+let _currentLat = null;
+let _currentLng = null;
 let _schemaCreated = false;
 
 export function init() {
     if (!isPicker()) return;
     window._pickMode = true;
     document.body.classList.add('picking');
+    _pickerPinId = generate_uuid();
 
     window.addEventListener('message', (e) => {
         if (e.data?.type === 'komun:pin-details') {
             if (e.data.title !== undefined) _pinTitle = e.data.title;
             if (e.data.body !== undefined) _pinNote = e.data.body;
+        }
+        if (e.data?.type === 'komun:submit') {
+            pushRelayPin();
         }
     });
 
@@ -55,8 +62,32 @@ async function ensureSchema() {
     } catch (e) { console.warn('[picker] schema creation failed:', e.message); }
 }
 
+function pushRelayPin() {
+    if (!_currentLat || !_currentLng) return;
+    if (!state.dek || !state.currentSet || !state.signingPublicKey) {
+        console.warn('[picker] push skipped: not ready');
+        return;
+    }
+    try {
+        const enc = encrypt_pin_data(_pinTitle, _pinNote, _currentLat, _currentLng, "#2563eb", state.dek);
+        const layer = state.layers[0];
+        const pin = {
+            pin_id: _pickerPinId, community_id: state.currentSet,
+            ciphertext: enc.ciphertext, nonce: enc.nonce,
+            author_pubkey: state.signingPublicKey, created_at: Date.now(),
+            layer_id: layer?.layer_id || "", emoji: "",
+            schema_id: layer?.default_schema_id || "",
+        };
+        DB.savePin(pin).catch(e => console.warn('[picker] save failed:', e));
+        window._relayPushDelta?.(state.currentSet, [pin], [], [], [], [], [], [], {});
+        console.log('[picker] pin pushed to relay at', _currentLat, _currentLng, 'title:', _pinTitle);
+    } catch (e) { console.warn('[picker] pin failed:', e.message); }
+}
+
 export function placePin(lat, lng) {
     if (!state.map || !window._pickMode) return;
+    _currentLat = lat;
+    _currentLng = lng;
     const icon = L.divIcon({
         className: 'pick-marker',
         html: '<svg width="28" height="40" viewBox="0 0 28 40" style="filter:drop-shadow(0 2px 4px rgba(0,0,0,0.3));cursor:grab;"><path d="M14 0C6.27 0 0 6.27 0 14c0 10.5 14 26 14 26s14-15.5 14-26C28 6.27 21.73 0 14 0z" fill="#2563eb" stroke="#fff" stroke-width="2"/><circle cx="14" cy="14" r="6" fill="#fff"/></svg>',
@@ -68,30 +99,12 @@ export function placePin(lat, lng) {
         permanent: true, direction: 'top', className: 'pick-tooltip'
     }).openTooltip();
 
-    const pushRelayPin = (posLat, posLng) => {
-        if (state.dek && state.currentSet && state.signingPublicKey) {
-            try {
-                const enc = encrypt_pin_data(_pinTitle, _pinNote, posLat, posLng, "#2563eb", state.dek);
-                const layer = state.layers[0];
-                const pin = {
-                    pin_id: generate_uuid(), community_id: state.currentSet,
-                    ciphertext: enc.ciphertext, nonce: enc.nonce,
-                    author_pubkey: state.signingPublicKey, created_at: Date.now(),
-                    layer_id: layer?.layer_id || "", emoji: "",
-                    schema_id: layer?.default_schema_id || "",
-                };
-                DB.savePin(pin).catch(e => console.warn('[picker] save failed:', e));
-                window._relayPushDelta?.(state.currentSet, [pin], [], [], [], [], [], [], {});
-                console.log('[picker] pin pushed to relay at', posLat, posLng);
-            } catch (e) { console.warn('[picker] pin failed:', e.message); }
-        }
-    };
-
     marker.on('dragend', () => {
         const pos = marker.getLatLng();
+        _currentLat = pos.lat;
+        _currentLng = pos.lng;
         marker.setTooltipContent(`${fmt(pos.lat)}, ${fmt(pos.lng)}`);
         try { window.parent.postMessage({ type: 'piggpin:location-picked', lat: pos.lat, lng: pos.lng }, '*'); } catch (_) {}
-        pushRelayPin(pos.lat, pos.lng);
     });
     try { window.parent.postMessage({ type: 'piggpin:location-picked', lat, lng }, '*'); } catch (_) {}
 }
