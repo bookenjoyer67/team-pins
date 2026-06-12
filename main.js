@@ -890,6 +890,23 @@ async function joinCommunityFromInvite({
 
   // Caller-provided post-join hook (Block A: saveRelayToList; Block B: history.replaceState + loadSetList)
   await Map.switchSet(sid);
+  const gov = state.currentCommunity?.governance;
+  if (gov?.default_schema) {
+    const ds = gov.default_schema;
+    const existing = await DB.getSchemas();
+    let schemaId;
+    if (existing.find(s => s.name === ds.name)) {
+      schemaId = existing.find(s => s.name === ds.name).schema_id;
+    } else {
+      schemaId = generate_uuid();
+      await DB.saveSchema({ schema_id: schemaId, name: ds.name, fields: ds.fields || [] });
+      state.schemas.push({ schema_id: schemaId, name: ds.name, fields: ds.fields });
+    }
+    if (state.layers[0] && !state.layers[0].default_schema_id) {
+      state.layers[0].default_schema_id = schemaId;
+      await DB.saveLayers(sid, state.layers);
+    }
+  }
   await Relay.syncDelta(sid);
   if (isUninitialized) {
     import("./relay.js").then(r => r.publishCommunity(sid, true));

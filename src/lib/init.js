@@ -393,6 +393,23 @@ async function processHashJoin(hash, pendingB64) {
 			const { switchSet, loadPins, loadDrawings, loadSetList } = await import('../../map.js');
 			await loadSetList();
 			await switchSet(sid);
+			const gov = state.currentCommunity?.governance;
+			if (gov?.default_schema) {
+				const ds = gov.default_schema;
+				const existing = await DB.getSchemas();
+				let schemaId;
+				if (existing.find(s => s.name === ds.name)) {
+					schemaId = existing.find(s => s.name === ds.name).schema_id;
+				} else {
+					schemaId = generate_uuid();
+					await DB.saveSchema({ schema_id: schemaId, name: ds.name, fields: ds.fields || [] });
+					state.schemas.push({ schema_id: schemaId, name: ds.name, fields: ds.fields });
+				}
+				if (state.layers[0] && !state.layers[0].default_schema_id) {
+					state.layers[0].default_schema_id = schemaId;
+					await DB.saveLayers(sid, state.layers);
+				}
+			}
 		await Relay.syncDelta(sid);
 		if (isUninitialized) {
 			await import('../../relay.js').then(r => r.publishCommunity(sid, true));
