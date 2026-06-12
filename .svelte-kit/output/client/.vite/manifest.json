@@ -1,6 +1,6 @@
 {
   ".svelte-kit/generated/client-optimized/app.js": {
-    "file": "_app/immutable/entry/app.DHwkfR30.js",
+    "file": "_app/immutable/entry/app.DI6Rn2AP.js",
     "name": "entry/app",
     "src": ".svelte-kit/generated/client-optimized/app.js",
     "isEntry": true,
@@ -16,7 +16,7 @@
     ]
   },
   ".svelte-kit/generated/client-optimized/nodes/0.js": {
-    "file": "_app/immutable/nodes/0.DOIPbCiG.js",
+    "file": "_app/immutable/nodes/0.CrK-JqeA.js",
     "name": "nodes/0",
     "src": ".svelte-kit/generated/client-optimized/nodes/0.js",
     "isEntry": true,
@@ -61,12 +61,12 @@
     ]
   },
   ".svelte-kit/generated/client-optimized/nodes/1.js": {
-    "file": "_app/immutable/nodes/1.BKxfumjY.js",
+    "file": "_app/immutable/nodes/1.D-xMwMQr.js",
     "name": "nodes/1",
     "src": ".svelte-kit/generated/client-optimized/nodes/1.js",
     "isEntry": true,
     "imports": [
-      "_CojguXr3.js",
+      "_CDgUNrhN.js",
       "_Bse9PeMV.js",
       "_DXLwiZ0H.js"
     ]
@@ -164,6 +164,13 @@
     "file": "_app/immutable/chunks/ByPWl-Qi.js",
     "name": "chunk"
   },
+  "_CDgUNrhN.js": {
+    "file": "_app/immutable/chunks/CDgUNrhN.js",
+    "name": "client",
+    "imports": [
+      "_Bse9PeMV.js"
+    ]
+  },
   "_CDh-FXPk.js": {
     "file": "_app/immutable/chunks/CDh-FXPk.js",
     "name": "e2e_core",
@@ -199,13 +206,6 @@
     "name": "sounds",
     "imports": [
       "_ByPWl-Qi.js"
-    ]
-  },
-  "_CojguXr3.js": {
-    "file": "_app/immutable/chunks/CojguXr3.js",
-    "name": "client",
-    "imports": [
-      "_Bse9PeMV.js"
     ]
   },
   "_CzoXcWn6.js": {
@@ -382,12 +382,12 @@
     ]
   },
   "node_modules/@sveltejs/kit/src/runtime/client/entry.js": {
-    "file": "_app/immutable/entry/start.DHAB5MPL.js",
+    "file": "_app/immutable/entry/start.CS6O_TyH.js",
     "name": "entry/start",
     "src": "node_modules/@sveltejs/kit/src/runtime/client/entry.js",
     "isEntry": true,
     "imports": [
-      "_CojguXr3.js"
+      "_CDgUNrhN.js"
     ]
   },
   "node_modules/maplibre-gl/dist/maplibre-gl.js": {

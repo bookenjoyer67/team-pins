@@ -3,12 +3,25 @@ import L from 'leaflet';
 import { encrypt_pin_data, generate_uuid } from './core/pkg/e2e_core.js';
 import * as DB from './db.js';
 
+let _pinTitle = '';
+let _pinNote = '';
+let _schemaCreated = false;
+
 export function init() {
     if (!isPicker()) return;
     window._pickMode = true;
     document.body.classList.add('picking');
+
+    window.addEventListener('message', (e) => {
+        if (e.data?.type === 'komun:pin-details') {
+            if (e.data.title !== undefined) _pinTitle = e.data.title;
+            if (e.data.body !== undefined) _pinNote = e.data.body;
+        }
+    });
+
     const enable = () => {
         if (state.currentSet && state.map && state.dek) {
+            ensureSchema();
             placePin(state.map.getCenter().lat, state.map.getCenter().lng);
         } else {
             setTimeout(enable, 500);
@@ -20,6 +33,26 @@ export function init() {
 function isPicker() {
     try { return new URLSearchParams(location.search).get('picker') === '1'; }
     catch (_) { return false; }
+}
+
+async function ensureSchema() {
+    if (_schemaCreated) return;
+    _schemaCreated = true;
+    const gov = state.currentCommunity?.governance;
+    if (!gov?.default_schema) return;
+    const ds = gov.default_schema;
+    try {
+        const existing = await DB.getSchemas();
+        if (existing.find(s => s.name === ds.name)) return;
+        const schemaId = generate_uuid();
+        await DB.saveSchema({ schema_id: schemaId, name: ds.name, fields: ds.fields || [] });
+        const layer = state.layers[0];
+        if (layer) {
+            layer.default_schema_id = schemaId;
+            await DB.saveLayers(state.currentSet, state.layers);
+        }
+        console.log('[picker] schema created:', ds.name, schemaId);
+    } catch (e) { console.warn('[picker] schema creation failed:', e.message); }
 }
 
 export function placePin(lat, lng) {
@@ -38,12 +71,14 @@ export function placePin(lat, lng) {
     const pushRelayPin = (posLat, posLng) => {
         if (state.dek && state.currentSet && state.signingPublicKey) {
             try {
-                const enc = encrypt_pin_data("", "", posLat, posLng, "#2563eb", state.dek);
+                const enc = encrypt_pin_data(_pinTitle, _pinNote, posLat, posLng, "#2563eb", state.dek);
+                const layer = state.layers[0];
                 const pin = {
                     pin_id: generate_uuid(), community_id: state.currentSet,
                     ciphertext: enc.ciphertext, nonce: enc.nonce,
                     author_pubkey: state.signingPublicKey, created_at: Date.now(),
-                    layer_id: state.layers[0]?.layer_id || "", emoji: "",
+                    layer_id: layer?.layer_id || "", emoji: "",
+                    schema_id: layer?.default_schema_id || "",
                 };
                 DB.savePin(pin).catch(e => console.warn('[picker] save failed:', e));
                 window._relayPushDelta?.(state.currentSet, [pin], [], [], [], [], [], [], {});
