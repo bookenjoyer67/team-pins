@@ -12,6 +12,7 @@ import * as Sync from '../../sync.js';
 import * as Relay from '../../relay.js';
 import * as Peer from '../../peer.js';
 import { state } from '../../state.js';
+import * as Picker from '../../picker.js';
 import { setLang, getLang } from './i18n/i18n.js';
 
 let _initPromise = null;
@@ -30,7 +31,6 @@ async function _doInit() {
 			return hasParam || window.self !== window.top;
 		} catch (_) { return false; }
 	})();
-	const isPicker = new URLSearchParams(location.search).get('picker') === '1';
 	window._isEmbed = isEmbed;
 	if (isEmbed) document.body.classList.add('embed');
 
@@ -124,19 +124,7 @@ async function _doInit() {
 		try {
 			window.parent.postMessage({ type: 'piggpin:ready' }, '*');
 		} catch (_) {}
-		if (isPicker) {
-			window._pickMode = true;
-			document.body.classList.add('picking');
-			const enable = () => {
-				if (state.currentSet && state.map && state.dek) {
-					const center = state.map.getCenter();
-					import('../../map.js').then(m => m.addPickMarker(center.lat, center.lng));
-				} else {
-					setTimeout(enable, 500);
-				}
-			};
-			setTimeout(enable, 1000);
-		}
+		Picker.init();
 	}
 
 	console.log('[init] App initialized');

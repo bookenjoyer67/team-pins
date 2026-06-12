@@ -17,6 +17,7 @@ import * as Map from "./map.js";
 import { init as initDrawer, initSliders as initDrawerSliders } from "./drawer.js";
 import * as Sync from "./sync.js";
 import * as Relay from "./relay.js";
+import * as Picker from './picker.js';
 import { initPushNotifications, togglePush, isPushEnabled, handlePushInfo } from "./push-sub.js";
 import { clearDiscoveryCache } from "./gossip.js";
 import { migrateAttestationsToVotes } from "./trust.js";
@@ -527,7 +528,6 @@ wasmReady.then(async () => {
     }
   }
 
-  const isPicker = new URLSearchParams(location.search).get("picker") === "1";
   if (isEmbed) {
     window.addEventListener("message", (e) => {
       if (e.data?.type === "komun:identity" && e.data.displayName) {
@@ -544,19 +544,7 @@ wasmReady.then(async () => {
     try {
       window.parent.postMessage({ type: "piggpin:ready" }, "*");
     } catch (_) {}
-    if (isPicker) {
-      window._pickMode = true;
-      document.body.classList.add("picking");
-      const enable = () => {
-        if (state.currentSet && state.map && state.dek) {
-          const center = state.map.getCenter();
-          Map.addPickMarker(center.lat, center.lng);
-        } else {
-          setTimeout(enable, 500);
-        }
-      };
-      setTimeout(enable, 1000);
-    }
+    Picker.init();
   }
 
   if (window.location.hash.startsWith("#join=")) {
