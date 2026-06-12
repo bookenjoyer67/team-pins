@@ -1194,31 +1194,10 @@ function passArray8ToWasm0(arg, malloc) {
 	return ptr;
 }
 function passStringToWasm0(arg, malloc, realloc) {
-	if (realloc === void 0) {
-		const buf = cachedTextEncoder.encode(arg);
-		const ptr = malloc(buf.length, 1) >>> 0;
-		getUint8ArrayMemory0().subarray(ptr, ptr + buf.length).set(buf);
-		WASM_VECTOR_LEN = buf.length;
-		return ptr;
-	}
-	let len = arg.length;
-	let ptr = malloc(len, 1) >>> 0;
-	const mem = getUint8ArrayMemory0();
-	let offset = 0;
-	for (; offset < len; offset++) {
-		const code = arg.charCodeAt(offset);
-		if (code > 127) break;
-		mem[ptr + offset] = code;
-	}
-	if (offset !== len) {
-		if (offset !== 0) arg = arg.slice(offset);
-		ptr = realloc(ptr, len, len = offset + arg.length * 3, 1) >>> 0;
-		const view = getUint8ArrayMemory0().subarray(ptr + offset, ptr + len);
-		const ret = cachedTextEncoder.encodeInto(arg, view);
-		offset += ret.written;
-		ptr = realloc(ptr, len, offset, 1) >>> 0;
-	}
-	WASM_VECTOR_LEN = offset;
+	const buf = cachedTextEncoder.encode(arg);
+	const ptr = malloc(buf.length, 1) >>> 0;
+	getUint8ArrayMemory0().subarray(ptr, ptr + buf.length).set(buf);
+	WASM_VECTOR_LEN = buf.length;
 	return ptr;
 }
 function takeFromExternrefTable0(idx) {
