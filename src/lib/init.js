@@ -348,10 +348,15 @@ async function processHashJoin(hash, pendingB64) {
 
 			const sid = result.community_id;
 			const isPasswordDerived = result.key_derivation === 'pbkdf2';
+			const isUninitialized = !result.wrapped_dek && !result.individually_wrapped_dek;
 
 			let public_key, secret_key, myWrappedDek;
-			const isUninitialized = !result.wrapped_dek && !result.individually_wrapped_dek;
-			if (isPasswordDerived && plaintextPass) {
+			const existingTeam = await DB.getTeam(sid);
+			if (existingTeam && !isUninitialized) {
+				public_key = existingTeam.public_key;
+				secret_key = existingTeam.secret_key;
+				myWrappedDek = existingTeam.wrapped_dek || result.individually_wrapped_dek || '';
+			} else if (isPasswordDerived && plaintextPass) {
 				const { generate_user_keypair_from_password, encode_hex } = await import('../../core/pkg/e2e_core.js');
 				const kp = generate_user_keypair_from_password(plaintextPass, result.community_id);
 				public_key = encode_hex(kp.public);

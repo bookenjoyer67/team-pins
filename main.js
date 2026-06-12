@@ -829,7 +829,12 @@ async function joinCommunityFromInvite({
   let secret_key = "";
   let myWrappedDek = result.individually_wrapped_dek || "";
 
-  if (isPasswordDerived && plaintextPass) {
+  const existingTeam = await DB.getTeam(sid);
+  if (existingTeam && !isUninitialized) {
+    public_key = existingTeam.public_key;
+    secret_key = existingTeam.secret_key;
+    myWrappedDek = existingTeam.wrapped_dek || result.individually_wrapped_dek || '';
+  } else if (isPasswordDerived && plaintextPass) {
     const { generate_user_keypair_from_password, encode_hex } = await import("./core/pkg/e2e_core.js");
     const kp = generate_user_keypair_from_password(plaintextPass, sid);
     public_key = encode_hex(kp.public);
