@@ -227,7 +227,7 @@ async function processHashJoin(hash, pendingB64) {
 			while (b64.length % 4) b64 += '=';
 			const raw = atob(b64);
 			let buf;
-			try { buf = new Uint8Array(raw.split('').map(c => c.charCodeAt(0))); }
+			try { buf = new TextEncoder().encode(raw); }
 			catch (_) { continue; }
 
 			let cidUuid, name, pw, relayUrl = '', embeddedCommunitySk = null;

@@ -352,7 +352,7 @@ wasmReady.then(async () => {
       while (b64.length % 4) b64 += "=";
       const raw = atob(b64);
       let buf;
-      try { buf = new Uint8Array(raw.split("").map(c => c.charCodeAt(0))); } catch (e) { console.warn("[main]", e.message); }
+      try { buf = new TextEncoder().encode(raw); } catch (e) { console.warn("[main]", e.message); }
       if (buf && buf.length >= 19) {
         let pos = 0;
         const nlen = buf[pos++];
@@ -431,7 +431,7 @@ wasmReady.then(async () => {
           while (b64.length % 4) b64 += "=";
           const raw = atob(b64);
           let buf;
-          try { buf = new Uint8Array(raw.split("").map(c => c.charCodeAt(0))); } catch (e) { console.warn("[main]", e.message); }
+          try { buf = new TextEncoder().encode(raw); } catch (e) { console.warn("[main]", e.message); }
           let cidUuid, name, pw, restoredRelayUrl = "", inviteTokenRestore = null, focusLat = null, focusLng = null, focusZoom = 15, embeddedCommunitySk = null;
           if (buf && buf.length >= 19) {
             let pos = 0;
@@ -610,7 +610,7 @@ wasmReady.then(async () => {
       while (b64.length % 4) b64 += "=";
       const raw = atob(b64);
       let buf;
-      try { buf = new Uint8Array(raw.split("").map(c => c.charCodeAt(0))); } catch (e) { console.warn("[main]", e.message); }
+      try { buf = new TextEncoder().encode(raw); } catch (e) { console.warn("[main]", e.message); }
       let cidUuid, name, linkRelayUrl, passwordProtected, inviteToken = null, focusLat = null, focusLng = null, focusZoom = 15, embeddedCommunitySk = null;
       if (buf && buf.length >= 19) {
         let pos = 0;
