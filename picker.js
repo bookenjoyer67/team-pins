@@ -58,6 +58,7 @@ async function ensureSchema() {
         if (existing.find(s => s.name === ds.name)) return;
         const schemaId = generate_uuid();
         await DB.saveSchema({ schema_id: schemaId, name: ds.name, fields: ds.fields || [] });
+        state.schemas.push({ schema_id: schemaId, name: ds.name, fields: ds.fields });
         const layer = state.layers[0];
         if (layer) {
             layer.default_schema_id = schemaId;
