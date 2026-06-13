@@ -240,7 +240,16 @@ impl PersistentStore {
             let layer_subscriptions = self.layer_subscriptions.read().await.clone();
             let member_deks = self.member_deks.read().await.clone();
             let pending_dek_requests = self.pending_dek_requests.read().await.clone();
-            let push_subscriptions = self.push_subscriptions.read().await.clone();
+            let push_subscriptions = {
+                let subs = self.push_subscriptions.read().await.clone();
+                subs.into_iter().map(|(k, list)| {
+                    (k, list.into_iter().map(|mut sub| {
+                        sub.p256dh = String::new();
+                        sub.auth = String::new();
+                        sub
+                    }).collect())
+                }).collect()
+            };
 
             let snap = SnapshotData {
                 communities,
