@@ -408,6 +408,54 @@ export async function deleteSchema(schemaId) {
   return promisify(tx("schemas", "readwrite").delete(schemaId));
 }
 
+// --- crypto helpers ---
+function bytesToBase64(bytes) {
+    let binary = "";
+    for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+}
+
+function base64ToBytes(b64) {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+}
+
+async function deriveWrapKey(passphrase, salt) {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+        "raw", enc.encode(passphrase), "PBKDF2", false, ["deriveKey"]
+    );
+    return crypto.subtle.deriveKey(
+        { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
+        keyMaterial,
+        { name: "AES-GCM", length: 256 },
+        false,
+        ["encrypt", "decrypt"]
+    );
+}
+
+async function encryptValue(value, passphrase, salt) {
+    const key = await deriveWrapKey(passphrase, salt);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const enc = new TextEncoder();
+    const ciphertext = await crypto.subtle.encrypt(
+        { name: "AES-GCM", iv }, key, enc.encode(value)
+    );
+    return { ciphertext: bytesToBase64(new Uint8Array(ciphertext)), iv: bytesToBase64(iv) };
+}
+
+async function decryptValue(encrypted, passphrase, salt) {
+    const key = await deriveWrapKey(passphrase, salt);
+    const ciphertext = base64ToBytes(encrypted.ciphertext);
+    const iv = base64ToBytes(encrypted.iv);
+    const plaintext = await crypto.subtle.decrypt(
+        { name: "AES-GCM", iv }, key, ciphertext
+    );
+    return new TextDecoder().decode(plaintext);
+}
+
 // --- profile ---
 export async function getProfile() {
   await openDB();
@@ -420,21 +468,53 @@ export async function saveProfile(profile) {
   return promisify(tx("profile", "readwrite").put(profile));
 }
 
-export async function getSigningKey() {
+export async function getSigningKey(passphrase) {
   await openDB();
   const p = await promisify(tx("profile").get("me"));
-  if (p && p.signing_public_key && p.signing_secret_key) {
+  if (!p) return null;
+
+  // Encrypted path
+  if (p.signing_keys_encrypted && passphrase) {
+    try {
+      const salt = base64ToBytes(p.signing_keys_salt);
+      const json = await decryptValue(p.signing_keys_encrypted, passphrase, salt);
+      const kp = JSON.parse(json);
+      return kp;
+    } catch { return null; }
+  }
+
+  // Legacy plaintext → migrate on first unlock
+  if (p.signing_public_key && p.signing_secret_key && passphrase) {
+    const kp = { public: p.signing_public_key, secret: p.signing_secret_key };
+    await saveSigningKey(kp, passphrase);
+    return kp;
+  }
+
+  // Legacy plaintext (no passphrase)
+  if (p.signing_public_key && p.signing_secret_key) {
     return { public: p.signing_public_key, secret: p.signing_secret_key };
   }
+
   return null;
 }
 
-export async function saveSigningKey(kp) {
+export async function saveSigningKey(kp, passphrase) {
   await openDB();
   const p = await promisify(tx("profile").get("me")).catch(() => null);
   const profile = p || { key: "me", user_id: generateUUIDCompat(), display_name: "Me" };
-  profile.signing_public_key = kp.public;
-  profile.signing_secret_key = kp.secret;
+
+  if (passphrase) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const json = JSON.stringify({ public: kp.public, secret: kp.secret });
+    const encrypted = await encryptValue(json, passphrase, salt);
+    profile.signing_keys_encrypted = encrypted;
+    profile.signing_keys_salt = bytesToBase64(salt);
+    delete profile.signing_public_key;
+    delete profile.signing_secret_key;
+  } else {
+    profile.signing_public_key = kp.public;
+    profile.signing_secret_key = kp.secret;
+  }
   return promisify(tx("profile", "readwrite").put(profile));
 }
 
