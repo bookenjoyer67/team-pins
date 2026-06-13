@@ -6,7 +6,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, timeout, Duration};
-use tokio_tungstenite::{accept_async, tungstenite::Message};
+use tokio_tungstenite::{accept_async_with_config, tungstenite::Message};
 use tracing::{info, warn, instrument};
 
 use crate::handlers::{self, HandlerContext};
@@ -23,7 +23,11 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
         if !rl.check_conn(&ip) { return; }
     }
 
-    let mut ws_stream = match timeout(Duration::from_secs(10), accept_async(stream)).await {
+    let ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+        max_message_size: Some(state.config.security.max_message_size),
+        ..Default::default()
+    };
+    let mut ws_stream = match timeout(Duration::from_secs(10), accept_async_with_config(stream, Some(ws_config))).await {
         Ok(Ok(ws)) => ws,
         Ok(Err(e)) => {
             warn!("WebSocket handshake failed from {}: {}", ip, e);
@@ -170,7 +174,6 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
             read = read_buf.next() => {
                 match read {
                     Some(Ok(Message::Text(txt))) => {
-                        if txt.len() > state.config.security.max_message_size { continue; }
                         {
                             let mut rl = state.rl.lock().await;
                             if !rl.check_msg(&read_ip) { continue; }
@@ -208,10 +211,7 @@ pub async fn handle(state: Arc<AppState>, stream: TcpStream, addr: SocketAddr) {
                     }
                     Some(Ok(Message::Close(_))) => break,
                     Some(Ok(_)) => {}
-                    Some(Err(e)) => {
-                        warn!("Client {} WebSocket error: {}", read_ip, e);
-                        break;
-                    }
+                    Some(Err(e)) => { warn!("[relay] ws error from {}: {}", read_ip, e); break; }
                     None => break,
                 }
             }
