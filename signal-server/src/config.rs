@@ -29,6 +29,7 @@ pub struct ServerConfig {
     #[serde(default = "d_conn_wait")] pub connection_wait_secs: u64,
     #[serde(default)] pub tls_cert: Option<String>,
     #[serde(default)] pub tls_key: Option<String>,
+    #[serde(default)] pub cert_fingerprint: Option<String>,
 }
 fn d_port() -> u16 { 9000 }
 fn d_bind() -> String { "0.0.0.0".into() }
@@ -36,7 +37,7 @@ fn d_max_conn() -> usize { 1000 }
 fn d_conn_wait() -> u64 { 10 }
 
 impl Default for ServerConfig {
-    fn default() -> Self { Self { port: 9000, bind_address: "0.0.0.0".into(), max_connections: 1000, connection_wait_secs: 10, tls_cert: None, tls_key: None } }
+    fn default() -> Self { Self { port: 9000, bind_address: "0.0.0.0".into(), max_connections: 1000, connection_wait_secs: 10, tls_cert: None, tls_key: None, cert_fingerprint: None } }
 }
 
 #[derive(Debug, Deserialize, Clone)]

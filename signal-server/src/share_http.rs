@@ -266,6 +266,7 @@ pub async fn handle_http(state: Arc<AppState>, mut stream: TcpStream) {
                 "conn_semaphore_available": conn_available,
                 "connections_accepted": conn_accepted,
                 "connections_rejected": conn_rejected,
+                "cert_fingerprint": state.config.server.cert_fingerprint.as_ref(),
             }).to_string();
             let resp = http_response("200 OK", "application/json", json.as_bytes(), allowed_origin, req_origin);
             let _ = stream.write_all(&resp).await;

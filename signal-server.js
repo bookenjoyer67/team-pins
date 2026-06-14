@@ -11,6 +11,7 @@ const MAX_MSGS_PER_SEC = 20;
 const MAX_CLIENTS_PER_IP = 10;
 const MAX_CLIENTS_PER_ROOM = 50;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "https://app.piggpin.space";
+const WS_CERT_FINGERPRINT = process.env.WS_CERT_FINGERPRINT || null;
 
 const server = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
