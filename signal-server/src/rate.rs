@@ -14,6 +14,7 @@ pub struct RateLimiter {
     comm_regs: HashMap<String, Vec<Instant>>,
     config: RateLimitConfig,
     offenses: HashMap<String, u32>,
+    offense_last_decay: HashMap<String, Instant>,
     pub total_bans: u64,
     pub total_rate_limited: u64,
 }
@@ -27,6 +28,7 @@ impl RateLimiter {
             comm_regs: HashMap::new(),
             config: c,
             offenses: HashMap::new(),
+            offense_last_decay: HashMap::new(),
             total_bans: 0,
             total_rate_limited: 0,
         }
@@ -113,12 +115,19 @@ impl RateLimiter {
             v.retain(|t| now.duration_since(*t) < Duration::from_secs(self.config.community_reg_window_secs));
             !v.is_empty()
         });
-        // Prune offense records for IPs with expired bans
-        self.offenses.retain(|ip, _| {
-            self.bans.contains_key(ip) || {
-                // Keep offense count if banned recently, otherwise decay
-                true  // keep indefinitely, just capped by MAX_ENTRIES below
+        // Decay offense records: decrement by 1 every 24h for IPs with no active ban
+        let decay_window = Duration::from_secs(86400); // 24h
+        self.offenses.retain(|ip, count| {
+            if self.bans.contains_key(ip) {
+                self.offense_last_decay.insert(ip.clone(), now);
+                return true;
             }
+            let last = self.offense_last_decay.get(ip).copied().unwrap_or(now);
+            if now.duration_since(last) >= decay_window {
+                *count = count.saturating_sub(1);
+                self.offense_last_decay.insert(ip.clone(), now);
+            }
+            *count > 0
         });
         // Trim oversized maps
         if self.comm_regs.len() > MAX_ENTRIES {
