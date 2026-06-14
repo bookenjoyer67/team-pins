@@ -345,7 +345,21 @@ pub async fn run_server(
         loop {
             if http_shutdown.load(Ordering::Acquire) { break; }
             let result = { let guard = http_l_clone.lock().await; match guard.as_ref() { Some(l) => timeout(Duration::from_secs(1), l.accept()).await, None => break } };
-            match result { Ok(Ok((stream, _addr))) => { let s = http_state.clone(); tokio::spawn(async move { share_http::handle_http(s, stream).await; }); } Ok(Err(_)) => break, Err(_) => continue }
+            match result { Ok(Ok((stream, _addr))) => {
+                let _permit = match tokio::time::timeout(
+                    Duration::from_secs(http_state.config.server.connection_wait_secs),
+                    http_state.conn_semaphore.clone().acquire_owned()
+                ).await {
+                    Ok(p) => p,
+                    Err(_) => {
+                        http_state.connections_rejected.fetch_add(1, Ordering::Relaxed);
+                        continue;
+                    }
+                };
+                http_state.connections_accepted.fetch_add(1, Ordering::Relaxed);
+                let s = http_state.clone();
+                tokio::spawn(async move { share_http::handle_http(s, stream).await; });
+            } Ok(Err(_)) => break, Err(_) => continue }
         }
     });
 

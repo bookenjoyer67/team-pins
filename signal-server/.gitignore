@@ -1,1 +1,9 @@
-code-server/
+config.toml
+community_data.json
+community_data.json.bak
+community_data.json.tmp
+vapid_keys.json
+*.bak
+*.tmp
+target/
+

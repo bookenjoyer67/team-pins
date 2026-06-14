@@ -58,7 +58,7 @@ fn http_response(status: &str, content_type: &str, body: &[u8], allowed_origin: 
     } else {
         allowed_origin
     };
-    let mut resp = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: {}\r\nVary: Origin\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n",
+    let mut resp = format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: {}\r\nVary: Origin\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nPermissions-Policy: geolocation=(), microphone=(), camera=()\r\nConnection: close\r\n\r\n",
         status, content_type, body.len(), origin).into_bytes();
     resp.extend_from_slice(body);
     resp

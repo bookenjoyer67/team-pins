@@ -6,7 +6,7 @@ description = "WebSocket signaling relay for piggPin with security features"
 license = "MIT"
 
 [features]
-default = ["mqtt-bridge", "rnode-bridge", "reticulum-bridge", "peer-relay"]
+default = []
 mqtt-bridge = ["dep:rumqttc", "dep:meshtastic_protobufs", "dep:prost"]
 rnode-bridge = ["dep:serialport"]
 reticulum-bridge = ["dep:reticulum-rs-core", "dep:reticulum-rs-transport"]

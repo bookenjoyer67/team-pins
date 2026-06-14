@@ -7,8 +7,8 @@ const defaultConfig = {
     { urls: "stun:stun.nextcloud.com:443" },
     {
       urls: ["turns:openrelay.metered.ca:443?transport=tcp", "turns:openrelay.metered.ca:80?transport=tcp"],
-      username: "openrelayproject",
-      credential: "openrelayproject",
+      username: import.meta.env.VITE_ICE_USERNAME || "openrelayproject",
+      credential: import.meta.env.VITE_ICE_CREDENTIAL || "openrelayproject",
     },
   ],
 };

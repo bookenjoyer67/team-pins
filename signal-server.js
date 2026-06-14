@@ -10,6 +10,7 @@ const MAX_MSG_SIZE = 51200; // 50KB
 const MAX_MSGS_PER_SEC = 20;
 const MAX_CLIENTS_PER_IP = 10;
 const MAX_CLIENTS_PER_ROOM = 50;
+const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "https://app.piggpin.space";
 
 const server = http.createServer((req, res) => {
   res.writeHead(200, { "Content-Type": "text/plain" });
@@ -18,7 +19,7 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ server, maxPayload: MAX_MSG_SIZE, verifyClient: ({ origin, req }) => {
   if (!origin) return true;
-  return true;
+  return origin === ALLOWED_ORIGIN;
 } });
 const rooms = new Map();
 const ipCounts = new Map();

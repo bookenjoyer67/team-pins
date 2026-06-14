@@ -13,6 +13,14 @@ pub async fn handle_push_delta(ctx: &HandlerContext<'_>, v: &serde_json::Value) 
     let ts = v.get("ts").and_then(|t| t.as_u64()).unwrap_or_else(messages::unix_millis);
     let conn_pubkey = get_conn_pubkey(ctx.room, ctx.cid);
 
+    if conn_pubkey.is_none() {
+        ctx.room.send_to(
+            &serde_json::json!({"type":"error","reason":"authentication required to push data"}).to_string(),
+            ctx.cid,
+        );
+        return;
+    }
+
     // Validate all field limits upfront — reject entire delta if any exceeds
     let s = &ctx.state.config.storage;
     let max_pins = s.max_pins_per_push;
