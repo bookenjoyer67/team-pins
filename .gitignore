@@ -50,3 +50,7 @@ android/.gradle/
 *.piggpin.svelte-kit/
 build/
 stl-metrobus.piggpin
+
+# build artifacts
+.svelte-kit/output/
+dist/
